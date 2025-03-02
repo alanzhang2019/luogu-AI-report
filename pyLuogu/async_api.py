@@ -504,7 +504,7 @@ class asyncLuoguAPI:
             contest_id: int | None = None,
             lang: str | None = None,
             enableO2: bool = True,
-            capture_handler: Callable[[bytes], str] | None = None
+            capture_handler: Callable[[bytes, int], str] | None = None
     ) -> SubmitCodeResponse:
         captcha_text = ""
         for attempt in range(self.max_retries):
@@ -528,7 +528,7 @@ class asyncLuoguAPI:
                 logger.warning(f"({attempt}/{self.max_retries}) Raise User-defined captcha handler")
                 captcha = await self._get_captcha()
                 logger.debug(f"Captcha: {captcha}")
-                captcha_text = capture_handler(captcha)
+                captcha_text = capture_handler(captcha, attempt)
                 await asyncio.sleep(5)
                 continue
         raise RequestError("Failed to submit code after multiple attempts")
