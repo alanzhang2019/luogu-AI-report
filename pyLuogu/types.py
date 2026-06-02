@@ -1847,3 +1847,17 @@ class LuoguCookies(LuoguType):
     }
     __client_id: str
     _uid: str
+
+    def __init__(self, json: dict[str, Any] | None = None):
+        self._raw: dict[str, Any] = {}
+        if isinstance(json, dict):
+            self._raw = dict(json)
+        super().__init__(json=json)
+
+    def to_json(self):
+        base = super().to_json()
+        if not self._raw:
+            return base
+        merged = dict(self._raw)
+        merged.update(base)
+        return merged

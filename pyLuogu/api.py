@@ -740,8 +740,34 @@ class luoguAPI(SyncLuoguTransportMixin):
     def translate_problem(self, pid: str, request: TranslateProblemRequest | None = None) -> RawDataResponse:
         return self._request_route("problem_translate", method="POST", path_params={"pid": pid}, data=request)
 
-    def get_record_list(self, page: int | None = None, uid: int | None = None) -> RecordListRequestResponse:
-        return self._typed_route("record_list", RecordListRequestResponse, params=raw_params(page=page, uid=uid), normalizer=normalize_records)
+    def get_record_list(
+            self,
+            page: int | None = None,
+            uid: int | None = None,
+            pid: str | None = None,
+            contestId: int | None = None,
+            user: str | None = None,
+            status: int | None = None,
+            language: int | None = None,
+            orderBy: int | None = None,
+    ) -> RecordListRequestResponse:
+        if user is None and uid is not None:
+            user = str(uid)
+        return self._typed_route(
+            "record_list",
+            RecordListRequestResponse,
+            params=raw_params(
+                page=page,
+                uid=uid,
+                pid=pid,
+                contestId=contestId,
+                user=user,
+                status=status,
+                language=language,
+                orderBy=orderBy,
+            ),
+            normalizer=normalize_records,
+        )
 
     def query_downloadable_testcase(self, id: int | str) -> DownloadableTestcaseResponse:
         return self._typed_route("record_downloadable_testcase", DownloadableTestcaseResponse, path_params={"id": id}, normalizer=normalize_downloadable_testcases)

@@ -80,13 +80,23 @@ def normalize_optional_paged_field(data: dict[str, Any], candidates: tuple[str, 
 
 
 def normalize_problem_list(data: dict[str, Any]) -> dict[str, Any]:
-    return flatten_paged_field(data, "problems")
+    data = flatten_paged_field(data, "problems")
+    problems = data.get("problems")
+    if isinstance(problems, list):
+        for item in problems:
+            if isinstance(item, dict) and item.get("title") is None and item.get("name") is not None:
+                item["title"] = item.get("name")
+    return data
 
 
 def normalize_problem_data(data: dict[str, Any]) -> dict[str, Any]:
     limits = data["problem"].get("limits")
     if isinstance(limits, dict):
         data["problem"]["limits"] = list(zip(limits["time"], limits["memory"]))
+    if data.get("problem") is not None:
+        problem = data["problem"]
+        if isinstance(problem, dict) and problem.get("title") is None and problem.get("name") is not None:
+            problem["title"] = problem.get("name")
     return data
 
 
@@ -227,6 +237,61 @@ def normalize_themes(data: dict[str, Any]) -> dict[str, Any]:
 def normalize_user_practice(data: dict[str, Any]) -> dict[str, Any]:
     if data.get("problems") is not None:
         return normalize_optional_paged_field(data, ("problems",), "problems")
+
+    passed = data.get("passed")
+    submitted = data.get("submitted")
+    if isinstance(passed, list) or isinstance(submitted, list):
+        passed_list = passed if isinstance(passed, list) else []
+        submitted_list = submitted if isinstance(submitted, list) else []
+
+        problems: list[dict[str, Any]] = []
+        passed_ids: set[str] = set()
+
+        for item in passed_list:
+            if not isinstance(item, dict):
+                continue
+            pid = item.get("pid")
+            if not pid:
+                continue
+            pid = str(pid)
+            passed_ids.add(pid)
+            problems.append(
+                {
+                    "pid": pid,
+                    "title": item.get("title") or item.get("name") or "",
+                    "difficulty": item.get("difficulty"),
+                    "type": item.get("type"),
+                    "submitted": True,
+                    "accepted": True,
+                }
+            )
+
+        for item in submitted_list:
+            if not isinstance(item, dict):
+                continue
+            pid = item.get("pid")
+            if not pid:
+                continue
+            pid = str(pid)
+            if pid in passed_ids:
+                continue
+            problems.append(
+                {
+                    "pid": pid,
+                    "title": item.get("title") or item.get("name") or "",
+                    "difficulty": item.get("difficulty"),
+                    "type": item.get("type"),
+                    "submitted": True,
+                    "accepted": False,
+                }
+            )
+
+        normalized = raw_response(data)
+        normalized["problems"] = problems
+        normalized["count"] = len(problems)
+        normalized["perPage"] = len(problems)
+        return normalized
+
     normalized = raw_response(data)
     normalized["problems"] = []
     normalized["count"] = 0

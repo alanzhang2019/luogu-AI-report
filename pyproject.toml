@@ -34,3 +34,9 @@ include = ["pyLuogu*"]
 dev = [
     "openai"
 ]
+coach = [
+    "openai",
+    "rich",
+    "matplotlib",
+    "reportlab"
+]
