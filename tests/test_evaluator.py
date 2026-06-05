@@ -351,6 +351,61 @@ class TestEvaluatorPracticeFallback(unittest.TestCase):
         self.assertIn("_detail_skipped", second)
         self.assertIsNone(second["sourceCode"])
 
+    def test_pick_record_for_problem_recovers_after_transient_network_error(self):
+        class DummyDetail:
+            def to_json(self):
+                return {
+                    "id": 101,
+                    "submitTime": 1234567999,
+                    "status": 12,
+                    "problem": {"pid": "P1002", "title": "Recover"},
+                }
+
+            @property
+            def sourceCode(self):
+                return "print('ok')"
+
+        class DummyRecord:
+            id = 101
+
+            def to_json(self):
+                return {
+                    "id": 101,
+                    "submitTime": 1234567999,
+                    "status": 12,
+                    "problem": {"pid": "P1002", "title": "Recover"},
+                }
+
+        class DummyRecordList:
+            records = [DummyRecord()]
+
+        class DummyDetailResp:
+            record = DummyDetail()
+
+        class DummyLuogu:
+            def __init__(self):
+                self.list_calls = 0
+                self.detail_calls = 0
+
+            def get_record_list(self, **kwargs):
+                self.list_calls += 1
+                if self.list_calls <= 2:
+                    raise RequestError("Request error")
+                return DummyRecordList()
+
+            def get_record(self, rid):
+                self.detail_calls += 1
+                if self.detail_calls <= 2:
+                    raise RequestError("Failed to send request after 5 attempts")
+                return DummyDetailResp()
+
+        api = DummyLuogu()
+        record = _pick_record_for_problem(api, uid=1, pid="P1002", max_records_to_try=2)
+
+        self.assertEqual(record["sourceCode"], "print('ok')")
+        self.assertGreaterEqual(api.list_calls, 3)
+        self.assertGreaterEqual(api.detail_calls, 3)
+
     def test_repair_behavior_analysis_from_items_uses_valid_fallback_records(self):
         export_data = {
             "passed_items": [

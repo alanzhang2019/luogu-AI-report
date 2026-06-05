@@ -23,6 +23,7 @@ class TestWebAppTemplate(unittest.TestCase):
         self.assertIn("Name/Value", content)
         self.assertIn('name="c3vk"', content)
         self.assertIn('name="c3vk" value="{{ form_values.c3vk }}" required', content)
+        self.assertIn('name="api_key" value="{{ form_values.api_key }}"', content)
         self.assertNotIn("C3VK（如有）", content)
         self.assertIn('formaction="/validate-cookies"', content)
         self.assertIn("校验 Cookies", content)
@@ -33,6 +34,7 @@ class TestWebAppTemplate(unittest.TestCase):
         self.assertIn("/admin/login", content)
         self.assertIn("ADMIN_USERNAME", content)
         self.assertIn("ADMIN_PASSWORD", content)
+        self.assertIn('/retry/<task_id>', content)
 
     def test_report_template_includes_detail_fetch_overview_cards(self):
         root = Path(__file__).resolve().parents[1]
@@ -673,6 +675,7 @@ class TestWebAppTemplate(unittest.TestCase):
             web_app = importlib.import_module("web_app")
             web_app.require_admin_auth = lambda: None
             web_app.reconcile_stale_generation_tasks = lambda: 2
+            today = datetime.now().strftime("%Y-%m-%d")
             web_app.list_tasks = lambda: [
                 {
                     "task_id": "task-1",
@@ -682,8 +685,8 @@ class TestWebAppTemplate(unittest.TestCase):
                     "solved_count": 3,
                     "failed_count": 1,
                     "status": "done",
-                    "eval_time": "2026-06-04 10:00",
-                    "created_at": "2026-06-04 09:00:00",
+                    "eval_time": f"{today} 10:00",
+                    "created_at": f"{today} 09:00:00",
                     "html": "/reports/task-1/report.html",
                     "pdf": "/reports/task-1/report.pdf",
                     "md": "/reports/task-1/report.md",
@@ -698,7 +701,7 @@ class TestWebAppTemplate(unittest.TestCase):
                     "solved": 0,
                     "failed": 0,
                     "status": "done",
-                    "time": "2026-06-04 08:00",
+                    "time": f"{today} 08:00",
                     "html": "/reports/orphan-1/report.html",
                     "pdf": "/download-report/orphan-1/report.pdf",
                     "md": "/reports/orphan-1/report.md",
@@ -759,6 +762,119 @@ class TestWebAppTemplate(unittest.TestCase):
             web_app = importlib.import_module("web_app")
             url = web_app._download_report_url("/reports/991f72d2_%E9%BB%84%E9%BC%8E/report.pdf?v=123")
             self.assertEqual(url, "/download-report/991f72d2_%E9%BB%84%E9%BC%8E/report.pdf?v=123")
+        finally:
+            sys.modules.pop("web_app", None)
+            if original_web_app is not None:
+                sys.modules["web_app"] = original_web_app
+            if original_flask is not None:
+                sys.modules["flask"] = original_flask
+            else:
+                sys.modules.pop("flask", None)
+
+    def test_source_cache_roundtrip_for_source_code_record(self):
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+        flask = types.ModuleType("flask")
+
+        class DummyFlask:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def route(self, *args, **kwargs):
+                def deco(fn):
+                    return fn
+                return deco
+
+        flask.Flask = DummyFlask
+        flask.render_template_string = lambda *args, **kwargs: ""
+        flask.request = types.SimpleNamespace(form={}, args={}, path="/", method="GET")
+        flask.redirect = lambda value: value
+        flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
+        flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+
+        original_flask = sys.modules.get("flask")
+        original_web_app = sys.modules.pop("web_app", None)
+        sys.modules["flask"] = flask
+        try:
+            web_app = importlib.import_module("web_app")
+            temp_root = Path(tempfile.mkdtemp())
+            original_root = web_app._ROOT
+            web_app._ROOT = temp_root
+            try:
+                record = {"id": 1, "sourceCode": "print(1)", "score": 100}
+                web_app.save_cached_source_record(123, "P1001", record)
+                loaded = web_app.load_cached_source_record(123, "P1001")
+            finally:
+                web_app._ROOT = original_root
+                import shutil
+                shutil.rmtree(temp_root, ignore_errors=True)
+
+            self.assertIsInstance(loaded, dict)
+            self.assertEqual(loaded["sourceCode"], "print(1)")
+            self.assertEqual(loaded["score"], 100)
+        finally:
+            sys.modules.pop("web_app", None)
+            if original_web_app is not None:
+                sys.modules["web_app"] = original_web_app
+            if original_flask is not None:
+                sys.modules["flask"] = original_flask
+            else:
+                sys.modules.pop("flask", None)
+
+    def test_retry_task_loads_saved_form_snapshot(self):
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+        flask = types.ModuleType("flask")
+
+        class DummyFlask:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def route(self, *args, **kwargs):
+                def deco(fn):
+                    return fn
+                return deco
+
+        flask.Flask = DummyFlask
+        flask.render_template_string = lambda *args, **kwargs: kwargs
+        flask.request = types.SimpleNamespace(form={}, args={}, path="/retry/task-1", method="GET")
+        flask.redirect = lambda value: value
+        flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}/{kwargs.get('task_id', '')}".rstrip("/")
+        flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+
+        original_flask = sys.modules.get("flask")
+        original_web_app = sys.modules.pop("web_app", None)
+        sys.modules["flask"] = flask
+        try:
+            web_app = importlib.import_module("web_app")
+            saved = {
+                "client_id": "cid",
+                "uid": "123",
+                "c3vk": "vk",
+                "api_key": "sk-test",
+                "student_name": "张三",
+                "school": "实验学校",
+                "grade": "六年级",
+                "max_passed": "5000",
+                "max_failed": "1000",
+            }
+            web_app.get_task = lambda task_id: {"retry_form_json": json.dumps(saved, ensure_ascii=False)}
+            web_app.render_index = lambda form=None, validation_result=None: {"form": form, "validation_result": validation_result}
+
+            result = web_app.retry_task("task-1")
+
+            self.assertEqual(result["form"]["client_id"], "cid")
+            self.assertEqual(result["form"]["c3vk"], "vk")
+            self.assertEqual(result["form"]["api_key"], "sk-test")
+            self.assertEqual(result["form"]["student_name"], "张三")
         finally:
             sys.modules.pop("web_app", None)
             if original_web_app is not None:

@@ -7,7 +7,7 @@ from typing import Any
 
 import pyLuogu
 from pyLuogu.api_helpers import raw_params
-from pyLuogu.errors import AuthenticationError, ForbiddenError, RequestError, RateLimitError
+from pyLuogu.errors import AuthenticationError, ForbiddenError, RequestError, RateLimitError, ServerError
 from pyLuogu.request_helpers import _debug_report
 
 
@@ -24,6 +24,8 @@ DETAIL_FETCH_SLEEP_SECONDS = 1.8
 DETAIL_FETCH_MAX_RETRIES = 5
 RECORD_LIST_PAGES_TO_TRY = 3
 RECORD_LIST_MAX_RETRIES = 4
+TRANSIENT_FETCH_MAX_RETRIES = 12
+TRANSIENT_FETCH_RETRY_SLEEP_SECONDS = 5.0
 
 
 def _safe_makedirs_for_file(path: str) -> None:
@@ -210,6 +212,30 @@ def _pick_record_for_problem(
         message = str(exc).strip().lower()
         return ("need login" in message) or ("auth" in message and "login" in message)
 
+    def _is_transient_detail_error(exc: Exception) -> bool:
+        if isinstance(exc, (RateLimitError, ServerError)):
+            return True
+        if isinstance(exc, RequestError):
+            status_code = getattr(exc, "status_code", None)
+            if status_code in {408, 425, 429, 500, 502, 503, 504}:
+                return True
+            if status_code is None:
+                message = str(exc).strip().lower()
+                if ("need login" in message) or ("auth" in message and "login" in message):
+                    return False
+                transient_keywords = (
+                    "request error",
+                    "failed to send request",
+                    "timeout",
+                    "timed out",
+                    "connection",
+                    "network",
+                    "server error",
+                    "temporarily unavailable",
+                )
+                return any(keyword in message for keyword in transient_keywords)
+        return False
+
     def _build_list_level_fallback(reason: str) -> dict[str, Any]:
         return {
             "sourceCode": None,
@@ -227,16 +253,20 @@ def _pick_record_for_problem(
     last_list_exc: Exception | None = None
     for page in range(1, RECORD_LIST_PAGES_TO_TRY + 1):
         last_list_exc = None
-        for attempt in range(RECORD_LIST_MAX_RETRIES):
+        max_attempts = max(RECORD_LIST_MAX_RETRIES, TRANSIENT_FETCH_MAX_RETRIES)
+        for attempt in range(max_attempts):
             if DETAIL_FETCH_SLEEP_SECONDS > 0:
-                time.sleep(DETAIL_FETCH_SLEEP_SECONDS * (1 + attempt * 0.7))
+                base_sleep = DETAIL_FETCH_SLEEP_SECONDS * (1 + min(attempt, RECORD_LIST_MAX_RETRIES - 1) * 0.7)
+                if attempt >= RECORD_LIST_MAX_RETRIES:
+                    base_sleep = max(base_sleep, TRANSIENT_FETCH_RETRY_SLEEP_SECONDS)
+                time.sleep(base_sleep)
             try:
                 record_list = luogu.get_record_list(page=page, uid=uid, pid=pid, user=str(uid))
                 last_list_exc = None
                 break
             except Exception as exc:
                 last_list_exc = exc
-                if isinstance(exc, RateLimitError) or (isinstance(exc, RequestError) and getattr(exc, "status_code", None) == 429):
+                if _is_transient_detail_error(exc):
                     continue
                 break
         if record_list and getattr(record_list, "records", None):
@@ -311,9 +341,13 @@ def _pick_record_for_problem(
             continue
 
         last_exc: Exception | None = None
-        for attempt in range(DETAIL_FETCH_MAX_RETRIES):
+        max_attempts = max(DETAIL_FETCH_MAX_RETRIES, TRANSIENT_FETCH_MAX_RETRIES)
+        for attempt in range(max_attempts):
             if DETAIL_FETCH_SLEEP_SECONDS > 0:
-                time.sleep(DETAIL_FETCH_SLEEP_SECONDS * (1 + attempt * 0.5))
+                base_sleep = DETAIL_FETCH_SLEEP_SECONDS * (1 + min(attempt, DETAIL_FETCH_MAX_RETRIES - 1) * 0.5)
+                if attempt >= DETAIL_FETCH_MAX_RETRIES:
+                    base_sleep = max(base_sleep, TRANSIENT_FETCH_RETRY_SLEEP_SECONDS)
+                time.sleep(base_sleep)
             try:
                 detail = luogu.get_record(str(record.id)).record
                 detail_json = detail.to_json()
@@ -330,6 +364,8 @@ def _pick_record_for_problem(
                 if best_effort_record is not None:
                     best_effort_record.setdefault("sourceCode", None)
                     best_effort_record["_detail_error"] = str(exc)
+                if _is_transient_detail_error(exc):
+                    continue
                 if _is_blocking_detail_error(exc):
                     state["stop_detail_fetch"] = True
                     state["last_detail_error"] = str(exc)

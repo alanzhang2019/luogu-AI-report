@@ -40,6 +40,7 @@ def init_db():
             source_code_total INTEGER DEFAULT 0,
             ai_progress INTEGER DEFAULT 0,
             ai_elapsed_seconds INTEGER DEFAULT 0,
+            retry_form_json TEXT DEFAULT '',
             created_at TEXT DEFAULT ''
         )
     """)
@@ -50,6 +51,7 @@ def init_db():
         "ALTER TABLE tasks ADD COLUMN source_code_total INTEGER DEFAULT 0",
         "ALTER TABLE tasks ADD COLUMN ai_progress INTEGER DEFAULT 0",
         "ALTER TABLE tasks ADD COLUMN ai_elapsed_seconds INTEGER DEFAULT 0",
+        "ALTER TABLE tasks ADD COLUMN retry_form_json TEXT DEFAULT ''",
     ):
         try:
             conn.execute(ddl)

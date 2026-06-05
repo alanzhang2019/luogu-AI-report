@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>洛谷 AI 学习测评报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm 15mm 20mm 15mm;
+            @bottom-right {
+                content: "Page " counter(page);
+                font-size: 10px;
+                color: #6b7280;
+            }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            color: #333;
+            line-height: 1.6;
+        }
+        .page-break {
+            page-break-before: always;
+        }
+        .cover-page {
+            height: 250mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            border: 1px solid #e5e7eb;
+        }
+        th, td {
+            border: 1px solid #e5e7eb;
+            padding: 10px 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #f8fafc;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        .markdown-content h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            color: #1e3a8a;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 0.5rem;
+        }
+        .markdown-content h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            color: #1e40af;
+        }
+        .markdown-content h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 1.25rem;
+            margin-bottom: 0.5rem;
+            color: #1d4ed8;
+        }
+        .markdown-content p {
+            margin-bottom: 1rem;
+        }
+        .markdown-content ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .markdown-content pre {
+            background-color: #f3f4f6;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+        }
+        .markdown-content code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            background-color: #f3f4f6;
+            padding: 0.1rem 0.3rem;
+            border-radius: 0.25rem;
+            font-size: 0.9em;
+        }
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .markdown-content .text-blue-700 {
+            color: #1d4ed8;
+        }
+        .markdown-content .font-semibold {
+            font-weight: 600;
+        }
+        .markdown-content p.text-blue-700.font-semibold {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 0.75rem 1rem;
+            margin: 1.5rem 0;
+            border-radius: 0 0.375rem 0.375rem 0;
+        }
+    </style>
+</head>
+<body class="bg-white">
+    
+
+    <!-- 封面页 -->
+    <div class="cover-page text-center">
+        <h1 class="text-4xl font-bold text-blue-900 mb-4">洛谷 AI 学习测评报告</h1>
+        <h2 class="text-xl text-gray-600 mb-12">Coach Edition · 图表化诊断 / 教练反馈 / 训练规划</h2>
+        
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-8 w-3/4 max-w-lg shadow-sm mb-12 text-left">
+            <h3 class="text-lg font-bold text-blue-800 border-b border-blue-200 pb-2 mb-4">测评基础信息</h3>
+            <div class="grid grid-cols-2 gap-4 text-gray-700">
+                <div><span class="font-semibold">选手姓名：</span>梁晋诚</div>
+                <div><span class="font-semibold">测评时间：</span>2026-06-05 12:10</div>
+                <div><span class="font-semibold">所属学校：</span>龙岗区外国语</div>
+                <div><span class="font-semibold">当前年级：</span>七年级</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-4 gap-4 w-full px-12 mb-8">
+            <div class="bg-gray-50 border border-gray-200 rounded p-4 text-center">
+                <div class="text-sm text-gray-500 mb-1">已通过题数</div>
+                <div class="text-2xl font-bold text-gray-800">53</div>
+            </div>
+            <div class="bg-gray-50 border border-gray-200 rounded p-4 text-center">
+                <div class="text-sm text-gray-500 mb-1">未通过题数</div>
+                <div class="text-2xl font-bold text-gray-800">2</div>
+            </div>
+            <div class="bg-gray-50 border border-gray-200 rounded p-4 text-center">
+                <div class="text-sm text-gray-500 mb-1">平均难度</div>
+                <div class="flex flex-col items-center gap-2">
+                    <span class="px-3 py-1 rounded-full text-sm font-bold" style="background: #FE4C61; color: #FFFFFF;">入门</span>
+                    <div class="text-xl font-bold text-gray-800">1.0</div>
+                </div>
+            </div>
+            <div class="bg-gray-50 border border-gray-200 rounded p-4 text-center">
+                <div class="text-sm text-gray-500 mb-1">高频标签</div>
+                <div class="text-lg font-bold text-gray-800 mt-1">顺序结构</div>
+            </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-5 w-full max-w-6xl shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-bold text-gray-800">提交详情抓取概览</h3>
+                <span class="px-3 py-1 rounded-full text-sm font-bold" style="background: #DCFCE7; color: #166534;">抓取稳定</span>
+            </div>
+            <div class="grid grid-cols-4 gap-4 text-center">
+                <div class="bg-green-50 border border-green-200 rounded p-3">
+                    <div class="text-xs text-green-700 mb-1">源码详情成功</div>
+                    <div class="text-xl font-bold text-green-800">55</div>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded p-3">
+                    <div class="text-xs text-blue-700 mb-1">摘要保底</div>
+                    <div class="text-xl font-bold text-blue-800">0</div>
+                </div>
+                <div class="bg-amber-50 border border-amber-200 rounded p-3">
+                    <div class="text-xs text-amber-700 mb-1">阻断后跳过</div>
+                    <div class="text-xl font-bold text-amber-800">0</div>
+                </div>
+                <div class="bg-red-50 border border-red-200 rounded p-3">
+                    <div class="text-xs text-red-700 mb-1">纯错误记录</div>
+                    <div class="text-xl font-bold text-red-800">0</div>
+                </div>
+            </div>
+            <div class="mt-4 text-sm text-gray-600 text-left">
+                <span class="font-semibold">阻断原因：</span>无
+            </div>
+        </div>
+    </div>
+
+    <!-- 目录页 -->
+    <div class="page-break">
+        <h1 class="text-2xl font-bold text-blue-900 mb-6 border-b pb-2">报告目录</h1>
+        <ul class="space-y-4 text-lg text-gray-700 ml-4">
+            <li>1. 核心数据概览与图表化分析</li>
+            <li>2. 综合能力雷达表与诊断</li>
+            <li>3. 考纲精准定级与知识点盲区</li>
+            <li>4. 风险诊断与训练闭环表</li>
+            <li>5. 代码质量与工程习惯</li>
+            <li>6. 定制训练题单</li>
+            <li>7. 错题单页题解与复盘（含 AI 题解摘要与推荐同类题）</li>
+        </ul>
+    </div>
+
+    <!-- 图表分析页 -->
+    <div class="page-break">
+        <h1 class="text-2xl font-bold text-blue-900 mb-6 border-b pb-2">1. 核心数据概览与图表化分析</h1>
+        <div class="grid grid-cols-2 gap-8 mb-8">
+            
+            <div class="text-center">
+                <img src="assets/ability_radar.png" class="mx-auto" style="max-height: 250px;" alt="能力雷达图">
+                <p class="text-sm text-gray-500 mt-2">图 1：能力雷达图</p>
+            </div>
+            
+            
+            <div class="text-center">
+                <img src="assets/personality_radar.png" class="mx-auto" style="max-height: 250px;" alt="性格画像雷达图">
+                <p class="text-sm text-gray-500 mt-2">图 2：性格画像雷达图</p>
+            </div>
+            
+            
+            <div class="text-center">
+                <img src="assets/difficulty_histogram.png" class="mx-auto" style="max-height: 250px;" alt="题目难度分布">
+                <p class="text-sm text-gray-500 mt-2">图 3：题目难度分布</p>
+            </div>
+            
+            
+            <div class="text-center">
+                <img src="assets/ac_submit_distribution.png" class="mx-auto" style="max-height: 250px;" alt="AC 提交次数分布">
+                <p class="text-sm text-gray-500 mt-2">图 4：首次 AC 提交次数分布</p>
+            </div>
+            
+            
+            <div class="text-center">
+                <img src="assets/status_ratio.png" class="mx-auto" style="max-height: 250px;" alt="通过/未通过占比">
+                <p class="text-sm text-gray-500 mt-2">图 5：通过/未通过占比</p>
+            </div>
+            
+            
+            <div class="text-center">
+                <img src="assets/top_tags.png" class="mx-auto" style="max-height: 250px;" alt="高频算法标签 Top 8">
+                <p class="text-sm text-gray-500 mt-2">图 6：高频算法标签 Top 8</p>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- AI 报告正文 -->
+    <div class="page-break markdown-content">
+        <h1>🏆 深度诊断报告：XiaoLu_2026</h1>
+<h2>数据校准与真实统计</h2>
+<ul>
+<li>报告生成时间：2026-06-05 12:10</li>
+</ul>
+<h3>难度分布（程序生成）</h3>
+<table><thead><tr><th>洛谷难度</th><th>题数</th><th>占比</th><th>分布图</th></tr></thead><tbody>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#FE4C61;color:#fff;font-weight:600;">入门</span></td><td>52</td><td>98.1%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:98.1%;height:12px;background:#FE4C61;"></span></span> <span style="margin-left:8px;">98.1%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#F39C12;color:#fff;font-weight:600;">普及-</span></td><td>1</td><td>1.9%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:1.9%;height:12px;background:#F39C12;"></span></span> <span style="margin-left:8px;">1.9%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#FFC116;color:#fff;font-weight:600;">普及/提高-</span></td><td>0</td><td>0.0%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:0.0%;height:12px;background:#FFC116;"></span></span> <span style="margin-left:8px;">0.0%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#52C41A;color:#fff;font-weight:600;">普及+/提高</span></td><td>0</td><td>0.0%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:0.0%;height:12px;background:#52C41A;"></span></span> <span style="margin-left:8px;">0.0%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#3498DB;color:#fff;font-weight:600;">提高+/省选-</span></td><td>0</td><td>0.0%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:0.0%;height:12px;background:#3498DB;"></span></span> <span style="margin-left:8px;">0.0%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#9D4EDD;color:#fff;font-weight:600;">省选/NOI-</span></td><td>0</td><td>0.0%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:0.0%;height:12px;background:#9D4EDD;"></span></span> <span style="margin-left:8px;">0.0%</span></td></tr>
+<tr><td><span style="display:inline-block;padding:2px 10px;border-radius:6px;background:#0E1D69;color:#fff;font-weight:600;">NOI/NOI+/CTSC</span></td><td>0</td><td>0.0%</td><td><span style="display:inline-block;width:150px;height:12px;background:#E5E7EB;border-radius:9999px;overflow:hidden;vertical-align:middle;"><span style="display:block;width:0.0%;height:12px;background:#0E1D69;"></span></span> <span style="margin-left:8px;">0.0%</span></td></tr>
+</tbody></table>
+
+<h3>知识点覆盖统计表（按算法标签）</h3>
+<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>详细情况</th></tr></thead><tbody>
+<tr><td><strong>入门</strong></td><td>1/28</td><td>3.6%</td><td>🟢0项 🟡0项 🟠1项 🔵0项 🔴27项</td></tr>
+<tr><td><strong>提高</strong></td><td>0/50</td><td>0.0%</td><td>🟢0项 🟡0项 🟠0项 🔵0项 🔴50项</td></tr>
+<tr><td><strong>省选</strong></td><td>0/10</td><td>0.0%</td><td>🟢0项 🟡0项 🟠0项 🔵0项 🔴10项</td></tr>
+<tr><td><strong>NOI</strong></td><td>0/43</td><td>0.0%</td><td>🟢0项 🟡0项 🟠0项 🔵0项 🔴43项</td></tr>
+</tbody></table>
+
+<ul>
+<li>口径说明：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。</li>
+</ul>
+<p>P26-06-05 12:10
+<strong>诊断对象</strong>：洛谷选手（ID 假定为 <code>XiaoLu_2026</code>）<br />
+<strong>总提交</strong>：181 次 | <strong>通过题数</strong>：53 | <strong>卡题数</strong>：1  </p>
+<hr />
+<h2>1. 选手概览与性格画像</h2>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>评分（满分5<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">1/1</span></span>）</th>
+<th>数据支撑</th>
+<th>拟人化评价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>坚韧度</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">5/5</span></span></td>
+<td>卡题 <strong>B2026</strong> 提交4次未放弃，后续仍在尝试</td>
+<td><p class="text-blue-700 font-semibold">“死磕型选手——遇到浮点数陷阱，不查资料硬扛，执着虽好但效率低”</p></td>
+</tr>
+<tr>
+<td><strong>完美主义</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">2/5</span></span></td>
+<td>一次AC率 38.2%（中等偏低）；WA后重交间隔中位数仅73秒</td>
+<td><p class="text-blue-700 font-semibold">“频繁快速重交，缺乏冷静复盘，有种‘赶着下班’的急躁”</p></td>
+</tr>
+<tr>
+<td><strong>冒险精神</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">2/5</span></span></td>
+<td>难度分布全部为 <strong>入门（52题）</strong> 和 <strong>普及-（1题）</strong>，无任何高级题目尝试</td>
+<td><p class="text-blue-700 font-semibold">“严格待在舒适区，不愿挑战不熟悉的算法，成长停滞”</p></td>
+</tr>
+<tr>
+<td><strong>自律性</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">3/5</span></span></td>
+<td>活跃天数仅14/132天，最大连续训练4天，集中周六（129次）</td>
+<td><p class="text-blue-700 font-semibold">“周末突击型，缺乏每日持续投入，训练节奏不稳定”</p></td>
+</tr>
+<tr>
+<td><strong>调试耐心</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#94A3B8;">★</span><span style="color:#94A3B8;">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">3/5</span></span></td>
+<td>1分钟内快速重交占比43.5%，代码长度中位数10行，几乎无注释</td>
+<td><p class="text-blue-700 font-semibold">“调试靠‘试错法’，改变一个符号就交，缺少系统性调试习惯”</p></td>
+</tr>
+<tr>
+<td><strong>作息规律</strong></td>
+<td><span style="display:inline-flex;align-items:center;gap:2px;padding:2px 8px;border-radius:9999px;background:#111827;border:1px solid #374151;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);font-size:1.02em;line-height:1.1;vertical-align:middle;"><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#F5C542;text-shadow:0 1px 0 rgba(0,0,0,0.18);">★</span><span style="color:#94A3B8;">★</span><span style="margin-left:6px;color:#CBD5E1;font-size:12px;font-weight:700;">4/5</span></span></td>
+<td>提交峰值14:00（79次），凌晨0次，早6-9点21次</td>
+<td><p class="text-blue-700 font-semibold">“午后为主，作息正派，适合作为训练黄金时段”</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>总结</strong>：一位<strong>入门阶段的勤奋但低效型选手</strong>。热爱编程，但停留在“写循环+条件”的阶段，缺乏算法思维训练。需要立即进行系统性补全。</p>
+<hr />
+<h2>2. 提交行为深度分析</h2>
+<h3>2.1 死磕题目 TOP 3</h3>
+<table>
+<thead>
+<tr>
+<th>题目</th>
+<th>提交次数</th>
+<th>最终状态</th>
+<th>分析</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>B2026</strong> 计算浮点数相除的余</td>
+<td>4</td>
+<td>未AC（语法错误 ×1，WA ×3）</td>
+<td><p class="text-blue-700 font-semibold">核心误区：C++ 中 <code>%</code> 不能用于浮点数，且题目要求小数余数。选手没理解题意，持续使用错误语法。建议立即查阅取余运算定义。</p></td>
+</tr>
+<tr>
+<td><strong>P5708</strong> 三角形面积</td>
+<td>2</td>
+<td>未AC（WA ×2）</td>
+<td><p class="text-blue-700 font-semibold">使用 <code>int</code> 计算海伦公式导致精度丢失，且变量复用混乱。选手在数据范围（输入是浮点数）上犯了致命错误。</p></td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 首次 AC 情况</h3>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>数据</th>
+<th>解读</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一次 AC 率</td>
+<td>38.2%</td>
+<td>较低，说明题目选择过于简单（多为无分支的单步任务）导致一次AC多，但实际算法能力弱</td>
+</tr>
+<tr>
+<td>多次尝试后 AC 率</td>
+<td>61.8%</td>
+<td>较多题目是靠反复试错通过的，缺乏一次性正确思考的习惯</td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 其他显著行为特征</h3>
+<ul>
+<li><strong>单日最高提交</strong>：45次（2023-04-08），当天大概率是在解决系列主题，但未留下题目记录，需警惕“刷水题”行为。</li>
+<li><strong>长耗时题目</strong>：无（所有题目 AC 耗时均在10分钟以内），反映出<strong>从未遇到需要深度思考的题目</strong>——这正是最大的问题。</li>
+</ul>
+<p class="text-blue-700 font-semibold">特征：训练量看似充足（181次提交），但有效训练极少。选手将大量时间浪费在“试bug”上，而非理解算法。</p>
+
+<hr />
+<h2>3. 难度分布与水平研判</h2>
+<p><img alt="" src="assets/difficulty_histogram.png" /></p>
+<p><img alt="" src="assets/status_ratio.png" /></p>
+<ul>
+<li>平均难度：入门（均值 1.02）</li>
+<li>题目覆盖区间：入门~普及/提高-(1-3) 53 题（100.0%）；普及+/提高~提高+/省选-(4-5) 0 题（0.0%）；省选/NOI-(6) 0 题（0.0%）；NOI/NOI+/CTSC(7) 0 题（0.0%）。</li>
+<li>通过/未通过：已通过 53 题，未通过 2 题（总尝试 55）。</li>
+</ul>
+<p>结论：以难度分布与通过比例为准，当前训练重心应优先覆盖 4-6 档的典型模型题，避免只在 1-3 档堆题量。</p>
+<h2>4. 六维能力雷达表与诊断</h2>
+<table>
+<thead>
+<tr>
+<th>能力块</th>
+<th>评分 (0-100)</th>
+<th>当前等级</th>
+<th>数据证据</th>
+<th>已经具备</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>基础算法</td>
+<td>49</td>
+<td>🔴薄弱</td>
+<td>模拟法3题，无枚举、贪心、二分、递推</td>
+<td>能写顺序、分支、循环</td>
+</tr>
+<tr>
+<td>数据结构</td>
+<td>32</td>
+<td>🔴薄弱</td>
+<td>仅数组使用，无栈队列链表树</td>
+<td>无</td>
+</tr>
+<tr>
+<td>图论</td>
+<td>32</td>
+<td>🔴薄弱</td>
+<td>无图遍历、无最小生成树、无最短路</td>
+<td>无</td>
+</tr>
+<tr>
+<td>动态规划</td>
+<td>38</td>
+<td>🔴薄弱</td>
+<td>无任何DP题目</td>
+<td>无</td>
+</tr>
+<tr>
+<td>字符串</td>
+<td>26</td>
+<td>🔴薄弱</td>
+<td>仅C风格字符数组，无KMP/Hash</td>
+<td>能处理字符串输入输出</td>
+</tr>
+<tr>
+<td>数学</td>
+<td>24</td>
+<td>🔴薄弱</td>
+<td>仅有1道数学标签（浮点数运算），无数论</td>
+<td>基本算术运算</td>
+</tr>
+</tbody>
+</table>
+<p class="text-blue-700 font-semibold">解读：雷达图呈现“空心化”，所有能力块均亮红灯。选手相当于只学了C++编程语言的“Hello World”部分，还未进入算法竞赛的领域。</p>
+
+<hr />
+<h2>5. 考纲精准定级与知识点盲区</h2>
+<h3>5.1 当前对应等级</h3>
+<p><strong>CSP-J（入门级）</strong>，但仅覆盖了入门级大纲中“基础知识与编程环境”的一小部分，以及“C++程序设计”中的基础语法。对“数据结构”、“算法”部分几乎为零。</p>
+<h3>5.2 知识点强弱项</h3>
+<table>
+<thead>
+<tr>
+<th>掌握最好的3个</th>
+<th>等级</th>
+<th>薄弱点Top3</th>
+<th>等级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>模拟法（3题）</td>
+<td>🟠入门</td>
+<td>枚举法（0题）</td>
+<td>🔴空白</td>
+</tr>
+<tr>
+<td>顺序结构（31题）</td>
+<td>🟡熟练（非大纲知识点，仅为语法）</td>
+<td>贪心法（0题）</td>
+<td>🔴空白</td>
+</tr>
+<tr>
+<td>分支结构（11题）</td>
+<td>🟡熟练（同上）</td>
+<td>递推法（0题）</td>
+<td>🔴空白</td>
+</tr>
+</tbody>
+</table>
+<h3>5.3 训练盲区</h3>
+<p>在CSP-J要求的知识点中，以下<strong>必修模块完全缺失</strong>：
+- 枚举法、贪心法、二分法、倍增法
+- 前缀和、差分、排序算法（冒泡、选择、插入、计数）
+- DFS、BFS、Flood Fill
+- 动态规划（一维、背包、区间）
+- 数据结构：栈、队列、链表、二叉树、图
+- 数学：欧几里得算法、素数筛法、排列组合</p>
+<h3>5.4 知识点覆盖表</h3>
+<table>
+<thead>
+<tr>
+<th>级别</th>
+<th>覆盖数/总数</th>
+<th>覆盖率</th>
+<th>推荐定位</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>入门级（CSP-J）</td>
+<td>1 / 28</td>
+<td>3.6%</td>
+<td>🔴严重缺失</td>
+</tr>
+<tr>
+<td>提高级（CSP-S）</td>
+<td>0 / 50</td>
+<td>0%</td>
+<td>🔴空白</td>
+</tr>
+<tr>
+<td>省选级</td>
+<td>0 / 10</td>
+<td>0%</td>
+<td>🔴空白</td>
+</tr>
+<tr>
+<td>NOI级</td>
+<td>0 / 43</td>
+<td>0%</td>
+<td>🔴空白</td>
+</tr>
+</tbody>
+</table>
+<h3>5.5 题目级别经历表</h3>
+<table>
+<thead>
+<tr>
+<th>来源</th>
+<th>AC题数</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CSP-J 真题</td>
+<td>0</td>
+<td>未做过任何带“NOIP/CSP”标签的题目</td>
+</tr>
+<tr>
+<td>CSP-S 真题</td>
+<td>0</td>
+<td>无</td>
+</tr>
+<tr>
+<td>省选/NOI</td>
+<td>0</td>
+<td>无</td>
+</tr>
+<tr>
+<td>洛谷原创/红题</td>
+<td>52</td>
+<td>全部是入门（入门）</td>
+</tr>
+<tr>
+<td>橙题</td>
+<td>1</td>
+<td>普及-（普及-），但实为语法水题</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. 风险诊断与训练闭环表</h2>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>风险项</th>
+<th>触发场景</th>
+<th>比赛症状</th>
+<th>根因判断</th>
+<th>训练专题</th>
+<th>验收标准</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;">S（高/立即处理）</span></td>
+<td>零算法基础</td>
+<td>遇到判断质数、统计次数等基础题直接枚举超时</td>
+<td>普-题都拿不到分</td>
+<td>从未系统学习枚举、数学类算法</td>
+<td>数学基础 + 枚举优化</td>
+<td>30分钟内完成 P5739 阶乘求和（非高精度）的多种解法</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;">S（高/立即处理）</span></td>
+<td>糟糕的调试习惯</td>
+<td>WA后1分钟内重交，不改逻辑只改符号</td>
+<td>把送分题做成“猜谜”，浪费大量时间</td>
+<td>缺乏测试用例构造和断点调试概念</td>
+<td>学习GDB/print调试技巧</td>
+<td>能不借助提交，通过本地样例复现错误并修复</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;">S（高/立即处理）</span></td>
+<td>不会使用 C++ STL</td>
+<td>所有代码手工处理（如求最大最小写循环），无vector/algorithm</td>
+<td>编码速度慢，易出错</td>
+<td>从未接触STL文档</td>
+<td>STL容器与算法基础</td>
+<td>能用 <code>max_element</code> 等一行代码替代手写循环</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#FFEDD5;color:#9A3412;border-color:#FDBA74;">A（中/近期处理）</span></td>
+<td>输入输出性能隐患</td>
+<td>大量使用 <code>cin/cout</code> 且未关闭同步</td>
+<td>大数据流 TLE（即使算法正确）</td>
+<td>缺乏常识</td>
+<td><code>ios::sync_with_stdio</code> 配置</td>
+<td>强制使用新代码加上该行</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#FFEDD5;color:#9A3412;border-color:#FDBA74;">A（中/近期处理）</span></td>
+<td>无图论、树、DP认知</td>
+<td>竞赛中80%的题目涉及这些</td>
+<td>只能做“模拟+数学”题，上限极低</td>
+<td>知识结构断层</td>
+<td>图论入门、线性DP</td>
+<td>独立完成 <code>P1048</code> 采药（01背包）</td>
+</tr>
+<tr>
+<td><span style="display:inline-block;padding:2px 8px;border-radius:9999px;border:1px solid;font-size:12px;font-weight:700;line-height:1.2;white-space:nowrap;background:#DCFCE7;color:#166534;border-color:#86EFAC;">B（低/可后置）</span></td>
+<td>训练无计划性</td>
+<td>刷题全是水题，无递进</td>
+<td>一年后仍停留在入门级</td>
+<td>缺乏教练指导</td>
+<td>制订6个月路线图</td>
+<td>按照计划完成每阶段目标</td>
+</tr>
+</tbody>
+</table><p style="margin:0 0 12px 0;color:#6b7280;font-size:13px;">优先级说明：S（高/立即处理） · A（中/近期处理） · B（低/可后置）。</p>
+<hr />
+<h2>7. 代码质量与工程习惯深度分析</h2>
+<h3>7.1 优点</h3>
+<ul>
+<li><strong>缩进统一</strong>：使用空格缩进（无Tab混用），可读性基础较好。</li>
+<li><strong>使用 <code>#include &lt;bits/stdc++.h&gt;</code></strong>：减少了头文件遗漏的可能性（虽然不标准，但竞赛环境常见）。</li>
+</ul>
+<h3>7.2 必须改掉的坏习惯（Top 3）</h3>
+<table>
+<thead>
+<tr>
+<th>编号</th>
+<th>坏习惯</th>
+<th>示例</th>
+<th>风险</th>
+<th>改进方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>缺少 I/O 加速</strong></td>
+<td>无 <code>ios::sync_with_stdio(false)</code>，98.2% 使用 <code>cin/cout</code></td>
+<td>当输入超过10万个数时必然TLE</td>
+<td>固定添加：<code>ios::sync_with_stdio(false); cin.tie(0); cout.tie(0);</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>变量命名随意</strong></td>
+<td><code>a,b,c,d,e,f,ma,mi,cn</code> 无意义</td>
+<td>代码难以维护，复杂逻辑极易出错</td>
+<td>用语义名称：<code>sum</code>, <code>max_val</code>, <code>min_val</code>, <code>area</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>重复计算和混乱逻辑</strong></td>
+<td>求最值时写了两个循环，且 <code>cn</code> 累加时漏加了 <code>cnt[0]</code> 后又补加，冗余</td>
+<td>增加 bug 概率，可读性差</td>
+<td>循环只做一件事；或使用 <code>min_element</code>/<code>max_element</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>附加问题</strong>：
+- 无注释（0%），即使是公式题也不说明。
+- 未使用 <code>#define int long long</code>（当前虽无溢出风险，但习惯要提前养成）。
+- 数组大小使用魔数 <code>1001</code>，当数据范围变化时易越界，应改为 <code>const int N = 1005</code>。</p>
+<hr />
+<h2>8. 定制训练题单（6个月路线图）</h2>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>时间</th>
+<th>核心学习内容</th>
+<th>洛谷推荐题目（题号+说明）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>第一阶段：语法打磨与基础算法</strong></td>
+<td>Month1-2</td>
+<td>枚举、模拟、贪心入门、递推、递归、二分查找、高精度运算</td>
+<td>1️⃣ <strong>P1001</strong> A+B Problem（复习输入输出）<br>2️⃣ <strong>P1421</strong> 小玉买文具（简单模拟）<br>3️⃣ <strong>P1036</strong> [NOIP2002] 选数（DFS+枚举入门）<br>4️⃣ <strong>P1085</strong> 不高兴的津津（模拟+枚举）<br>5️⃣ <strong>P1909</strong> 买铅笔（贪心初步）<br>6️⃣ <strong>P2240</strong> 部分背包（贪心经典）</td>
+</tr>
+<tr>
+<td><strong>第二阶段：数据结构与基础DP</strong></td>
+<td>Month3-4</td>
+<td>栈、队列、链表（STL）、二叉树、图的邻接表、DFS/BFS、线性DP、背包DP</td>
+<td>1️⃣ <strong>P1449</strong> 后缀表达式（栈）<br>2️⃣ <strong>P1996</strong> 约瑟夫问题（队列/循环链表）<br>3️⃣ <strong>P1048</strong> 采药（01背包）<br>4️⃣ <strong>P1057</strong> [NOIP2008] 传球游戏（线性DP）<br>5️⃣ <strong>P5318</strong> 查找文献（图遍历BFS/DFS）<br>6️⃣ <strong>P2853</strong> [USACO] 牛的旅行（图论最短路变体）</td>
+</tr>
+<tr>
+<td><strong>第三阶段：算法集成与比赛实战</strong></td>
+<td>Month5-6</td>
+<td>动态规划优化、图论进阶（最小生成树、最短路）、数论基础（GCD、素数筛）、CSP-J真题刷题</td>
+<td>1️⃣ <strong>P1044</strong> 栈（卡特兰数/递推）<br>2️⃣ <strong>P1192</strong> 台阶问题（递推+DP）<br>3️⃣ <strong>P3366</strong> 最小生成树（模板）<br>4️⃣ <strong>P3371</strong> 单源最短路径（模板，Dijkstra）<br>5️⃣ <strong>P1029</strong> [NOIP2001] 最大公约数和最小公倍数问题（数论）<br>6️⃣ <strong>CSP-J 2021/2022/2023 真题卷</strong>（直接模拟考试）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>每周训练量</strong>：建议每天 1-2 题，周末 3-5 题，保持连续性。</p>
+<hr />
+<h2>9. 核心建议（优先级排序）</h2>
+<table>
+<thead>
+<tr>
+<th>优先级</th>
+<th>建议</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🔴 <strong>紧急</strong></td>
+<td><strong>添加 <code>ios::sync_with_stdio(false); cin.tie(0);</code> 到所有代码</strong></td>
+<td>当前代码 98.2% 使用 <code>cin/cout</code>，无优化极易 TLE，养成习惯只需1秒</td>
+</tr>
+<tr>
+<td>🔴 <strong>紧急</strong></td>
+<td><strong>停止1分钟内重交，改为本地构造测试数据</strong></td>
+<td>43.5% 的重交是浪费，学会用 <code>gdb</code> 或 <code>print</code> 调试10分钟胜过提交10次</td>
+</tr>
+<tr>
+<td>🔴 <strong>紧急</strong></td>
+<td><strong>系统学习C++基础：数组下标从0开始、浮点数运算、取余定义</strong></td>
+<td>未通过题 B2026、P5708 全是基础概念错误，必须先扫盲</td>
+</tr>
+<tr>
+<td>🟡 <strong>重要</strong></td>
+<td><strong>立即开始学习“枚举法”和“贪心法”</strong></td>
+<td>这是所有算法的基础，目前完全空白，直接决定能否突破普及-</td>
+</tr>
+<tr>
+<td>🟡 <strong>重要</strong></td>
+<td><strong>建立训练日志，记录每道题的思路、错误点、复杂度</strong></td>
+<td>当前复盘能力0，需用四段式复盘方法（赛时模型→错因→性质→不变量）</td>
+</tr>
+<tr>
+<td>🟡 <strong>重要</strong></td>
+<td><strong>主动提升难度，每天至少做一道普及-（橙色）或普及/提高-（黄色）题</strong></td>
+<td>否则永远停留在“入门”水平</td>
+</tr>
+<tr>
+<td>🟢 <strong>建议</strong></td>
+<td><strong>学习使用 <code>#define int long long</code> 和 <code>typedef</code> 重命名</strong></td>
+<td>防止溢出，且代码更规范</td>
+</tr>
+<tr>
+<td>🟢 <strong>建议</strong></td>
+<td><strong>周末参加洛谷线上赛，模拟比赛时间压力</strong></td>
+<td>检验真实水平，克服紧张</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>10. 未通过题目专属题解</h2>
+<h3>10.1 B2026 计算浮点数相除的余</h3>
+<h4>📌 AI题解摘要</h4>
+<blockquote>
+<p>核心坑点1：C++ 的 <code>%</code> 运算符只针对<strong>整数</strong>，浮点数需要改用 <code>fmod</code> 或手动公式。<br />
+核心坑点2：题目定义“余数”为 <code>a - k * b</code>，其中 <code>k</code> 是使 <code>|a - k*b|</code> 最小的整数（即 <strong>floor(a/b)</strong> 或 <strong>trunc(a/b)</strong> 的实现）。<br />
+坑点3：输入输出格式——浮点数，保留一位小数。</p>
+</blockquote>
+<h4>a) 暴力思路怎么想？</h4>
+<p>直接的想法：既然 <code>%</code> 不能用，那就按照数学定义手动计算余数。</p>
+<pre><code class="language-cpp">// 第一个错误版本
+double a, b, k, r;
+cin &gt;&gt; a &gt;&gt; b;
+k = (int)(a / b);    // 直接取整，但负数情况呢？题目未说，假设a,b&gt;0
+r = a - k * b;
+cout &lt;&lt; r;
+</code></pre>
+<p><strong>复杂度</strong>：O(1)<br />
+<strong>能拿多少分？</strong> 如果 a,b 是正数且 a%b 无精度丢失，能过样例，但可能因为浮点误差或截断方向错误而 WA（比如 a/b 是 0.999...，强制 int 会得到0，实际应取1？要看题目定义）。实际上题目要求“保留一位小数”，所以还需要格式化输出。</p>
+<h4>b) 瓶颈在哪里？</h4>
+<ul>
+<li>对浮点 <code>a/b</code> 取整的方式不对。C++ 有 <code>floor</code>（向下取整）、<code>ceil</code>（向上取整）、<code>trunc</code>（向零取整）。题目定义“最小的|a - k<em>b|”等价于让 <code>k</code> 为离 <code>a/b</code> 最近的整数（即四舍五入取整），但常见理解是取 <code>floor</code>（向下取整），例如“3.8 除以 2 的余数”通常理解为 3.8 - 1</em>2 = 1.8。但<strong>请仔细读题</strong>：题目中“计算浮点数相除的余”的规范定义是 <code>a - floor(a/b) * b</code>（与C语言的 <code>fmod</code> 一致）。我们先查阅标准做法：C++ 提供了 <code>fmod</code>（取余）和 <code>remainder</code>（取余但向最近整数）。两者不同。根据洛谷该题（B2026）的讨论，正确做法是 a - b * (long long)(a / b) 或直接用 <code>fmod</code>。</li>
+</ul>
+<h4>c) 关键性质/不变量观察</h4>
+<ul>
+<li><code>k = floor(a / b)</code> 在非负情况下等于整数部分 <code>int(a / b)</code>，但 <code>int</code> 转换是向零取整，对正数效果一样，但遇到负数就会不同（本题 a,b &gt;0？）。题目没说，但后台数据可能是正浮点数。</li>
+<li>浮点数比较时要谨慎：<code>a / b</code> 可能产生无限小数，直接转 <code>long long</code> 会截断，而题目要求保留一位小数，所以需要 <code>printf("%.1f", r)</code> 输出。</li>
+</ul>
+<h4>d) 最终正解的推导与核心代码结构</h4>
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+int main() {
+    double a, b;
+    cin &gt;&gt; a &gt;&gt; b;
+    // 方法1：使用 fmod（C++标准库，求余）
+    double ans = fmod(a, b);  // fmod(a,b) = a - floor(a/b)*b
+    // 方法2：手动计算（只对正数）
+    // long long k = (long long)(a / b);  // a/b 是浮点数，截断整数部分
+    // double ans = a - k * b;
+    printf(&quot;%.1f\n&quot;, ans);
+    return 0;
+}
+</code></pre>
+<p><strong>注意</strong>：<code>fmod</code> 的结果可能为负（如果 a 和 b 异号），但本题 a,b 都为正，所以没问题。推荐使用 <code>fmod</code> 以避免手动截断的精度误差。</p>
+<h4>e) 推荐同类题</h4>
+<ul>
+<li><strong>P6543</strong> 浮点数比较</li>
+</ul>
+    </div>
+
+</body>
+</html>

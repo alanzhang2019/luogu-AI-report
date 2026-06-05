@@ -1,0 +1,4155 @@
+{
+  "student_info": {
+    "name": "梁晋诚",
+    "school": "龙岗区外国语",
+    "grade": "七年级",
+    "eval_time": "2026-06-05 12:10"
+  },
+  "solved_count": 53,
+  "failed_count": 2,
+  "summary": {
+    "difficulty_histogram": {
+      "1": 52,
+      "2": 1
+    },
+    "tag_type_histogram": {
+      "2": 50,
+      "3": 1,
+      "4": 1,
+      "5": 3
+    },
+    "top_tags": [
+      {
+        "id": 353,
+        "name": "顺序结构",
+        "type": 2,
+        "count": 31
+      },
+      {
+        "id": 354,
+        "name": "分支结构",
+        "type": 2,
+        "count": 11
+      },
+      {
+        "id": 355,
+        "name": "循环结构",
+        "type": 2,
+        "count": 4
+      },
+      {
+        "id": 1,
+        "name": "模拟",
+        "type": 2,
+        "count": 3
+      },
+      {
+        "id": 107,
+        "name": "Special Judge",
+        "type": 5,
+        "count": 2
+      },
+      {
+        "id": 5,
+        "name": "数学",
+        "type": 2,
+        "count": 1
+      },
+      {
+        "id": 34,
+        "name": "2017",
+        "type": 4,
+        "count": 1
+      },
+      {
+        "id": 82,
+        "name": "NOIP 普及组",
+        "type": 3,
+        "count": 1
+      },
+      {
+        "id": 104,
+        "name": "提交答案",
+        "type": 5,
+        "count": 1
+      }
+    ],
+    "top_algorithm_tags": [
+      {
+        "id": 353,
+        "name": "顺序结构",
+        "type": 2,
+        "count": 31
+      },
+      {
+        "id": 354,
+        "name": "分支结构",
+        "type": 2,
+        "count": 11
+      },
+      {
+        "id": 355,
+        "name": "循环结构",
+        "type": 2,
+        "count": 4
+      },
+      {
+        "id": 1,
+        "name": "模拟",
+        "type": 2,
+        "count": 3
+      },
+      {
+        "id": 5,
+        "name": "数学",
+        "type": 2,
+        "count": 1
+      }
+    ],
+    "level_experience": {
+      "csp_j": {
+        "label": "CSP-J",
+        "solved": 53,
+        "by_difficulty": 53,
+        "by_origin": 1
+      },
+      "csp_s": {
+        "label": "CSP-S",
+        "solved": 1,
+        "by_difficulty": 0,
+        "by_origin": 1
+      },
+      "provincial": {
+        "label": "省选",
+        "solved": 1,
+        "by_difficulty": 0,
+        "by_origin": 1
+      },
+      "noi": {
+        "label": "NOI",
+        "solved": 1,
+        "by_difficulty": 0,
+        "by_origin": 1
+      }
+    }
+  },
+  "passed_items": [
+    {
+      "problem": {
+        "pid": "P5726",
+        "title": "【深基4.习9】打分",
+        "difficulty": 2,
+        "type": "P",
+        "submitted": true,
+        "accepted": true
+      },
+      "record": {
+        "time": 16,
+        "memory": 808,
+        "problem": {
+          "pid": "P5726",
+          "title": "【深基4.习9】打分",
+          "difficulty": 2,
+          "type": "P"
+        },
+        "sourceCodeLength": 443,
+        "submitTime": 1692268834,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 121448735,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tint cnt[1001];\r\n\tint n,ma,mi=0;\r\n\tdouble cn=0;\r\n\tcin>>n;\r\n\tfor(int i=0;i<n;i++)\r\n\t{\r\n\t\tcin>>cnt[i];\r\n\t}\r\n\tma=cnt[0];\r\n\tmi=cnt[0];\r\n\tfor(int j=1;j<n;j++)\r\n\t{\r\n\t\tif(cnt[j]>ma)\r\n\t\t{\r\n\t\t\tma=cnt[j];\r\n\t\t}\r\n\t\tcn=cn+cnt[j];\r\n\t\t\r\n\t}\r\n\tcn=cn+cnt[0];\r\n\tfor(int k=1;k<n;k++)\r\n\t{\r\n\t\tif(cnt[k]<mi)\r\n\t\t{\r\n\t\t\tmi=cnt[k];\r\n\t    }\r\n\t}\r\n\tcn=cn-mi-ma;\r\n\tcn=cn/(n-2);\r\n\tprintf(\"%.2f\",cn);\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5718",
+        "title": "【深基4.例2】找最小值",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true
+      },
+      "record": {
+        "time": 15,
+        "memory": 812,
+        "problem": {
+          "pid": "P5718",
+          "title": "【深基4.例2】找最小值",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 274,
+        "submitTime": 1692267083,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 121444095,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tint cnt[101];\r\n\tint n,ma,mi=0;\r\n\tcin>>n;\r\n\tfor(int i=0;i<n;i++)\r\n\t{\r\n\t\tcin>>cnt[i];\r\n\t}\r\n\tma=cnt[0];\r\n\tmi=cnt[0];\r\n\tfor(int k=1;k<n;k++)\r\n\t{\r\n\t\tif(cnt[k]<mi)\r\n\t\t{\r\n\t\t\tmi=cnt[k];\r\n\t}\r\n\t}\r\n\tcout<<mi;\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5712",
+        "title": "【深基3.例4】Apples",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true
+      },
+      "record": {
+        "time": 15,
+        "memory": 852,
+        "problem": {
+          "pid": "P5712",
+          "title": "【深基3.例4】Apples",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 262,
+        "submitTime": 1685168181,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111361830,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a=0;\r\n    cin>>a;\r\n    if (a==1)\r\n    cout<<\"Today, I ate \"<<a<<\" apple.\";\r\n\telse if (1<a)\r\n\tcout<<\"Today, I ate \"<<a<<\" apples.\";\r\n\telse\r\n\tcout<<\"Today, I ate \"<<a<<\" apple.\";\r\n    return 0;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5706",
+        "title": "【深基2.例8】再分肥宅水",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "P5706",
+          "title": "【深基2.例8】再分肥宅水",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 177,
+        "submitTime": 1682749882,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 109165831,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    double a,b,c=0;\n    int d=0;\n    cin>>a>>b;\n    c=a/b;\n    d=b*2;\n    printf(\"%.3f\\n\",c);\n    printf(\"%d\",d);\n    \n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5705",
+        "title": "【深基2.例7】数字反转",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 796,
+        "problem": {
+          "pid": "P5705",
+          "title": "【深基2.例7】数字反转",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 137,
+        "submitTime": 1683957643,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 110224290,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tchar a,b,c,d,e;\r\n\tcin>>a>>b>>c>>d>>e;\r\n\tcout<<e<<d<<c<<b<<a;\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5704",
+        "title": "【深基2.例6】字母转换",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "P5704",
+          "title": "【深基2.例6】字母转换",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 139,
+        "submitTime": 1682147202,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108689317,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    char a;\n    int b=0;\n    cin>>a;\n    b=a;\n    b=b-32;\n    a=b;\n    cout<<a;\n}\n",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P5703",
+        "title": "【深基2.例5】苹果采购",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          5
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "P5703",
+          "title": "【深基2.例5】苹果采购",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 119,
+        "submitTime": 1682143833,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108678827,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b,c=0;\n    cin>>a>>b;\n    c=a*b;\n    cout<<c;\n    \n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P3954",
+        "title": "[NOIP 2017 普及组] 成绩",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          34,
+          82
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 808,
+        "problem": {
+          "pid": "P3954",
+          "title": "[NOIP 2017 普及组] 成绩",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 174,
+        "submitTime": 1682144502,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108680518,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b,c,d=0;\n    cin>>a>>b>>c;\n    a=a*0.2;\n    b=b*0.3;\n    c=c*0.5;\n    d=a+b+c;\n    cout<<d;\n    return 0;\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1421",
+        "title": "小玉买文具",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          1
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 748,
+        "problem": {
+          "pid": "P1421",
+          "title": "小玉买文具",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 143,
+        "submitTime": 1683960282,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 110231665,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a,b;\r\n    cin>>a>>b;\r\n    a=a*10;\r\n    a=a+b;\r\n    a=a/19;\r\n    cout<<a;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "P1001",
+        "title": "A+B Problem",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          1
+        ]
+      },
+      "record": {
+        "time": 31,
+        "memory": 808,
+        "problem": {
+          "pid": "P1001",
+          "title": "A+B Problem",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 101,
+        "submitTime": 1680933865,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107431059,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b;\n    cin>>a>>b;\n    cout<<a+b;\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2088",
+        "title": "计算书费",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          355
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 808,
+        "problem": {
+          "pid": "B2088",
+          "title": "计算书费",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 298,
+        "submitTime": 1683959086,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 110227951,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tdouble a,b,c,d,e,f,g,h,i,j,k;\r\n\tcin>>a>>b>>c>>d>>e>>f>>g>>h>>i>>j;\r\n\ta=a*28.9;\r\n\tb=b*32.7;\r\n\tc=c*45.6;\r\n\td=d*78;\r\n\te=e*35;\r\n\tf=f*86.2;\r\n\tg=g*27.8;\r\n\th=h*43;\r\n\ti=i*56;\r\n\tj=j*65;\r\n\tk=a+b+c+d+e+f+g+h+i+j;\r\n\tprintf(\"%.1f\",k);\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2056",
+        "title": "求整数的和与均值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          355
+        ]
+      },
+      "record": {
+        "time": 20,
+        "memory": 808,
+        "problem": {
+          "pid": "B2056",
+          "title": "求整数的和与均值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 282,
+        "submitTime": 1692268005,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 121446395,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double cnt[10001];\r\n\tdouble n,ma=0;\r\n\tcin>>n;\r\n\tfor(int i=0;i<n;i++)\r\n\t{\r\n\t\tcin>>cnt[i];\r\n\t}\r\n\tfor(int j=0;j<n;j++)\r\n\t{\r\n\t\tma=ma+cnt[j];\r\n\t}\r\n\tcout<<(int)ma;\r\n\tcout<<' ';\r\n\tma=ma/n;\r\n\tprintf(\"%.5f\",ma);\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2055",
+        "title": "均值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          107,
+          355
+        ]
+      },
+      "record": {
+        "time": 31,
+        "memory": 808,
+        "problem": {
+          "pid": "B2055",
+          "title": "均值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 250,
+        "submitTime": 1692267561,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 121445325,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tdouble cnt[101];\r\n\tdouble n,ma,mi=0;\r\n\tcin>>n;\r\n\tfor(int i=0;i<n;i++)\r\n\t{\r\n\t\tcin>>cnt[i];\r\n\t}\r\n\tfor(int j=0;j<n;j++)\r\n\t{\r\n\t\tma=ma+cnt[j];\r\n\t}\r\n\tma=ma/n;\r\n\tprintf(\"%.4f\",ma);\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2054",
+        "title": "求平均年龄",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          107,
+          355
+        ]
+      },
+      "record": {
+        "time": 63,
+        "memory": 808,
+        "problem": {
+          "pid": "B2054",
+          "title": "求平均年龄",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 250,
+        "submitTime": 1692268111,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 121446679,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 20,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double cnt[101];\r\n\tdouble n,ma=0;\r\n\tcin>>n;\r\n\tfor(int i=0;i<n;i++)\r\n\t{\r\n\t\tcin>>cnt[i];\r\n\t}\r\n\tfor(int j=0;j<n;j++)\r\n\t{\r\n\t\tma=ma+cnt[j];\r\n\t}\r\n\tma=ma/n;\r\n\tprintf(\"%.2f\",ma);\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2046",
+        "title": "骑车与走路",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 856,
+        "problem": {
+          "pid": "B2046",
+          "title": "骑车与走路",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 236,
+        "submitTime": 1685171021,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111370176,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    double a,b,c=0;\n    cin>>a;\n    b=a/1.2;\n    c=a/3;\n    c=c+27+23;\n    if (c>b)\n    cout<<\"Walk\";\n    else if (b>c)\n    cout<<\"Bike\";\n    else\n    cout<<\"All\";\n    return 0;\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2045",
+        "title": "晶晶赴约会",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 820,
+        "problem": {
+          "pid": "B2045",
+          "title": "晶晶赴约会",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 173,
+        "submitTime": 1685170410,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111368197,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a;\r\n    cin>>a;\r\n    if (a!=1&&a!=3&&a!=5)\r\n    cout<<\"YES\";\r\n    else\r\n    cout<<\"NO\";\r\n    return 0;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2044",
+        "title": "有一门课不及格的学生",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 16,
+        "memory": 808,
+        "problem": {
+          "pid": "B2044",
+          "title": "有一门课不及格的学生",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 318,
+        "submitTime": 1685170152,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111367359,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b,c=0;\n    cin>>a>>b>>c;\n    if (a<60&&(b>60||b==60)&&(c>60||c==60))\n    cout<<'1';\n    else if (b<60&&(a>60||a==60)&&(c>60||c==60))\n    cout<<'1';\n    else if (c<60&&(a>60||a==60)&&(b>60||b==60))\n    cout<<'1';\n    else\n    cout<<'0';\n    return 0;\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2042",
+        "title": "判断一个数能否同时被 3 和 5 整除",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 840,
+        "problem": {
+          "pid": "B2042",
+          "title": "判断一个数能否同时被 3 和 5 整除",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 149,
+        "submitTime": 1685169638,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111365775,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a=0;\n    cin>>a;\n    if (a%3==0&&a%5==0)\n    cout<<\"YES\";\n    else\n    cout<<\"NO\";\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2041",
+        "title": "收集瓶盖赢大奖",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 31,
+        "memory": 808,
+        "problem": {
+          "pid": "B2041",
+          "title": "收集瓶盖赢大奖",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 164,
+        "submitTime": 1685169358,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111364958,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b=0;\n    cin>>a>>b;\n    if ((a>10||a==10)||(a>20||a==0))\n    cout<<'1';\n    else\n    cout<<'0';\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2040",
+        "title": "判断是否为两位数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 744,
+        "problem": {
+          "pid": "B2040",
+          "title": "判断是否为两位数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 176,
+        "submitTime": 1685168955,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 111363886,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a=0;\r\n    cin>>a;\r\n    if ((a==10||a>10)&&a<100)\r\n    cout<<'1';\r\n    else\r\n    cout<<'0';\r\n    return 0;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2039",
+        "title": "整数大小比较",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 764,
+        "problem": {
+          "pid": "B2039",
+          "title": "整数大小比较",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 184,
+        "submitTime": 1682343216,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108860202,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a,b=0;\r\n    cin>>a>>b;\r\n    if (a>b)\r\n    cout<<\">\";\r\n    if (a==b)\r\n    cout<<\"=\";\r\n    if (a<b)\r\n    cout<<\"<\";\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2038",
+        "title": "奇偶 ASCII 值判断",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 12,
+        "memory": 696,
+        "problem": {
+          "pid": "B2038",
+          "title": "奇偶 ASCII 值判断",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 176,
+        "submitTime": 1682123791,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108640985,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    char a;\r\n    int b;\r\n    cin>>a;\r\n    b=int(a);\r\n    if (a%2!=0)\r\n    cout<<\"YES\";\r\n    else\r\n    cout<<\"NO\";\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2037",
+        "title": "奇偶数判断",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 32,
+        "memory": 864,
+        "problem": {
+          "pid": "B2037",
+          "title": "奇偶数判断",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 190,
+        "submitTime": 1680935511,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107438692,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a;\r\n    cin>>a;\r\n    if (a%2==0)\r\n    {\r\n    cout<<\"even\";\r\n    }\r\n    else if (a%2!=0)\r\n    {\r\n    cout<<\"odd\";\r\n    }\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2036",
+        "title": "输出绝对值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 17,
+        "memory": 808,
+        "problem": {
+          "pid": "B2036",
+          "title": "输出绝对值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 120,
+        "submitTime": 1680937048,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107446417,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    double a;\n    cin>>a;\n    a=abs(a);\n    printf(\"%.2f\",a);\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2035",
+        "title": "判断数正负",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          354
+        ]
+      },
+      "record": {
+        "time": 12,
+        "memory": 704,
+        "problem": {
+          "pid": "B2035",
+          "title": "判断数正负",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 173,
+        "submitTime": 1680934482,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107433676,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main()\r\n{\r\n\tint a;\r\n\tcin>>a;\r\n\tif (a>0)\r\n\tcout<<\"positive\";\r\n\telse if (a==0)\r\n\tcout<<\"zero\";\r\n\telse\r\n\tcout<<\"negative\";\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2034",
+        "title": "计算 2 的幂",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 34,
+        "memory": 812,
+        "problem": {
+          "pid": "B2034",
+          "title": "计算 2 的幂",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 117,
+        "submitTime": 1680937499,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107448711,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    int a;\r\n    cin>>a;\r\n    a=pow(2,a);\r\n    cout<<a;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2033",
+        "title": "A*B 问题",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 32,
+        "memory": 852,
+        "problem": {
+          "pid": "B2033",
+          "title": "A*B 问题",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 125,
+        "submitTime": 1680937871,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107450589,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    long long a,b,c;\r\n    cin>>a>>b;\r\n    c=a*b;\r\n    cout<<c;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2028",
+        "title": "反向输出一个三位数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 13,
+        "memory": 696,
+        "problem": {
+          "pid": "B2028",
+          "title": "反向输出一个三位数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 121,
+        "submitTime": 1683957785,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 110224621,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n\tchar a,b,c;\r\n\tcin>>a>>b>>c;\r\n\tcout<<c<<b<<a;\r\n\treturn 0;\r\n} ",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2027",
+        "title": "计算球的体积",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 16,
+        "memory": 808,
+        "problem": {
+          "pid": "B2027",
+          "title": "计算球的体积",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 163,
+        "submitTime": 1682751221,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 109168729,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double a,b,c;\r\n    cin>>a;\r\n    b=(3.14/3)*4;\r\n    a=a*a*a;\r\n    c=a*b;\r\n    printf(\"%.5f\",c);\r\n}\r\n",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2025",
+        "title": "输出字符菱形",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          104,
+          353
+        ]
+      },
+      "record": {
+        "time": 4,
+        "memory": 808,
+        "problem": {
+          "pid": "B2025",
+          "title": "输出字符菱形",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 185,
+        "submitTime": 1681995202,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108556868,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 1,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    cout<<\"  *\"<<endl;\r\n    cout<<\" ***\"<<endl;\r\n    cout<<\"*****\"<<endl;\r\n    cout<<\" ***\"<<endl;\r\n    cout<<\"  *\"<<endl;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2024",
+        "title": "输出浮点数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 7,
+        "memory": 684,
+        "problem": {
+          "pid": "B2024",
+          "title": "输出浮点数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 200,
+        "submitTime": 1682749382,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 109164818,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 2,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double a=0;\r\n    cin>>a;\r\n    printf(\"%f\\n\",a);\r\n    printf(\"%.5f\\n\",a);\r\n    printf(\"%e\\n\",a);\r\n    printf(\"%g\\n\",a);\r\n    return 0;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2023",
+        "title": "空格分隔输出",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "B2023",
+          "title": "空格分隔输出",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 242,
+        "submitTime": 1681541740,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108134780,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    char a;\r\n    char p;\r\n    int b;\r\n    float c;\r\n    double d;\r\n    p=' ';\r\n    cin>>a;\r\n    cin>>b;\r\n    cin>>c;\r\n    cin>>d;\r\n    printf(\"%c%c%d%c%.6f%c%.6lf\",a,p,b,p,c,p,d);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2022",
+        "title": "输出保留 12 位小数的浮点数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 812,
+        "problem": {
+          "pid": "B2022",
+          "title": "输出保留 12 位小数的浮点数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 107,
+        "submitTime": 1681540457,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108129150,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    double a;\n    cin>>a;\n    printf(\"%.12f\",a);\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2021",
+        "title": "输出保留 3 位小数的浮点数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 31,
+        "memory": 796,
+        "problem": {
+          "pid": "B2021",
+          "title": "输出保留 3 位小数的浮点数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 105,
+        "submitTime": 1682512288,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108987055,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    float a;\n    cin>>a;\n    printf(\"%.3f\",a);\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2019",
+        "title": "整型与布尔型的转换",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 13,
+        "memory": 804,
+        "problem": {
+          "pid": "B2019",
+          "title": "整型与布尔型的转换",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 138,
+        "submitTime": 1681539312,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108124331,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a;\r\n   bool c;\r\n   cin>>a;\r\n   c=bool(a);\r\n   a=int(c);\r\n   cout<<a;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2018",
+        "title": "打印字符",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 60,
+        "memory": 808,
+        "problem": {
+          "pid": "B2018",
+          "title": "打印字符",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 124,
+        "submitTime": 1681538991,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108123023,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 20,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   char a;\r\n   int c;\r\n   cin>>c;\r\n   a=char(c);\r\n   cout<<a;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2017",
+        "title": "打印 ASCII 码",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 852,
+        "problem": {
+          "pid": "B2017",
+          "title": "打印 ASCII 码",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 123,
+        "submitTime": 1681538857,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108122497,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   char a;\r\n   int c;\r\n   cin>>a;\r\n   c=int(a);\r\n   cout<<c;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2016",
+        "title": "浮点数向零舍入",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 31,
+        "memory": 808,
+        "problem": {
+          "pid": "B2016",
+          "title": "浮点数向零舍入",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 288,
+        "submitTime": 1681539871,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108126621,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   double a;\r\n   long long c;\r\n   cin>>a;\r\n   if (a>0)\r\n   {\r\n   \t    c=a/1;\r\n   \t    cout<<c;\r\n   }\r\n   else if (a==0)\r\n   {\r\n       c=0;\r\n       cout<<c;\r\n   }\r\n   else if (a<0)\r\n   {\r\n   \t    c=a/1;\r\n   \t    cout<<c;\r\n   }\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2015",
+        "title": "计算并联电阻的阻值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "B2015",
+          "title": "计算并联电阻的阻值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 135,
+        "submitTime": 1681033545,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107666047,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   double a,b,c;\r\n   cin>>a>>b;\r\n   c=1/(1/a+1/b);\r\n   printf(\"%.2f\",c);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2014",
+        "title": "与圆相关的计算",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 808,
+        "problem": {
+          "pid": "B2014",
+          "title": "与圆相关的计算",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 212,
+        "submitTime": 1681023519,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107624620,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   double r,b,c,d;\r\n   char s;\r\n   s=' ';\r\n   cin>>r;\r\n   b=r*2;\r\n   c=2*r*3.14159;\r\n   d=3.14159*pow(r,2);\r\n   printf(\"%.4f%c%.4f%c%.4f\",b,s,c,s,d);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2013",
+        "title": "温度表达转化",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 744,
+        "problem": {
+          "pid": "B2013",
+          "title": "温度表达转化",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 131,
+        "submitTime": 1681003873,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107566818,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double a;\r\n    cin>>a;\r\n    a=5*(a-32)/9;\r\n    printf(\"%.5f\",a);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2012",
+        "title": "甲流疫情死亡率",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 704,
+        "problem": {
+          "pid": "B2012",
+          "title": "甲流疫情死亡率",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 172,
+        "submitTime": 1681003254,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107565050,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 9,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double a,b;\r\n    char c;\r\n    c='%';\r\n    cin>>a>>b;\r\n    a=b/a;\r\n    a=a*100;\r\n    printf(\"%.3f%c\",a,c);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2011",
+        "title": "计算分数的浮点数值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 17,
+        "memory": 680,
+        "problem": {
+          "pid": "B2011",
+          "title": "计算分数的浮点数值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 127,
+        "submitTime": 1681003533,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107565875,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   double a,b,c;\r\n   cin>>a>>b;\r\n   c=a/b;\r\n   printf(\"%.9f\",c);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2010",
+        "title": "带余除法",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 772,
+        "problem": {
+          "pid": "B2010",
+          "title": "带余除法",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 124,
+        "submitTime": 1680940605,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107465145,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a,b;\r\n   cin>>a>>b;\r\n   cout<<a/b<<\" \";\r\n   cout<<a%b;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2009",
+        "title": "计算 (a+b)/c 的值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 12,
+        "memory": 872,
+        "problem": {
+          "pid": "B2009",
+          "title": "计算 (a+b)/c 的值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 113,
+        "submitTime": 1680940436,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107464196,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a,b,c;\r\n   cin>>a>>b>>c;\r\n   cout<<(a+b)/c;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2008",
+        "title": "计算 (a+b)×c 的值",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 16,
+        "memory": 856,
+        "problem": {
+          "pid": "B2008",
+          "title": "计算 (a+b)×c 的值",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 113,
+        "submitTime": 1680940400,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107463984,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a,b,c;\r\n   cin>>a>>b>>c;\r\n   cout<<(a+b)*c;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2007",
+        "title": "A + B 问题",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 12,
+        "memory": 808,
+        "problem": {
+          "pid": "B2007",
+          "title": "A + B 问题",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 104,
+        "submitTime": 1680940313,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107463536,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 4,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a,b;\r\n   cin>>a>>b;\r\n   cout<<a+b;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2006",
+        "title": "地球人口承载力估计",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "B2006",
+          "title": "地球人口承载力估计",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 149,
+        "submitTime": 1682597835,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 109052266,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<stdio.h>\r\nint main(void)\r\n{\r\n    int x,y,a,b;\r\n    scanf(\"%d%d%d%d\",&x,&a,&y,&b);\r\n    printf(\"%.2f\",1.0*(x*a-y*b)/(a-b));\r\n    return 0;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2005",
+        "title": "字符三角形",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 16,
+        "memory": 808,
+        "problem": {
+          "pid": "B2005",
+          "title": "字符三角形",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 171,
+        "submitTime": 1680940052,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107462108,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   char a;\r\n   cin>>a;\r\n   cout<<\"  \"<<a<<endl;\r\n   cout<<\" \"<<a<<a<<a<<endl;\r\n   cout<<a<<a<<a<<a<<a<<endl;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2004",
+        "title": "对齐输出",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 15,
+        "memory": 808,
+        "problem": {
+          "pid": "B2004",
+          "title": "对齐输出",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 137,
+        "submitTime": 1680939848,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107461078,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n   int a,b,c;\r\n   cin>>a>>b>>c;\r\n   printf(\"%8d%c%8d%c%8d\",a,' ',b,' ',c);\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2003",
+        "title": "输出第二个整数",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 77,
+        "memory": 812,
+        "problem": {
+          "pid": "B2003",
+          "title": "输出第二个整数",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 116,
+        "submitTime": 1680938751,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107455153,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 25,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    long long a,b,c;\r\n    cin>>a>>b>>c;\r\n    cout<<b;\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2002",
+        "title": "Hello,World!",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          353
+        ]
+      },
+      "record": {
+        "time": 3,
+        "memory": 808,
+        "problem": {
+          "pid": "B2002",
+          "title": "Hello,World!",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 88,
+        "submitTime": 1680938526,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107454021,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 1,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    cout<<\"Hello,World!\";\r\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2001",
+        "title": "入门测试题目",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": true,
+        "tags": [
+          1,
+          353
+        ]
+      },
+      "record": {
+        "time": 30,
+        "memory": 808,
+        "problem": {
+          "pid": "B2001",
+          "title": "入门测试题目",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 113,
+        "submitTime": 1680938635,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 107454582,
+        "status": 12,
+        "enableO2": false,
+        "score": 100,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 10,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    long long a,b;\r\n    cin>>a>>b;\r\n    cout<<a+b;\r\n}",
+        "_detail_requested": true
+      }
+    }
+  ],
+  "failed_items": [
+    {
+      "problem": {
+        "pid": "P5708",
+        "title": "【深基2.习2】三角形面积",
+        "difficulty": 1,
+        "type": "P",
+        "submitted": true,
+        "accepted": false
+      },
+      "record": {
+        "time": 16,
+        "memory": 808,
+        "problem": {
+          "pid": "P5708",
+          "title": "【深基2.习2】三角形面积",
+          "difficulty": 1,
+          "type": "P"
+        },
+        "sourceCodeLength": 202,
+        "submitTime": 1683957356,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 110223743,
+        "status": 14,
+        "enableO2": false,
+        "score": 0,
+        "detail": {
+          "compileResult": {
+            "success": true,
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 5,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\nusing namespace std;\nint main(){\n    int a,b,c,p=0;\n    cin>>a>>b>>c;\n    a=a+b+c;\n    p=a/2;\n    a=a-p;\n    b=b-p;\n    c=c-p;\n    p=p*a*b*c;\n    p=sqrt(p);\n    printf(\"%f\",p);\n}",
+        "_detail_requested": true
+      }
+    },
+    {
+      "problem": {
+        "pid": "B2026",
+        "title": "计算浮点数相除的余",
+        "difficulty": 1,
+        "type": "B",
+        "submitted": true,
+        "accepted": false
+      },
+      "record": {
+        "time": 0,
+        "memory": 0,
+        "problem": {
+          "pid": "B2026",
+          "title": "计算浮点数相除的余",
+          "difficulty": 1,
+          "type": "B"
+        },
+        "sourceCodeLength": 147,
+        "submitTime": 1681542692,
+        "language": 28,
+        "user": {
+          "uid": 987972,
+          "name": "123456abcAlex",
+          "avatar": "https://cdn.luogu.com.cn/upload/usericon/987972.png",
+          "slogan": "",
+          "isAdmin": false,
+          "isBanned": false,
+          "color": "Gray",
+          "ccfLevel": 0,
+          "xcpcLevel": 0,
+          "background": ""
+        },
+        "id": 108139024,
+        "status": 2,
+        "enableO2": false,
+        "detail": {
+          "compileResult": {
+            "success": false,
+            "message": "/tmp/compiler_bvx8gnrd/src: 在函数‘int main()’中:\n/tmp/compiler_bvx8gnrd/src:8:8: 错误：操作数类型‘double’和‘double’对双目‘operator%’而言无效\n    8 |     c=a%b;\n      |       ~^~\n      |       | |\n      |       | double\n      |       double\n",
+            "opt2": false
+          },
+          "judgeResult": {
+            "finishedCaseCount": 0,
+            "status": 0,
+            "time": 0,
+            "memory": 0,
+            "score": 0
+          },
+          "version": 400
+        },
+        "sourceCode": "#include<bits/stdc++.h>\r\nusing namespace std;\r\nint main(){\r\n    double b;\r\n    double a;\r\n    float c;\r\n    cin>>a>>b;\r\n    c=a%b;\r\n    cout<<c;\r\n}",
+        "_detail_requested": true
+      }
+    }
+  ],
+  "detail_fetch_stats": {
+    "total_items": 55,
+    "source_code_success": 55,
+    "summary_only": 0,
+    "detail_requested": 55,
+    "detail_skipped": 0,
+    "detail_errors": 0,
+    "pure_error_records": 0,
+    "blocker_reason": ""
+  },
+  "behavior_analysis": {
+    "total_records": 181,
+    "total_unique_problems": 55,
+    "ac_count": 63,
+    "ac_rate": 0.348,
+    "first_try_ac_rate": 0.382,
+    "ce_count": 0,
+    "ce_rate": 0.0,
+    "status_distribution": {
+      "12": 63,
+      "14": 76,
+      "2": 42
+    },
+    "hourly_distribution": {
+      "18": 17,
+      "15": 41,
+      "14": 79,
+      "13": 7,
+      "20": 7,
+      "21": 3,
+      "8": 1,
+      "17": 2,
+      "16": 3,
+      "10": 1,
+      "9": 20
+    },
+    "time_slot_distribution": {
+      "凌晨 (0-5点)": 0,
+      "早晨 (6-9点)": 21,
+      "上午 (9-12点)": 1,
+      "下午 (13-17点)": 132,
+      "傍晚 (17-20点)": 26,
+      "晚上 (20-23点)": 10
+    },
+    "peak_hour": 14,
+    "peak_hour_count": 79,
+    "weekday_distribution": {
+      "周一": 4,
+      "周二": 2,
+      "周三": 2,
+      "周四": 19,
+      "周五": 0,
+      "周六": 129,
+      "周日": 25
+    },
+    "weekend_vs_weekday": {
+      "周末": 154,
+      "工作日": 27
+    },
+    "active_days": 14,
+    "total_days_span": 132,
+    "active_rate": 0.106,
+    "max_daily_submits": 45,
+    "max_daily_date": "2023-04-08",
+    "max_consecutive_days": 4,
+    "stuck_problems": [
+      {
+        "pid": "B2026",
+        "title": "计算浮点数相除的余",
+        "submit_count": 4,
+        "final_status": "未AC"
+      }
+    ],
+    "max_submit_single_problem": {
+      "pid": "P5712",
+      "count": 13
+    },
+    "debug_patience": {
+      "median_resubmit_interval_seconds": 73.0,
+      "quick_resubmit_under_60s_rate": 0.435
+    },
+    "ac_submit_distribution": {
+      "5": 2,
+      "1": 21,
+      "6": 4,
+      "2": 9,
+      "3": 7,
+      "4": 4,
+      "13": 1,
+      "7": 3,
+      "10": 1,
+      "8": 1
+    },
+    "personality_scores": {
+      "坚韧度": 48,
+      "完美主义": 70,
+      "冒险精神": 70,
+      "自律性": 26,
+      "调试耐心": 24,
+      "作息规律": 97
+    },
+    "_source": "record_list"
+  },
+  "syllabus_evaluation": {
+    "csp_j": {
+      "details": [
+        {
+          "topic": "模拟法",
+          "ac_count": 3,
+          "level": "🟠 入门"
+        },
+        {
+          "topic": "枚举法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "贪心法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递推法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "递归法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "倍增法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "前缀和",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Flood Fill",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "背包DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "区间DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "图遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "栈",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二叉树遍历",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "哈夫曼树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BST",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "GCD",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "素数筛法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "排列组合",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杨辉三角",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "进制转换",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 28,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 1,
+        "初窥": 0,
+        "空白": 27
+      },
+      "coverage": 3.6,
+      "total_ac": 3
+    },
+    "csp_s": {
+      "details": [
+        {
+          "topic": "位集合bitset",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单调栈/队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双端队列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "ST表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "并查集",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树状数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "优先队列/堆",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "字典树Trie",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "平衡树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二分图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "强连通图",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离散化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "归并排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KMP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Manacher",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "剪枝优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "记忆化搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "启发式搜索",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "双向BFS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "迭代加深",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树形DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "状压DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "多维DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "DP优化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最小生成树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "最短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Floyd",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "拓扑排序",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单源次短路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉道路",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "同余式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "欧拉定理/函数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "费马小定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "逆元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展欧几里得",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "中国剩余定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "快速幂",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "容斥原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "卡特兰数",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "矩阵运算",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "高斯消元",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "鸽巢原理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "二项式定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "错排列/圆排列",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 50,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 50
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "provincial": {
+      "details": [
+        {
+          "topic": "匈牙利算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "网络流",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "分块",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Nim博弈/SG",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "离线处理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "可持久化线段树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "块状链表",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "随机化",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "复杂DP模型",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "构造",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 10,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 10
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "noi": {
+      "details": [
+        {
+          "topic": "后缀数组",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "后缀自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "AC自动机",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "树链剖分",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "LCT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "CDQ分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "点分治",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "虚树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FFT/NTT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "FWT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "斜率优化DP",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "四边形不等式",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "基与线性基",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Pollard-Rho",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Miller-Rabin",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "杜教筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Min_25筛",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "圆方树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "2-SAT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "差分约束",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "无源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "有源汇上下界",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "KM算法",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "一般图匹配",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "莫比乌斯反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Burnside引理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Polya定理",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "原根",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扩展BSGS",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单位根反演",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "单纯形",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "计算几何基础",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "半平面交",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "旋转卡壳",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "扫描线(几何)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "k-d树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "替罪羊树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Treap",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "Splay",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "WBLT",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "析合树",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        },
+        {
+          "topic": "笛卡尔树(高级)",
+          "ac_count": 0,
+          "level": "🔴 空白"
+        }
+      ],
+      "stats": {
+        "total": 43,
+        "精通": 0,
+        "熟练": 0,
+        "入门": 0,
+        "初窥": 0,
+        "空白": 43
+      },
+      "coverage": 0.0,
+      "total_ac": 0
+    },
+    "overall": {
+      "total_topics": 131,
+      "covered_topics": 1,
+      "coverage_rate": 0.8
+    },
+    "source": {
+      "content": "",
+      "source": "txt-cache",
+      "path": "D:\\AItrade\\luoguAI\\luogu-AI-report\\NOI大纲_Syllabus_Edition_2025.pdf.txt",
+      "full_length": 8283
+    }
+  },
+  "six_dimension_scores": {
+    "基础算法": 49,
+    "数据结构": 32,
+    "图论": 32,
+    "动态规划": 38,
+    "字符串": 26,
+    "数学": 24
+  }
+}

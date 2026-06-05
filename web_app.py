@@ -200,6 +200,38 @@ def get_rebuild_state(task_id: str) -> dict[str, str]:
     }
 
 
+def _source_cache_dir(uid: int | str) -> Path:
+    return _ROOT / ".source_cache" / str(uid)
+
+
+def _source_cache_file(uid: int | str, pid: str) -> Path:
+    safe_pid = "".join(ch for ch in str(pid or "").strip() if ch.isalnum() or ch in {"_", "-"})
+    return _source_cache_dir(uid) / f"{safe_pid or 'unknown'}.json"
+
+
+def load_cached_source_record(uid: int | str, pid: str) -> dict | None:
+    cache_file = _source_cache_file(uid, pid)
+    if not cache_file.exists():
+        return None
+    try:
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if isinstance(data, dict) and data.get("sourceCode"):
+        return data
+    return None
+
+
+def save_cached_source_record(uid: int | str, pid: str, record: dict | None) -> None:
+    if not isinstance(record, dict) or not record.get("sourceCode"):
+        return
+    cache_file = _source_cache_file(uid, pid)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(record)
+    payload["_cached_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _parse_admin_time(value: str) -> datetime:
     text = str(value or "").strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
@@ -397,7 +429,7 @@ INDEX_HTML = """
             </div>
             <div>
                 <label class="app-label block text-sm font-medium text-gray-700">OpenAI API Key（留空使用服务端默认）</label>
-                <input type="password" name="api_key" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
+                <input type="password" name="api_key" value="{{ form_values.api_key }}" class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
                 <p class="text-xs text-gray-500 mt-1">{{ server_key_hint }}</p>
             </div>
             <div>
@@ -497,12 +529,48 @@ def build_cookie_dict(form: dict) -> dict[str, str]:
     }
 
 
+RETRY_FORM_FIELDS = (
+    "client_id",
+    "uid",
+    "c3vk",
+    "api_key",
+    "base_url",
+    "model_name",
+    "student_name",
+    "school",
+    "grade",
+    "max_passed",
+    "max_failed",
+)
+
+
+def build_retry_form_snapshot(form: dict | None = None) -> dict[str, str]:
+    src = form or {}
+    return {field: str(src.get(field, "") or "") for field in RETRY_FORM_FIELDS}
+
+
+def load_retry_form_snapshot(task: dict | None) -> dict[str, str]:
+    if not isinstance(task, dict):
+        return {}
+    raw_json = str(task.get("retry_form_json", "") or "").strip()
+    if not raw_json:
+        return {}
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return build_retry_form_snapshot(payload)
+
+
 def build_form_values(form: dict | None = None) -> dict[str, str]:
     src = form or {}
     return {
         "client_id": str(src.get("client_id", "")),
         "uid": str(src.get("uid", "")),
         "c3vk": str(src.get("c3vk", "")),
+        "api_key": str(src.get("api_key", "")),
         "base_url": str(src.get("base_url", "")),
         "model_name": str(src.get("model_name", "")),
         "student_name": str(src.get("student_name", "未知选手")),
@@ -628,6 +696,7 @@ def run_generation(task_id: str, form: dict):
         source_code_success = 0
         processed = 0
         last_progress_update = 0.0
+        cached_source_hits = 0
 
         def _is_source_code_present(record_obj: object) -> bool:
             if isinstance(record_obj, dict):
@@ -643,7 +712,8 @@ def run_generation(task_id: str, form: dict):
             last_progress_update = now
             msg = (
                 f"正在拉取提交记录与代码（源码优先，速度较慢）... "
-                f"已获取源码 {source_code_success}/{source_code_total}，进度 {processed}/{source_code_total}"
+                f"已获取源码 {source_code_success}/{source_code_total}，"
+                f"其中复用缓存 {cached_source_hits} 题，进度 {processed}/{source_code_total}"
             )
             with TASKS_LOCK:
                 update_task(
@@ -656,15 +726,43 @@ def run_generation(task_id: str, form: dict):
 
         detail_fetch_state: dict[str, object] = {}
         passed_items = []
+        pending_passed_problems = []
+        pending_failed_problems = []
+
+        def _prefill_cached_records(problems: list[object], target_items: list[dict]) -> list[object]:
+            nonlocal processed, source_code_success, cached_source_hits
+            remaining = []
+            for problem in problems:
+                cached_record = load_cached_source_record(uid, getattr(problem, "pid", ""))
+                if cached_record is None:
+                    remaining.append(problem)
+                    continue
+                target_items.append({"problem": problem.to_json(), "record": cached_record})
+                processed += 1
+                cached_source_hits += 1
+                if _is_source_code_present(cached_record):
+                    source_code_success += 1
+            return remaining
+
+        pending_passed_problems = _prefill_cached_records(passed_problems, passed_items)
+        failed_items = []
+        pending_failed_problems = _prefill_cached_records(failed_problems, failed_items)
+
         with TASKS_LOCK:
             update_task(
                 task_id,
-                message="正在拉取提交记录与代码（源码优先，速度较慢）...",
+                message=(
+                    "正在拉取提交记录与代码（源码优先，速度较慢，支持缓存复用）... "
+                    f"已预载缓存 {cached_source_hits} 题源码，剩余待抓取 "
+                    f"{source_code_total - processed} 题"
+                ),
                 stage=current_stage,
-                source_code_success=0,
+                source_code_success=source_code_success,
                 source_code_total=source_code_total,
             )
-        for idx, problem in enumerate(passed_problems):
+        _maybe_update_progress(force=True)
+
+        for idx, problem in enumerate(pending_passed_problems):
             try:
                 record = _pick_record_for_problem(
                     luogu=luogu,
@@ -676,14 +774,14 @@ def run_generation(task_id: str, form: dict):
                 )
             except Exception as e:
                 record = {"error": str(e)}
+            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
             passed_items.append({"problem": problem.to_json(), "record": record})
             processed += 1
             if _is_source_code_present(record):
                 source_code_success += 1
             _maybe_update_progress()
 
-        failed_items = []
-        for idx, problem in enumerate(failed_problems):
+        for idx, problem in enumerate(pending_failed_problems):
             try:
                 record = _pick_record_for_problem(
                     luogu=luogu,
@@ -695,6 +793,7 @@ def run_generation(task_id: str, form: dict):
                 )
             except Exception as e:
                 record = {"error": str(e)}
+            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
             failed_items.append({"problem": problem.to_json(), "record": record})
             processed += 1
             if _is_source_code_present(record):
@@ -708,6 +807,7 @@ def run_generation(task_id: str, form: dict):
         if total_items > 0 and source_code_success < total_items:
             raise RuntimeError(
                 f"源码抓取未完成：成功 {source_code_success}/{total_items}。"
+                f"本次已复用缓存 {cached_source_hits} 题源码。"
                 f"已放慢抓取速度并提高重试，仍有缺失。"
                 f"请重新获取同一会话下的 __client_id、_uid、C3VK 后重试；"
                 f"必要时降低题量（max_passed/max_failed）以提高稳定性。"
@@ -863,10 +963,18 @@ def validate_cookies_page():
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    form_data = request.form.to_dict()
     task_id = str(uuid.uuid4())
     with TASKS_LOCK:
         insert_task(task_id, status="queued", message="排队中...")
-    thread = threading.Thread(target=run_generation, args=(task_id, request.form.to_dict()), daemon=True)
+        update_task(
+            task_id,
+            student_name=str(form_data.get("student_name", "未知选手") or "未知选手").strip(),
+            school=str(form_data.get("school", "未知学校") or "未知学校").strip(),
+            grade=str(form_data.get("grade", "未知年级") or "未知年级").strip(),
+            retry_form_json=json.dumps(build_retry_form_snapshot(form_data), ensure_ascii=False),
+        )
+    thread = threading.Thread(target=run_generation, args=(task_id, form_data), daemon=True)
     register_active_generation_task(task_id, thread)
     thread.start()
     return redirect(url_for("status_page", task_id=task_id))
@@ -920,7 +1028,7 @@ STATUS_HTML = """
             <a href="{{ md }}" target="_blank" class="block w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 transition">查看 Markdown 原文</a>
         </div>
         {% elif status == 'error' %}
-        <a href="/" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition mt-4">返回重试</a>
+        <a href="{{ retry_url }}" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition mt-4">返回重试</a>
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新...</p>
         {% endif %}
@@ -948,7 +1056,17 @@ def status_page(task_id):
         html=task.get("html", ""),
         pdf=_download_report_url(pdf_url),
         md=task.get("md", ""),
+        retry_url=url_for("retry_task", task_id=task_id),
     )
+
+
+@app.route("/retry/<task_id>")
+def retry_task(task_id):
+    task = get_task(task_id)
+    snapshot = load_retry_form_snapshot(task)
+    if not snapshot:
+        return redirect("/")
+    return render_index(form=snapshot)
 
 
 @app.route("/reports/<path:filename>")
