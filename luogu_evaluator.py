@@ -1384,15 +1384,62 @@ def load_or_prompt_cookies():
         
     return cookies
 
-def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, model_name: str) -> str:
+def _trim_to_safe_boundary(text: str | None) -> str:
+    """把已生成的 partial 文本修剪到最后一个完整行，避免把半句话喂给模型续写。"""
+    if not text:
+        return ""
+    text = text.rstrip()
+    if not text:
+        return ""
+    # 优先尝试切到最后一个 "## " / "### " 之类的二级标题处，作为天然分段点
+    boundary_candidates: list[int] = []
+    for marker in ("\n## ", "\n### ", "\n#### "):
+        idx = text.rfind(marker)
+        if idx > 0:
+            boundary_candidates.append(idx + 1)  # +1 保留换行符
+    # 退化到最后一个换行
+    last_newline = text.rfind("\n")
+    if last_newline > 0:
+        boundary_candidates.append(last_newline + 1)
+    if not boundary_candidates:
+        return text
+    cut = max(boundary_candidates)
+    # 至少要保留 80% 内容，否则保守地只切到最后一个换行
+    if cut < int(len(text) * 0.2):
+        return text
+    return text[:cut].rstrip() + "\n"
+
+
+def generate_ai_report(
+    export_data: dict,
+    api_key: str,
+    base_url: str | None,
+    model_name: str,
+    *,
+    output_path: str | None = None,
+    resume_prefix: str | None = None,
+) -> str:
+    """生成 AI Markdown 报告。
+
+    Args:
+        export_data: 选手数据导出结构
+        api_key: OpenAI 兼容 API Key
+        base_url: 可选的第三方 Base URL
+        model_name: 模型名
+        output_path: 若提供，token 会以流式增量写入该文件，断连时 partial 留在文件里
+        resume_prefix: 若提供，作为"已生成的开头"喂给模型，要求其直接续写
+    """
     from syllabus_matcher import format_syllabus_report, load_syllabus_context
 
     repair_behavior_analysis_from_items(export_data)
 
-    client_kwargs = {"api_key": api_key}
+    client_kwargs = {
+        "api_key": api_key,
+        "timeout": 1800.0,  # 30 分钟读超时，避免大报告被中途断开
+    }
     if base_url:
         client_kwargs["base_url"] = base_url
-        
+
     client = OpenAI(**client_kwargs)
     
     solved_count = export_data.get("solved_count", 0)
@@ -1574,15 +1621,74 @@ def generate_ai_report(export_data: dict, api_key: str, base_url: str | None, mo
       e) 最终正解的推导与核心代码结构。
       f) **推荐同类题**：推荐 1-2 道涉及相同考点或技巧的洛谷题目（标明题号和简要推荐理由）。
  """
-    
+
+    # 续写模式：在 prompt 末尾追加"已有开头，直接续写"指令
+    if resume_prefix:
+        trimmed_prefix = _trim_to_safe_boundary(resume_prefix)
+        if trimmed_prefix:
+            prompt = prompt + f"""
+
+---
+
+### 续写模式（重要）
+以下是**已经生成的开头**（可能因网络中断/超时而中止），请你**直接从该前缀的下一个字符开始续写剩余部分**：
+- **不要重复输出已有内容**（前缀已包含的内容一律不要再写一遍）
+- **不要写"以下是..."、"好的"、"我继续"等开场白或导语**
+- 保持与已有内容**完全一致**的 Markdown 风格、章节顺序、视觉元素（星级、徽章等）
+- 如果你认为已有内容已经基本完整，请**直接输出 `===REPORT_COMPLETE===`** 单独一行作为收尾
+
+[已生成内容开始]
+{trimmed_prefix}
+[已生成内容结束]
+"""
+
+    system_prompt = (
+        "你是顶级算法竞赛教练，极其擅长引导学生通过“暴力-观察-优化”的过程推导正解，"
+        "且熟悉各种算法训练框架。"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+
+    if output_path:
+        # 流式生成：把 token 实时写盘，断连时 partial 会留在文件里
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        initial_content = _trim_to_safe_boundary(resume_prefix) if resume_prefix else ""
+        collected_chunks: list[str] = []
+        with open(output_path, "w", encoding="utf-8") as f:
+            if initial_content:
+                f.write(initial_content)
+                f.flush()
+            try:
+                stream = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    stream=True,
+                    timeout=1800.0,
+                )
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        piece = chunk.choices[0].delta.content
+                        collected_chunks.append(piece)
+                        f.write(piece)
+                        f.flush()
+            except Exception:
+                # 不吞异常：让上层 retry 捕获，但 partial 已经在文件里
+                raise
+        # 流式成功后做一次归一化（替换 AI 编的 ASCII 表/难度名/日期等），再覆盖回文件
+        full_raw = initial_content + "".join(collected_chunks)
+        normalized = normalize_report_markdown(full_raw, export_data)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(normalized)
+        return normalized
+
+    # 非流式：保持旧行为，方便 CLI 单独跑测
     response = client.chat.completions.create(
         model=model_name, # 使用用户指定的模型
-        messages=[
-            {"role": "system", "content": "你是顶级算法竞赛教练，极其擅长引导学生通过“暴力-观察-优化”的过程推导正解，且熟悉各种算法训练框架。"},
-            {"role": "user", "content": prompt}
-        ]
+        messages=messages,
+        timeout=1800.0,
     )
-
     content = response.choices[0].message.content or ""
     return normalize_report_markdown(content, export_data)
 

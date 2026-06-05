@@ -713,6 +713,7 @@ def _generate_ai_report_artifacts(
     student_name: str,
     school: str,
     grade: str,
+    resume_md_prefix: str | None = None,
 ) -> None:
     current_stage = "生成 AI 报告"
     with TASKS_LOCK:
@@ -721,7 +722,11 @@ def _generate_ai_report_artifacts(
             stage=current_stage,
             ai_progress=1,
             ai_elapsed_seconds=0,
-            message=f"正在调用 {model_name} 生成 AI 报告，请耐心等待...",
+            message=(
+                f"正在调用 {model_name} 生成 AI 报告（流式写入，断连可自动续写）..."
+                if not resume_md_prefix
+                else f"正在续写 AI 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
+            ),
         )
     if not str(api_key or "").strip():
         raise ValueError("未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。")
@@ -730,26 +735,49 @@ def _generate_ai_report_artifacts(
         "report_md": None,
         "exc": None,
         "attempt": 1,
-        "status_message": f"正在调用 {model_name} 生成 AI 报告，请耐心等待...",
+        "status_message": (
+            f"正在调用 {model_name} 生成 AI 报告（流式写入，断连可自动续写）..."
+            if not resume_md_prefix
+            else f"正在续写 AI 报告（已加载 {len(resume_md_prefix)} 字符前置内容）..."
+        ),
     }
 
     def _run_ai():
         attempt = 1
+        # 当前 effective 的续写前缀：第 1 次用入参给的，后面会读 partial 接力
+        current_resume = resume_md_prefix or ""
         while attempt <= AI_GENERATION_MAX_RETRIES:
             ai_holder["attempt"] = attempt
             ai_holder["status_message"] = (
-                f"正在调用 {model_name} 生成 AI 报告（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次）..."
+                f"正在调用 {model_name} 生成 AI 报告（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次）"
+                + (f" [续写 {len(current_resume)} 字符]" if current_resume else "")
             )
             try:
-                ai_holder["report_md"] = generate_ai_report(export_data, api_key, base_url, model_name)
+                ai_holder["report_md"] = generate_ai_report(
+                    export_data,
+                    api_key,
+                    base_url,
+                    model_name,
+                    output_path=str(md_path),
+                    resume_prefix=current_resume or None,
+                )
                 ai_holder["exc"] = None
                 break
             except Exception as exc:
                 ai_holder["exc"] = exc
+                # 失败时尝试从 md_path 读取这一轮写下的 partial，作为下一轮续写前缀
+                try:
+                    if md_path.exists() and md_path.is_file():
+                        partial = md_path.read_text(encoding="utf-8")
+                        if partial and partial.strip():
+                            current_resume = partial
+                except Exception:
+                    pass
                 if (attempt >= AI_GENERATION_MAX_RETRIES) or (not _is_retryable_ai_error(exc)):
                     break
                 ai_holder["status_message"] = (
                     f"AI 接口暂时不可用，正在等待后自动重试（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次失败）：{exc}"
+                    + (f" [已有 {len(current_resume)} 字符可续写]" if current_resume else "")
                 )
                 time.sleep(AI_GENERATION_RETRY_SLEEP_SECONDS * attempt)
                 attempt += 1
@@ -783,21 +811,27 @@ def _generate_ai_report_artifacts(
     if ai_holder.get("exc") is not None:
         raise ai_holder["exc"]  # type: ignore[misc]
     report_md = str(ai_holder.get("report_md") or "")
+    # 兼容旧路径：若 generate_ai_report 没有 output_path，则这里补写一次
+    if report_md and not (md_path.exists() and md_path.stat().st_size > 0):
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(report_md)
+    else:
+        # 新路径：流式写盘后，优先以文件内容为准（保证后续阶段读到的就是磁盘上的最终归一化结果）
+        try:
+            report_md = md_path.read_text(encoding="utf-8") or report_md
+        except Exception:
+            pass
+
     with TASKS_LOCK:
         update_task(
             task_id,
             stage=current_stage,
             ai_progress=100,
             ai_elapsed_seconds=int(time.time() - ai_start),
-            message=f"AI 报告已生成（{api_key_source}），正在写入文件...",
+            message=f"AI 报告已生成（{api_key_source}），正在生成图表与 HTML/PDF...",
         )
 
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write(report_md)
-
     current_stage = "生成图表与 HTML/PDF"
-    with TASKS_LOCK:
-        update_task(task_id, stage=current_stage, message="正在生成图表与 HTML/PDF...")
     chart_paths = generate_chart_images(export_data, str(assets_dir))
     build_html_and_pdf(report_md, export_data, str(html_path), str(pdf_path), chart_paths)
 
@@ -884,6 +918,20 @@ def run_generation(task_id: str, form: dict):
         if resume_export_data is not None:
             current_stage = "恢复 AI 阶段数据"
             source_code_success, source_code_total = _resolve_source_code_progress(resume_export_data)
+
+            # 尝试从上次任务读取 AI 报告的 partial 内容（如果有的话），用作本次的续写前缀
+            resume_md_prefix = ""
+            try:
+                if isinstance(resume_task, dict):
+                    prev_report_dir = _resolve_task_report_dir(resume_task)
+                    prev_md = prev_report_dir / "report.md"
+                    if prev_md.exists() and prev_md.is_file() and prev_md.stat().st_size > 200:
+                        prev_text = prev_md.read_text(encoding="utf-8")
+                        if prev_text and prev_text.strip():
+                            resume_md_prefix = prev_text
+            except Exception:
+                resume_md_prefix = ""
+
             with TASKS_LOCK:
                 update_task(
                     task_id,
@@ -892,7 +940,11 @@ def run_generation(task_id: str, form: dict):
                     source_code_total=source_code_total,
                     message=(
                         f"检测到任务 {resume_task_id[:8]} 已完成前置数据准备，"
-                        "正在跳过洛谷抓取并直接续跑 AI 报告..."
+                        + (
+                            f"上次 AI 已生成 {len(resume_md_prefix)} 字符，将自动续写..."
+                            if resume_md_prefix
+                            else "正在跳过洛谷抓取并直接续跑 AI 报告..."
+                        )
                     ),
                     student_name=student_name,
                     school=school,
@@ -915,6 +967,7 @@ def run_generation(task_id: str, form: dict):
                 student_name=student_name,
                 school=school,
                 grade=grade,
+                resume_md_prefix=resume_md_prefix or None,
             )
             return
 
@@ -1135,8 +1188,19 @@ def run_generation(task_id: str, form: dict):
             grade=grade,
         )
     except Exception as e:
+        # 用 task 表里最新写入的 stage 替换外层缓存的 current_stage，
+        # 避免出现 "[阶段: 恢复 AI 阶段数据] Connection error." 这种阶段名滞后的问题
+        try:
+            latest_task = get_task(task_id) or {}
+            latest_stage = str(latest_task.get("stage") or current_stage or "")
+        except Exception:
+            latest_stage = current_stage
         with TASKS_LOCK:
-            update_task(task_id, status="error", message=describe_generation_error(e, current_stage))
+            update_task(
+                task_id,
+                status="error",
+                message=describe_generation_error(e, latest_stage),
+            )
     finally:
         unregister_active_generation_task(task_id)
 
