@@ -35,6 +35,7 @@ class TestWebAppTemplate(unittest.TestCase):
         self.assertIn("ADMIN_USERNAME", content)
         self.assertIn("ADMIN_PASSWORD", content)
         self.assertIn('/retry/<task_id>', content)
+        self.assertIn('name="resume_task_id"', content)
 
     def test_report_template_includes_detail_fetch_overview_cards(self):
         root = Path(__file__).resolve().parents[1]
@@ -433,7 +434,8 @@ class TestWebAppTemplate(unittest.TestCase):
                 finally:
                     os.chdir(cwd_before)
 
-                self.assertEqual(result, task["html"])
+                self.assertTrue(result.startswith(task["html"]))
+                self.assertIn("?v=", result)
                 self.assertEqual(captured["export_pdf"], False)
                 self.assertTrue(str(captured["html_path"]).endswith("report.html"))
                 self.assertEqual(updates["message"], "已重建 HTML 报告")
@@ -866,7 +868,8 @@ class TestWebAppTemplate(unittest.TestCase):
                 "max_passed": "5000",
                 "max_failed": "1000",
             }
-            web_app.get_task = lambda task_id: {"retry_form_json": json.dumps(saved, ensure_ascii=False)}
+            web_app.get_task = lambda task_id: {"task_id": task_id, "retry_form_json": json.dumps(saved, ensure_ascii=False)}
+            web_app.can_resume_from_ai_stage = lambda task: True
             web_app.render_index = lambda form=None, validation_result=None: {"form": form, "validation_result": validation_result}
 
             result = web_app.retry_task("task-1")
@@ -875,6 +878,226 @@ class TestWebAppTemplate(unittest.TestCase):
             self.assertEqual(result["form"]["c3vk"], "vk")
             self.assertEqual(result["form"]["api_key"], "sk-test")
             self.assertEqual(result["form"]["student_name"], "张三")
+            self.assertEqual(result["form"]["resume_task_id"], "task-1")
+        finally:
+            sys.modules.pop("web_app", None)
+            if original_web_app is not None:
+                sys.modules["web_app"] = original_web_app
+            if original_flask is not None:
+                sys.modules["flask"] = original_flask
+            else:
+                sys.modules.pop("flask", None)
+
+    def test_connection_error_is_retryable_for_ai_generation(self):
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+        flask = types.ModuleType("flask")
+
+        class DummyFlask:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def route(self, *args, **kwargs):
+                def deco(fn):
+                    return fn
+                return deco
+
+        flask.Flask = DummyFlask
+        flask.render_template_string = lambda *args, **kwargs: ""
+        flask.request = types.SimpleNamespace(form={}, args={}, path="/", method="GET")
+        flask.redirect = lambda value: value
+        flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
+        flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+
+        original_flask = sys.modules.get("flask")
+        original_web_app = sys.modules.pop("web_app", None)
+        sys.modules["flask"] = flask
+        try:
+            web_app = importlib.import_module("web_app")
+            self.assertTrue(web_app._is_retryable_ai_error(Exception("Connection error.")))
+            msg = web_app.describe_generation_error(Exception("Connection error."), "生成 AI 报告")
+            self.assertIn("AI 接口连接失败", msg)
+        finally:
+            sys.modules.pop("web_app", None)
+            if original_web_app is not None:
+                sys.modules["web_app"] = original_web_app
+            if original_flask is not None:
+                sys.modules["flask"] = original_flask
+            else:
+                sys.modules.pop("flask", None)
+
+    def test_load_resume_export_data_finds_report_dir_by_task_prefix(self):
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+        flask = types.ModuleType("flask")
+
+        class DummyFlask:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def route(self, *args, **kwargs):
+                def deco(fn):
+                    return fn
+                return deco
+
+        flask.Flask = DummyFlask
+        flask.render_template_string = lambda *args, **kwargs: ""
+        flask.request = types.SimpleNamespace(form={}, args={}, path="/", method="GET")
+        flask.redirect = lambda value: value
+        flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
+        flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+
+        original_flask = sys.modules.get("flask")
+        original_web_app = sys.modules.pop("web_app", None)
+        sys.modules["flask"] = flask
+        try:
+            web_app = importlib.import_module("web_app")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                temp_root = Path(tmpdir)
+                report_dir = temp_root / "reports" / "12345678_张三"
+                report_dir.mkdir(parents=True, exist_ok=True)
+                export_payload = {"student_info": {"name": "张三"}, "solved_count": 5}
+                (report_dir / "export_data.json").write_text(
+                    json.dumps(export_payload, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                original_root = web_app._ROOT
+                original_get_task = web_app.get_task
+                web_app._ROOT = temp_root
+                web_app.get_task = lambda task_id: {
+                    "task_id": "12345678-abcd",
+                    "status": "error",
+                    "student_name": "张三",
+                    "html": "",
+                    "md": "",
+                    "pdf": "",
+                }
+                try:
+                    export_data, task = web_app.load_resume_export_data("12345678-abcd")
+                finally:
+                    web_app._ROOT = original_root
+                    web_app.get_task = original_get_task
+
+                self.assertEqual(export_data["student_info"]["name"], "张三")
+                self.assertEqual(task["task_id"], "12345678-abcd")
+        finally:
+            sys.modules.pop("web_app", None)
+            if original_web_app is not None:
+                sys.modules["web_app"] = original_web_app
+            if original_flask is not None:
+                sys.modules["flask"] = original_flask
+            else:
+                sys.modules.pop("flask", None)
+
+    def test_run_generation_resumes_from_ai_stage_without_refetching_luogu(self):
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+
+        flask = types.ModuleType("flask")
+
+        class DummyFlask:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def route(self, *args, **kwargs):
+                def deco(fn):
+                    return fn
+                return deco
+
+        flask.Flask = DummyFlask
+        flask.render_template_string = lambda *args, **kwargs: ""
+        flask.request = types.SimpleNamespace(form={}, args={}, path="/", method="GET")
+        flask.redirect = lambda value: value
+        flask.url_for = lambda endpoint, **kwargs: f"/{endpoint}"
+        flask.send_from_directory = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.send_file = lambda *args, **kwargs: types.SimpleNamespace(headers={})
+        flask.session = {}
+
+        original_flask = sys.modules.get("flask")
+        original_web_app = sys.modules.pop("web_app", None)
+        sys.modules["flask"] = flask
+        try:
+            web_app = importlib.import_module("web_app")
+            export_data = {
+                "student_info": {
+                    "name": "张三",
+                    "school": "实验学校",
+                    "grade": "六年级",
+                    "eval_time": "2026-06-05 10:00",
+                },
+                "solved_count": 8,
+                "failed_count": 2,
+                "detail_fetch_stats": {"total_items": 10, "source_code_success": 10},
+            }
+            updates = []
+            built = {}
+            temp_root = Path(tempfile.mkdtemp())
+            cwd_before = Path.cwd()
+            original_root = web_app._ROOT
+            original_load_resume_export_data = web_app.load_resume_export_data
+            original_update_task = web_app.update_task
+            original_unregister = web_app.unregister_active_generation_task
+            original_generate_ai_report = web_app.generate_ai_report
+            original_generate_chart_images = web_app.generate_chart_images
+            original_build_html_and_pdf = web_app.build_html_and_pdf
+            original_cookies_ctor = web_app.pyLuogu.LuoguCookies
+            original_luogu_api = web_app.pyLuogu.luoguAPI
+            try:
+                web_app._ROOT = temp_root
+                os.chdir(temp_root)
+                web_app.load_resume_export_data = lambda task_id: (export_data, {"task_id": task_id})
+                web_app.update_task = lambda task_id, **kwargs: updates.append(kwargs)
+                web_app.unregister_active_generation_task = lambda task_id: None
+                web_app.generate_ai_report = lambda data, api_key, base_url, model_name: "# AI Report"
+                web_app.generate_chart_images = lambda data, assets_dir: {"difficulty": str(Path(assets_dir) / "difficulty.png")}
+
+                def fake_build_html_and_pdf(report_md, data, html_path, pdf_path, chart_paths):
+                    Path(html_path).write_text("<html>ok</html>", encoding="utf-8")
+                    Path(pdf_path).write_text("pdf", encoding="utf-8")
+                    built["chart_paths"] = chart_paths
+
+                web_app.build_html_and_pdf = fake_build_html_and_pdf
+                web_app.pyLuogu.LuoguCookies = lambda form: (_ for _ in ()).throw(AssertionError("should not build cookies"))
+                web_app.pyLuogu.luoguAPI = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call luogu api"))
+
+                web_app.run_generation(
+                    "task-new-1234",
+                    {
+                        "resume_task_id": "task-old-5678",
+                        "student_name": "张三",
+                        "school": "实验学校",
+                        "grade": "六年级",
+                        "api_key": "sk-test",
+                        "base_url": "https://example.com/v1",
+                        "model_name": "gpt-test",
+                    },
+                )
+            finally:
+                os.chdir(cwd_before)
+                web_app._ROOT = original_root
+                web_app.load_resume_export_data = original_load_resume_export_data
+                web_app.update_task = original_update_task
+                web_app.unregister_active_generation_task = original_unregister
+                web_app.generate_ai_report = original_generate_ai_report
+                web_app.generate_chart_images = original_generate_chart_images
+                web_app.build_html_and_pdf = original_build_html_and_pdf
+                web_app.pyLuogu.LuoguCookies = original_cookies_ctor
+                web_app.pyLuogu.luoguAPI = original_luogu_api
+                import shutil
+                shutil.rmtree(temp_root, ignore_errors=True)
+
+            self.assertTrue(any("直接续跑 AI 报告" in str(item.get("message", "")) for item in updates))
+            self.assertTrue(any(item.get("status") == "done" for item in updates))
+            self.assertIn("difficulty", built["chart_paths"])
         finally:
             sys.modules.pop("web_app", None)
             if original_web_app is not None:

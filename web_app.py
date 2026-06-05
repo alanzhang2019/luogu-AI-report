@@ -7,6 +7,7 @@ import hmac
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
+from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
     from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session
 except ImportError:
@@ -81,6 +82,8 @@ REBUILD_TASKS_LOCK = threading.Lock()
 REBUILD_TASKS: dict[str, dict[str, str]] = {}
 ACTIVE_GENERATION_TASKS_LOCK = threading.Lock()
 ACTIVE_GENERATION_TASKS: dict[str, threading.Thread] = {}
+AI_GENERATION_MAX_RETRIES = 4
+AI_GENERATION_RETRY_SLEEP_SECONDS = 12
 
 
 def get_admin_credentials() -> tuple[str, str]:
@@ -330,6 +333,8 @@ def describe_generation_error(exc: Exception, stage: str) -> str:
         return stage_prefix + f"访问被拒绝：{exc}"
     if isinstance(exc, RequestError):
         return stage_prefix + str(exc)
+    if _is_retryable_ai_error(exc) and stage == "生成 AI 报告":
+        return stage_prefix + f"AI 接口连接失败：{exc}。可直接点“返回重试”，系统会自动回填参数；同时已加入自动重试，短时网络抖动会自行恢复。"
     if "missing credentials" in message_lower and stage == "生成 AI 报告":
         return stage_prefix + "未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。"
     return stage_prefix + str(exc)
@@ -344,6 +349,30 @@ def resolve_openai_api_key(form: dict) -> tuple[str, str]:
         if env_value:
             return env_value, f"env:{env_name}"
     return "", "missing"
+
+
+def _is_retryable_ai_error(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError, OpenAIRateLimitError)):
+        return True
+    if isinstance(exc, APIError):
+        status_code = getattr(exc, "status_code", None)
+        if status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
+            return True
+    message = str(exc or "").strip().lower()
+    retryable_keywords = (
+        "connection error",
+        "api connection error",
+        "timed out",
+        "timeout",
+        "connection",
+        "temporarily unavailable",
+        "rate limit",
+        "server error",
+        "502",
+        "503",
+        "504",
+    )
+    return any(keyword in message for keyword in retryable_keywords)
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -403,6 +432,7 @@ INDEX_HTML = """
             </ol>
         </div>
         <form action="/generate" method="post" class="space-y-4">
+            <input type="hidden" name="resume_task_id" value="{{ form_values.resume_task_id }}">
             <div>
                 <label class="app-label block text-sm font-medium text-gray-700">__client_id</label>
                 <input type="text" name="client_id" value="{{ form_values.client_id }}" required class="app-input mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2">
@@ -564,6 +594,36 @@ def load_retry_form_snapshot(task: dict | None) -> dict[str, str]:
     return build_retry_form_snapshot(payload)
 
 
+def can_resume_from_ai_stage(task: dict | None) -> bool:
+    if not isinstance(task, dict):
+        return False
+    if str(task.get("status", "") or "") == "done":
+        return False
+    try:
+        report_dir = _resolve_task_report_dir(task)
+    except Exception:
+        return False
+    return (report_dir / "export_data.json").exists()
+
+
+def load_resume_export_data(task_id: str) -> tuple[dict | None, dict | None]:
+    resume_task_id = str(task_id or "").strip()
+    if not resume_task_id:
+        return None, None
+    task = get_task(resume_task_id)
+    if not can_resume_from_ai_stage(task):
+        return None, task
+    try:
+        report_dir = _resolve_task_report_dir(task)
+        export_json_path = report_dir / "export_data.json"
+        export_data = json.loads(export_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, task
+    if not isinstance(export_data, dict):
+        return None, task
+    return export_data, task
+
+
 def build_form_values(form: dict | None = None) -> dict[str, str]:
     src = form or {}
     return {
@@ -578,6 +638,7 @@ def build_form_values(form: dict | None = None) -> dict[str, str]:
         "grade": str(src.get("grade", "未知年级")),
         "max_passed": str(src.get("max_passed", "5000")),
         "max_failed": str(src.get("max_failed", "1000")),
+        "resume_task_id": str(src.get("resume_task_id", "")),
     }
 
 
@@ -593,6 +654,169 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
         validation_result=validation_result,
         server_key_hint=server_key_hint,
     )
+
+
+def _resolve_source_code_progress(export_data: dict | None) -> tuple[int, int]:
+    if not isinstance(export_data, dict):
+        return 0, 0
+    detail_fetch_stats = export_data.get("detail_fetch_stats", {})
+    if isinstance(detail_fetch_stats, dict):
+        total_items = int(detail_fetch_stats.get("total_items") or 0)
+        source_code_success = int(detail_fetch_stats.get("source_code_success") or 0)
+        if total_items > 0:
+            if source_code_success <= 0:
+                source_code_success = total_items
+            return source_code_success, total_items
+
+    passed_items = export_data.get("passed_items", [])
+    failed_items = export_data.get("failed_items", [])
+    total_items = len(passed_items) + len(failed_items)
+    if total_items <= 0:
+        return 0, 0
+    return total_items, total_items
+
+
+def _build_report_paths(task_id: str, student_name: str) -> tuple[Path, Path, Path, Path, Path]:
+    safe_name = "".join(c for c in student_name if c.isalnum() or c in "_-").strip() or "unknown"
+    folder_name = f"{task_id[:8]}_{safe_name}"
+    out_dir = Path("reports") / folder_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir = out_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    return (
+        out_dir,
+        assets_dir,
+        out_dir / "report.md",
+        out_dir / "report.html",
+        out_dir / "report.pdf",
+    )
+
+
+def _write_export_data_json(out_dir: Path, export_data: dict) -> Path:
+    export_json_path = out_dir / "export_data.json"
+    with open(export_json_path, "w", encoding="utf-8") as f:
+        json.dump(export_data, f, ensure_ascii=False, indent=2)
+    return export_json_path
+
+
+def _generate_ai_report_artifacts(
+    task_id: str,
+    export_data: dict,
+    api_key: str,
+    api_key_source: str,
+    base_url: str | None,
+    model_name: str,
+    md_path: Path,
+    html_path: Path,
+    pdf_path: Path,
+    assets_dir: Path,
+    student_name: str,
+    school: str,
+    grade: str,
+) -> None:
+    current_stage = "生成 AI 报告"
+    with TASKS_LOCK:
+        update_task(
+            task_id,
+            stage=current_stage,
+            ai_progress=1,
+            ai_elapsed_seconds=0,
+            message=f"正在调用 {model_name} 生成 AI 报告，请耐心等待...",
+        )
+    if not str(api_key or "").strip():
+        raise ValueError("未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。")
+    ai_holder: dict[str, object] = {
+        "done": False,
+        "report_md": None,
+        "exc": None,
+        "attempt": 1,
+        "status_message": f"正在调用 {model_name} 生成 AI 报告，请耐心等待...",
+    }
+
+    def _run_ai():
+        attempt = 1
+        while attempt <= AI_GENERATION_MAX_RETRIES:
+            ai_holder["attempt"] = attempt
+            ai_holder["status_message"] = (
+                f"正在调用 {model_name} 生成 AI 报告（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次）..."
+            )
+            try:
+                ai_holder["report_md"] = generate_ai_report(export_data, api_key, base_url, model_name)
+                ai_holder["exc"] = None
+                break
+            except Exception as exc:
+                ai_holder["exc"] = exc
+                if (attempt >= AI_GENERATION_MAX_RETRIES) or (not _is_retryable_ai_error(exc)):
+                    break
+                ai_holder["status_message"] = (
+                    f"AI 接口暂时不可用，正在等待后自动重试（第 {attempt}/{AI_GENERATION_MAX_RETRIES} 次失败）：{exc}"
+                )
+                time.sleep(AI_GENERATION_RETRY_SLEEP_SECONDS * attempt)
+                attempt += 1
+                continue
+        ai_holder["done"] = True
+
+    ai_thread = threading.Thread(target=_run_ai, daemon=True)
+    ai_thread.start()
+    ai_start = time.time()
+    last_update = 0.0
+    ai_progress = 1
+    while ai_thread.is_alive():
+        elapsed = int(time.time() - ai_start)
+        ai_progress = min(95, max(ai_progress, min(95, elapsed * 3)))
+        if (time.time() - last_update) >= 3.0:
+            last_update = time.time()
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    stage=current_stage,
+                    ai_progress=int(ai_progress),
+                    ai_elapsed_seconds=int(elapsed),
+                    message=(
+                        f"{str(ai_holder.get('status_message') or f'正在调用 {model_name} 生成 AI 报告...')} "
+                        f"({api_key_source}) 已等待 {elapsed}s"
+                    ),
+                )
+        time.sleep(1)
+
+    ai_thread.join(timeout=0.1)
+    if ai_holder.get("exc") is not None:
+        raise ai_holder["exc"]  # type: ignore[misc]
+    report_md = str(ai_holder.get("report_md") or "")
+    with TASKS_LOCK:
+        update_task(
+            task_id,
+            stage=current_stage,
+            ai_progress=100,
+            ai_elapsed_seconds=int(time.time() - ai_start),
+            message=f"AI 报告已生成（{api_key_source}），正在写入文件...",
+        )
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(report_md)
+
+    current_stage = "生成图表与 HTML/PDF"
+    with TASKS_LOCK:
+        update_task(task_id, stage=current_stage, message="正在生成图表与 HTML/PDF...")
+    chart_paths = generate_chart_images(export_data, str(assets_dir))
+    build_html_and_pdf(report_md, export_data, str(html_path), str(pdf_path), chart_paths)
+
+    eval_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with TASKS_LOCK:
+        update_task(
+            task_id,
+            status="done",
+            message="报告生成完成",
+            html=_report_url(html_path),
+            pdf=_report_url(pdf_path),
+            md=_report_url(md_path),
+            student_name=student_name,
+            school=school,
+            grade=grade,
+            solved_count=int(export_data.get("solved_count") or 0),
+            failed_count=int(export_data.get("failed_count") or 0),
+            eval_time=eval_time,
+        )
 
 
 def validate_cookies(form: dict) -> dict[str, object]:
@@ -638,9 +862,6 @@ def run_generation(task_id: str, form: dict):
         with TASKS_LOCK:
             update_task(task_id, status="running", message="正在连接洛谷 API...")
 
-        current_stage = "构造 Cookies"
-        cookies = pyLuogu.LuoguCookies(build_cookie_dict(form))
-
         api_key, api_key_source = resolve_openai_api_key(form)
         base_url = form.get("base_url", "").strip() or DEFAULT_BASE_URL or os.environ.get("OPENAI_BASE_URL", "") or None
         model_name = form.get("model_name", "").strip() or DEFAULT_MODEL_NAME or os.environ.get("OPENAI_MODEL_NAME", "") or "gpt-4o"
@@ -649,18 +870,56 @@ def run_generation(task_id: str, form: dict):
         student_name = form.get("student_name", "未知选手").strip()
         school = form.get("school", "未知学校").strip()
         grade = form.get("grade", "未知年级").strip()
+        resume_task_id = str(form.get("resume_task_id", "") or "").strip()
+        resume_export_data, resume_task = load_resume_export_data(resume_task_id)
+        if resume_export_data is not None:
+            student_info = resume_export_data.get("student_info", {})
+            if isinstance(student_info, dict):
+                student_name = str(student_info.get("name") or student_name or "未知选手").strip()
+                school = str(student_info.get("school") or school or "未知学校").strip()
+                grade = str(student_info.get("grade") or grade or "未知年级").strip()
 
-        # 文件夹命名：编号+学生姓名
-        safe_name = "".join(c for c in student_name if c.isalnum() or c in "_-").strip() or "unknown"
-        folder_name = f"{task_id[:8]}_{safe_name}"
-        out_dir = Path("reports") / folder_name
-        out_dir.mkdir(parents=True, exist_ok=True)
-        assets_dir = out_dir / "assets"
-        assets_dir.mkdir(parents=True, exist_ok=True)
+        out_dir, assets_dir, md_path, html_path, pdf_path = _build_report_paths(task_id, student_name)
 
-        md_path = out_dir / "report.md"
-        html_path = out_dir / "report.html"
-        pdf_path = out_dir / "report.pdf"
+        if resume_export_data is not None:
+            current_stage = "恢复 AI 阶段数据"
+            source_code_success, source_code_total = _resolve_source_code_progress(resume_export_data)
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    stage=current_stage,
+                    source_code_success=source_code_success,
+                    source_code_total=source_code_total,
+                    message=(
+                        f"检测到任务 {resume_task_id[:8]} 已完成前置数据准备，"
+                        "正在跳过洛谷抓取并直接续跑 AI 报告..."
+                    ),
+                    student_name=student_name,
+                    school=school,
+                    grade=grade,
+                    solved_count=int(resume_export_data.get("solved_count") or 0),
+                    failed_count=int(resume_export_data.get("failed_count") or 0),
+                )
+            _write_export_data_json(out_dir, resume_export_data)
+            _generate_ai_report_artifacts(
+                task_id=task_id,
+                export_data=resume_export_data,
+                api_key=api_key,
+                api_key_source=api_key_source,
+                base_url=base_url,
+                model_name=model_name,
+                md_path=md_path,
+                html_path=html_path,
+                pdf_path=pdf_path,
+                assets_dir=assets_dir,
+                student_name=student_name,
+                school=school,
+                grade=grade,
+            )
+            return
+
+        current_stage = "构造 Cookies"
+        cookies = pyLuogu.LuoguCookies(build_cookie_dict(form))
 
         current_stage = "连接洛谷 API / me()"
         luogu = pyLuogu.luoguAPI(cookies=cookies)
@@ -859,90 +1118,22 @@ def run_generation(task_id: str, form: dict):
             "six_dimension_scores": six_dim_scores,
         }
 
-        # 保存 export_data.json 供后台管理页面读取
-        export_json_path = out_dir / "export_data.json"
-        with open(export_json_path, "w", encoding="utf-8") as f:
-            json.dump(export_data, f, ensure_ascii=False, indent=2)
-
-        current_stage = "生成 AI 报告"
-        with TASKS_LOCK:
-            update_task(
-                task_id,
-                stage=current_stage,
-                ai_progress=1,
-                ai_elapsed_seconds=0,
-                message=f"正在调用 {model_name} 生成 AI 报告，请耐心等待...",
-            )
-        if not str(api_key or "").strip():
-            raise ValueError("未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。")
-        ai_holder: dict[str, object] = {"done": False, "report_md": None, "exc": None}
-
-        def _run_ai():
-            try:
-                ai_holder["report_md"] = generate_ai_report(export_data, api_key, base_url, model_name)
-            except Exception as exc:
-                ai_holder["exc"] = exc
-            finally:
-                ai_holder["done"] = True
-
-        ai_thread = threading.Thread(target=_run_ai, daemon=True)
-        ai_thread.start()
-        ai_start = time.time()
-        last_update = 0.0
-        ai_progress = 1
-        while ai_thread.is_alive():
-            elapsed = int(time.time() - ai_start)
-            ai_progress = min(95, max(ai_progress, min(95, elapsed * 3)))
-            if (time.time() - last_update) >= 3.0:
-                last_update = time.time()
-                with TASKS_LOCK:
-                    update_task(
-                        task_id,
-                        stage=current_stage,
-                        ai_progress=int(ai_progress),
-                        ai_elapsed_seconds=int(elapsed),
-                        message=f"正在调用 {model_name} 生成 AI 报告（{api_key_source}）... 已等待 {elapsed}s",
-                    )
-            time.sleep(1)
-
-        ai_thread.join(timeout=0.1)
-        if ai_holder.get("exc") is not None:
-            raise ai_holder["exc"]  # type: ignore[misc]
-        report_md = str(ai_holder.get("report_md") or "")
-        with TASKS_LOCK:
-            update_task(
-                task_id,
-                stage=current_stage,
-                ai_progress=100,
-                ai_elapsed_seconds=int(time.time() - ai_start),
-                message=f"AI 报告已生成（{api_key_source}），正在写入文件...",
-            )
-
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(report_md)
-
-        current_stage = "生成图表与 HTML/PDF"
-        with TASKS_LOCK:
-            update_task(task_id, stage=current_stage, message="正在生成图表与 HTML/PDF...")
-        chart_paths = generate_chart_images(export_data, str(assets_dir))
-        build_html_and_pdf(report_md, export_data, str(html_path), str(pdf_path), chart_paths)
-
-        eval_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-        with TASKS_LOCK:
-            update_task(
-                task_id,
-                status="done",
-                message="报告生成完成",
-                html=_report_url(html_path),
-                pdf=_report_url(pdf_path),
-                md=_report_url(md_path),
-                student_name=student_name,
-                school=school,
-                grade=grade,
-                solved_count=len(all_passed),
-                failed_count=len(all_failed),
-                eval_time=eval_time,
-            )
+        _write_export_data_json(out_dir, export_data)
+        _generate_ai_report_artifacts(
+            task_id=task_id,
+            export_data=export_data,
+            api_key=api_key,
+            api_key_source=api_key_source,
+            base_url=base_url,
+            model_name=model_name,
+            md_path=md_path,
+            html_path=html_path,
+            pdf_path=pdf_path,
+            assets_dir=assets_dir,
+            student_name=student_name,
+            school=school,
+            grade=grade,
+        )
     except Exception as e:
         with TASKS_LOCK:
             update_task(task_id, status="error", message=describe_generation_error(e, current_stage))
@@ -1066,6 +1257,8 @@ def retry_task(task_id):
     snapshot = load_retry_form_snapshot(task)
     if not snapshot:
         return redirect("/")
+    if can_resume_from_ai_stage(task):
+        snapshot["resume_task_id"] = task_id
     return render_index(form=snapshot)
 
 
@@ -1121,9 +1314,15 @@ def download_report(filename):
 
 
 def _report_url(path: Path) -> str:
-    url = "/" + path.as_posix()
+    path_obj = Path(path)
+    if path_obj.is_absolute():
+        try:
+            path_obj = path_obj.resolve().relative_to(_ROOT.resolve())
+        except Exception:
+            path_obj = Path(path_obj.name)
+    url = "/" + path_obj.as_posix()
     try:
-        version = path.stat().st_mtime_ns
+        version = Path(path).stat().st_mtime_ns
     except OSError:
         return url
     return f"{url}?v={version}"
@@ -1146,10 +1345,24 @@ def _resolve_task_report_dir(task: dict) -> Path:
         raw_value = str(task.get(field, "") or "").strip()
         if not raw_value:
             continue
-        report_path = Path(raw_value.lstrip("/"))
+        raw_path = urlsplit(raw_value).path or raw_value
+        report_path = Path(raw_path.lstrip("/"))
+        if not report_path.is_absolute():
+            report_path = (_ROOT / report_path).resolve()
         if report_path.suffix:
             return report_path.parent
         return report_path
+    task_id = str(task.get("task_id", "") or "").strip()
+    if task_id:
+        report_root = (_ROOT / "reports").resolve()
+        prefix = task_id[:8]
+        candidates = sorted(
+            [path for path in report_root.glob(f"{prefix}_*") if path.is_dir()],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return candidates[0]
     raise FileNotFoundError("未找到该任务对应的报告目录")
 
 
