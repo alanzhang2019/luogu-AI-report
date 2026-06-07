@@ -17,57 +17,94 @@ DB_PATH = Path(os.environ.get("TASK_DB_PATH", "tasks.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
+# ----------------------------------------------------------------------------
+# 单一可信源：tasks 表除 task_id 外的所有列定义
+# ----------------------------------------------------------------------------
+# 加新列只需要在这里加一行，init_db() 启动时自动扫 PRAGMA table_info，
+# 缺啥补啥（ALTER TABLE ADD COLUMN）。无需再手动维护 ALTER 列表。
+#
+# 值是完整的 SQL 类型段（含 NOT NULL / DEFAULT）。
+#   - "TEXT DEFAULT ''"          → 字符串类字段（默认空串）
+#   - "INTEGER DEFAULT 0"        → 计数 / 进度类字段
+#   - "TEXT NOT NULL DEFAULT 'queued'" → 状态字段
+# ----------------------------------------------------------------------------
+TASK_COLUMNS: dict[str, str] = {
+    "status":                "TEXT NOT NULL DEFAULT 'queued'",
+    "message":               "TEXT DEFAULT ''",
+    "html":                  "TEXT DEFAULT ''",
+    "pdf":                   "TEXT DEFAULT ''",
+    "md":                    "TEXT DEFAULT ''",
+    "student_name":          "TEXT DEFAULT ''",
+    "school":                "TEXT DEFAULT ''",
+    "grade":                 "TEXT DEFAULT ''",
+    "solved_count":          "INTEGER DEFAULT 0",
+    "failed_count":          "INTEGER DEFAULT 0",
+    "eval_time":             "TEXT DEFAULT ''",
+    "stage":                 "TEXT DEFAULT ''",
+    "source_code_success":   "INTEGER DEFAULT 0",
+    "source_code_total":     "INTEGER DEFAULT 0",
+    "ai_progress":           "INTEGER DEFAULT 0",
+    "ai_elapsed_seconds":    "INTEGER DEFAULT 0",
+    "tag_fetch_success":     "INTEGER DEFAULT 0",
+    "tag_fetch_total":       "INTEGER DEFAULT 0",
+    "retry_form_json":       "TEXT DEFAULT ''",
+    "created_at":            "TEXT DEFAULT ''",
+}
+
+
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
+def _build_create_table_sql() -> str:
+    """根据 TASK_COLUMNS 生成完整的 CREATE TABLE 语句（首次部署用）"""
+    cols = ["task_id TEXT PRIMARY KEY"]
+    cols.extend(f"{name} {typedef}" for name, typedef in TASK_COLUMNS.items())
+    body = ",\n            ".join(cols)
+    return f"CREATE TABLE IF NOT EXISTS tasks (\n            {body}\n        )"
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> list[str]:
+    """对比 PRAGMA table_info 与 TASK_COLUMNS，对缺失列执行 ALTER TABLE ADD COLUMN。
+    返回本次新加的列名列表。"""
+    actual = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+    added: list[str] = []
+    for name, typedef in TASK_COLUMNS.items():
+        if name not in actual:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {typedef}")
+            added.append(name)
+    return added
+
+
 def init_db():
-    """初始化数据库表"""
+    """初始化 / 迁移数据库表。
+
+    流程：
+    1. CREATE TABLE IF NOT EXISTS（全新部署直接拿到完整 schema）
+    2. 用 PRAGMA table_info 扫实际列，对比 TASK_COLUMNS，缺啥补啥
+    3. 打印迁移日志，方便排查
+    """
     conn = _get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id TEXT PRIMARY KEY,
-            status TEXT NOT NULL DEFAULT 'queued',
-            message TEXT DEFAULT '',
-            html TEXT DEFAULT '',
-            pdf TEXT DEFAULT '',
-            md TEXT DEFAULT '',
-            student_name TEXT DEFAULT '',
-            school TEXT DEFAULT '',
-            grade TEXT DEFAULT '',
-            solved_count INTEGER DEFAULT 0,
-            failed_count INTEGER DEFAULT 0,
-            eval_time TEXT DEFAULT '',
-            stage TEXT DEFAULT '',
-            source_code_success INTEGER DEFAULT 0,
-            source_code_total INTEGER DEFAULT 0,
-            ai_progress INTEGER DEFAULT 0,
-            ai_elapsed_seconds INTEGER DEFAULT 0,
-            tag_fetch_success INTEGER DEFAULT 0,
-            tag_fetch_total INTEGER DEFAULT 0,
-            retry_form_json TEXT DEFAULT '',
-            created_at TEXT DEFAULT ''
+    conn.execute(_build_create_table_sql())
+    added = _ensure_columns(conn)
+    if added:
+        # 写 stdout，docker logs 能直接看到
+        print(
+            f"[task_store] auto-migrate: added columns to tasks table: {added}",
+            flush=True,
         )
-    """)
-    # 兼容历史数据库：旧表可能缺字段，做增量迁移
-    for ddl in (
-        "ALTER TABLE tasks ADD COLUMN stage TEXT DEFAULT ''",
-        "ALTER TABLE tasks ADD COLUMN source_code_success INTEGER DEFAULT 0",
-        "ALTER TABLE tasks ADD COLUMN source_code_total INTEGER DEFAULT 0",
-        "ALTER TABLE tasks ADD COLUMN ai_progress INTEGER DEFAULT 0",
-        "ALTER TABLE tasks ADD COLUMN ai_elapsed_seconds INTEGER DEFAULT 0",
-        "ALTER TABLE tasks ADD COLUMN retry_form_json TEXT DEFAULT ''",
-        "ALTER TABLE tasks ADD COLUMN tag_fetch_success INTEGER DEFAULT 0",
-        "ALTER TABLE tasks ADD COLUMN tag_fetch_total INTEGER DEFAULT 0",
-    ):
-        try:
-            conn.execute(ddl)
-        except sqlite3.OperationalError:
-            pass
     conn.commit()
     conn.close()
+
+
+def list_columns() -> list[str]:
+    """返回 tasks 表当前的真实列名（供调试 / 健康检查）"""
+    conn = _get_conn()
+    rows = conn.execute("PRAGMA table_info(tasks)").fetchall()
+    conn.close()
+    return [row["name"] for row in rows]
 
 
 def insert_task(task_id: str, status: str = "queued", message: str = "排队中..."):
