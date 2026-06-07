@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from env_loader import load_dotenv
 
@@ -551,17 +551,33 @@ def enrich_problem_tags(
     problems: list[pyLuogu.ProblemSummary],
     *,
     max_fetch: int | None = None,
+    progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> int:
     """
     为缺失 tags 的题目按需补全标签。
     优先使用 practice.problems 自带标签；只有为空时才走 problem_detail 兜底。
     返回本次成功补全的题目数量。
+
+    progress_callback(fetched, enriched, total_missing) 在每道题处理完后调用，
+    用于向前端实时反馈标签抓取进度；传 None 则不回调。
     """
     enriched = 0
     fetched = 0
     cache: dict[str, list[int]] = {}
 
-    for problem in problems:
+    # 先一次性统计需要补全的题目总数，方便前端显示 "X/Y" 进度
+    missing_indices = [
+        i for i, p in enumerate(problems)
+        if not list(getattr(p, "tags", []) or [])
+    ]
+    total_missing = len(missing_indices)
+    if progress_callback is not None:
+        try:
+            progress_callback(0, 0, total_missing)
+        except Exception:
+            pass
+
+    for idx, problem in enumerate(problems):
         existing_tags = list(getattr(problem, "tags", []) or [])
         if existing_tags:
             continue
@@ -583,6 +599,12 @@ def enrich_problem_tags(
                 enriched += 1
         except Exception:
             continue
+
+        if progress_callback is not None:
+            try:
+                progress_callback(fetched, enriched, total_missing)
+            except Exception:
+                pass
 
     return enriched
 
@@ -729,7 +751,126 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         ]
     )
 
+    # 知识树图谱（HTML 块，python-markdown 会原样保留到最终 HTML）
+    lines.append("")
+    lines.append("### 知识树图谱（按算法标签 · 掌握度可视化）")
+    lines.append(build_knowledge_tree_html(syllabus_eval))
+
     return "\n".join(lines)
+
+
+# 知识树中每个掌握度等级对应的视觉样式（背景色 / 边框 / 文字色）
+_LEVEL_STYLES = {
+    "精通": ("#166534", "#22C55E", "#DCFCE7"),  # 深绿字 / 绿色边 / 浅绿底
+    "熟练": ("#854D0E", "#EAB308", "#FEF3C7"),  # 棕字 / 黄边 / 浅黄底
+    "入门": ("#9A3412", "#F97316", "#FFEDD5"),  # 棕红字 / 橙边 / 浅橙底
+    "初窥": ("#1E40AF", "#3B82F6", "#DBEAFE"),  # 深蓝字 / 蓝边 / 浅蓝底
+    "空白": ("#9CA3AF", "#D1D5DB", "#F3F4F6"),  # 灰字 / 灰边 / 灰底
+}
+
+
+def _level_for_ac(ac_count: int) -> str:
+    if ac_count >= 20:
+        return "精通"
+    if ac_count >= 10:
+        return "熟练"
+    if ac_count >= 3:
+        return "入门"
+    if ac_count >= 1:
+        return "初窥"
+    return "空白"
+
+
+def build_knowledge_tree_html(syllabus_eval: dict) -> str:
+    """
+    渲染"知识树"HTML：
+    - 4 大等级（CSP-J / CSP-S / 省选 / NOI）= 4 个分支
+    - 每个知识点是一个胶囊/圆角标签，未点亮的（空白）置灰
+    - 掌握度越高，背景越深；颜色为 5 档（绿/黄/橙/蓝/灰）
+    - 顶部带图例，鼠标悬停可看 AC 数
+    """
+    group_keys = (
+        ("csp_j", "CSP-J 入门", "🌱"),
+        ("csp_s", "CSP-S 提高", "🌿"),
+        ("provincial", "省选级", "🌳"),
+        ("noi", "NOI 级", "🏆"),
+    )
+
+    legend = (
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 14px 0;'
+        'font-size:12px;color:#374151;">'
+        '<span style="font-weight:600;color:#1F2937;">图例：</span>'
+        + "".join(
+            f'<span style="display:inline-flex;align-items:center;gap:4px;">'
+            f'<span style="display:inline-block;width:14px;height:14px;border-radius:4px;'
+            f'background:{bg};border:1px solid {bd};"></span>'
+            f'<span style="color:{fg};">{name}</span></span>'
+            for name, (fg, bd, bg) in _LEVEL_STYLES.items()
+        )
+        + '<span style="color:#6B7280;">（颜色越深 = AC 数越多 = 掌握越好；灰白 = 完全未接触）</span>'
+        "</div>"
+    )
+
+    branches_html: list[str] = []
+    for key, title, icon in group_keys:
+        group = syllabus_eval.get(key, {}) or {}
+        details = group.get("details", []) or []
+        stats = group.get("stats", {}) or {}
+        coverage = group.get("coverage", 0)
+        total = int(stats.get("total", 0))
+        red = int(stats.get("空白", 0))
+
+        topic_chips: list[str] = []
+        for item in details:
+            topic = str(item.get("topic", ""))
+            ac = int(item.get("ac_count", 0) or 0)
+            level = _level_for_ac(ac)
+            fg, bd, bg = _LEVEL_STYLES[level]
+            # 空白项 40% 透明度，看起来"未点亮"
+            opacity = "0.45" if level == "空白" else "1"
+            # 边框粗细：接触的更显眼
+            border_w = "1px" if level == "空白" else ("2px" if level in ("初窥", "入门") else "2.5px")
+            topic_chips.append(
+                f'<span title="{topic} · AC {ac} · {level}" '
+                f'style="display:inline-flex;align-items:center;gap:4px;'
+                f'padding:4px 9px;border-radius:9999px;'
+                f'background:{bg};border:{border_w} solid {bd};'
+                f'color:{fg};font-size:12.5px;font-weight:600;'
+                f'opacity:{opacity};cursor:default;'
+                f'box-shadow:0 1px 2px rgba(0,0,0,0.04);">'
+                f'<span>{topic}</span>'
+                f'<span style="opacity:0.75;font-size:11px;font-weight:500;">{ac}</span>'
+                f'</span>'
+            )
+
+        # 分支根节点 + 子节点列表
+        branches_html.append(
+            f'<div style="border:1px solid #E5E7EB;border-radius:14px;'
+            f'padding:14px 14px 12px 14px;background:#FFFFFF;'
+            f'box-shadow:0 1px 3px rgba(0,0,0,0.04);">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;'
+            f'margin-bottom:10px;">'
+            f'<div style="font-weight:700;font-size:15px;color:#111827;">'
+            f'{icon} {title}</div>'
+            f'<div style="font-size:12px;color:#6B7280;">'
+            f'已点亮 <span style="color:#059669;font-weight:700;">{total - red}</span>'
+            f' / {total}（{coverage}%）</div>'
+            f'</div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:6px;line-height:1.6;">'
+            + "".join(topic_chips)
+            + "</div></div>"
+        )
+
+    # 整体用 grid 排版（>=900px 时 2 列；>=1200px 时 4 列；否则 1 列）
+    html = (
+        '<div style="margin:8px 0 18px 0;">'
+        + legend
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));'
+        'gap:14px;">'
+        + "".join(branches_html)
+        + "</div></div>"
+    )
+    return html
 
 
 def normalize_report_markdown(report_md: str, export_data: dict) -> str:
@@ -743,6 +884,11 @@ def normalize_report_markdown(report_md: str, export_data: dict) -> str:
     )
     normalized = re.sub(
         r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖表（按算法标签统计）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?ms)^\s{0,3}#{2,6}\s*知识树[^\n]*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
         "",
         normalized,
     )
@@ -1596,7 +1742,7 @@ def generate_ai_report(
      - **当前对应等级水平**：明确指出该选手目前处于 CSP-J / CSP-S / 省选 / NOI 哪个阶段。
      - **知识点强弱项**：严格对照考纲中的知识点名词，列出其掌握得最好的 3 个考点，以及最薄弱的 3 个考点（使用 🟢🟡🔴 标注）。
      - **训练盲区**：指出他在当前等级中"完全没有涉及/刷题数据中缺失"的必考知识点。
-     - **知识点覆盖表**：输出 CSP-J / CSP-S / 省选级 / NOI级 的知识点覆盖率统计表格，并明确说明这是按算法标签统计，不等于做过该级别题目。
+     - **知识点覆盖与树状图**：不要再写知识点覆盖统计表或知识树（这些由程序自动生成，放在"数据校准与真实统计"小节）。你只需要在本节用 1-2 段话点评"哪些大分支（4 大等级）覆盖得好、哪些几乎为零，并给 1-2 条具体训练建议"即可。
      - **题目级别经历表**：单独说明做过多少道 CSP-S / 省选 / NOI 级别题，按来源标签与难度双证据解释，不要与知识点覆盖混为一谈。
 
   6. **【风险诊断与训练闭环表】**：

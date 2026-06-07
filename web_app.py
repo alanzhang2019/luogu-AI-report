@@ -993,7 +993,41 @@ def run_generation(task_id: str, form: dict):
         with TASKS_LOCK:
             update_task(task_id, message="正在补全题目标签数据...")
         current_stage = "补全题目标签"
-        enrich_problem_tags(luogu, all_passed)
+
+        # 标签补全进度回调
+        tag_last_update = [0.0]
+
+        def _on_tag_progress(fetched: int, enriched: int, total_missing: int) -> None:
+            now = time.time()
+            if total_missing <= 0:
+                return
+            # 限制更新频率：每 0.4s 或每 5 题一次
+            if (now - tag_last_update[0]) < 0.4 and fetched % 5 != 0 and fetched != total_missing:
+                return
+            tag_last_update[0] = now
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=(
+                        f"正在补全题目标签（按需抓取，最慢的阶段）... "
+                        f"已补全 {enriched}/{total_missing} 题（已抓 {fetched} 题详情）"
+                    ),
+                    stage=current_stage,
+                    tag_fetch_success=enriched,
+                    tag_fetch_total=total_missing,
+                )
+
+        enrich_problem_tags(luogu, all_passed, progress_callback=_on_tag_progress)
+
+        # 标签补全结束：清空进度字段
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                message="题目标签补全完成",
+                stage=current_stage,
+                tag_fetch_success=0,
+                tag_fetch_total=0,
+            )
 
         all_passed.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
         all_failed.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
@@ -1272,6 +1306,17 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
+        {% if tag_fetch_total and tag_fetch_total|int > 0 %}
+        <div class="mb-4 text-left">
+            <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
+                <span>标签补全进度</span>
+                <span class="font-semibold text-gray-800">{{ tag_fetch_success }}/{{ tag_fetch_total }}</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div class="bg-amber-500 h-3" style="width: {{ (100 * (tag_fetch_success|int) / (tag_fetch_total|int)) if (tag_fetch_total|int) > 0 else 0 }}%;"></div>
+            </div>
+        </div>
+        {% endif %}
         {% if stage == '生成 AI 报告' %}
         <div class="mb-4 text-left">
             <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
@@ -1314,6 +1359,8 @@ def status_page(task_id):
         stage=str(task.get("stage", "") or ""),
         source_code_success=int(task.get("source_code_success", 0) or 0),
         source_code_total=int(task.get("source_code_total", 0) or 0),
+        tag_fetch_success=int(task.get("tag_fetch_success", 0) or 0),
+        tag_fetch_total=int(task.get("tag_fetch_total", 0) or 0),
         ai_progress=int(task.get("ai_progress", 0) or 0),
         ai_elapsed_seconds=int(task.get("ai_elapsed_seconds", 0) or 0),
         html=task.get("html", ""),
