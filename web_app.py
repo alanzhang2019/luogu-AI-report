@@ -6,7 +6,7 @@ import time
 import hmac
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit, quote
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
     from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session
@@ -27,6 +27,39 @@ DEFAULT_MODEL_NAME = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")         
 DEFAULT_ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me-now")
 # ======================================================
+
+# ============================================================================
+# 一键填入 Luogu Cookies —— Bookmarklet + textarea 解析
+# ============================================================================
+# Bookmarklet：在 luogu.com.cn 已登录页面点一下书签，从 document.cookie 读出
+# __client_id / _uid / C3VK 并复制到剪贴板。失败提示用户去 DevTools 复制。
+BOOKMARKLET_JS = (
+    "(function(){"
+    "var c=document.cookie||'';"
+    "function g(k){var m=c.match(new RegExp('(?:^|;\\\\s*)'+k+'=([^;]*)'));"
+    "return m?decodeURIComponent(m[1]):'';"
+    "}"
+    "var d={__client_id:g('__client_id'),_uid:g('_uid'),C3VK:g('C3VK')};"
+    "var miss=Object.keys(d).filter(function(k){return !d[k];});"
+    "if(miss.length){"
+    "alert('\\u8bfb\\u53d6\\u5931\\u8d25\\uff08\\u53ef\\u80fd\\u4e3a HttpOnly\\uff09\\uff1a\\n'+miss.join(', ')+'\\n\\n\\u8bf7\\u6539\\u7528 F12 \\u2192 Application \\u2192 Cookies\\uff0c\\u6574\\u884c\\u590d\\u5236\\u540e\\u7c98\\u8fdb\\u201c\\u5feb\\u901f\\u586b\\u5165\\u201d\\u6587\\u672c\\u6846\\u3002');"
+    "return;"
+    "}"
+    "var t='__client_id='+d.__client_id+'\\n_uid='+d._uid+'\\nC3VK='+d.C3VK;"
+    "if(navigator.clipboard&&navigator.clipboard.writeText){"
+    "navigator.clipboard.writeText(t).then(function(){"
+    "alert('\\u5df2\\u590d\\u5236\\u5230\\u526a\\u5201\\u677f\\uff01\\n\\u56de\\u5230\\u62a5\\u544a\\u9875\\u7c98\\u5230\\u201c\\u5feb\\u901f\\u586b\\u5165\\u201d\\u5373\\u53ef\\u3002');"
+    "},function(){"
+    "window.prompt('\\u590d\\u5236\\u4ee5\\u4e0b\\u5185\\u5bb9\\uff1a',t);"
+    "});"
+    "}else{"
+    "window.prompt('\\u590d\\u5236\\u4ee5\\u4e0b\\u5185\\u5bb9\\uff1a',t);"
+    "}"
+    "})();"
+)
+# quote 默认 safe='/' 会编码 ( ) ' " ; + = 等所有对 JS 来说需要转义的字符，
+# 浏览器拿到 href 后会自动 URL-decode 再 eval，等价于原 JS。
+BOOKMARKLET_HREF = "javascript:" + quote(BOOKMARKLET_JS, safe='')
 
 import pyLuogu
 from examples.export_for_ai import (
@@ -431,6 +464,32 @@ INDEX_HTML = """
                 <li>复制以下三个参数的 Name/Value 填入下方：</li>
             </ol>
         </div>
+        <details class="app-box app-box-green bg-green-50 border border-green-200 rounded-md p-3 mb-4 text-sm text-green-900" open>
+            <summary class="font-semibold cursor-pointer select-none">📌 一键填入（推荐，免去手动复制 3 个参数）</summary>
+            <div class="mt-2 space-y-2 text-xs text-green-800">
+                <p><b>方法 1：书签抓取</b> · 把下面这个绿色链接 <b>拖到书签栏</b>，然后在已经登录的洛谷页点一下，3 个值会自动复制到剪贴板 → 回来按下面「解析并填入」旁边的粘贴按钮即可。</p>
+                <p class="flex items-center gap-2 flex-wrap">
+                    <a id="bookmarkletLink" href="{{ bookmarklet_href }}" draggable="true" onclick="return false;"
+                       class="inline-block px-3 py-1 bg-green-600 text-white rounded font-bold shadow hover:bg-green-700 cursor-grab active:cursor-grabbing select-none"
+                       title="把这个链接拖到书签栏">📌 洛谷 Cookie 抓取</a>
+                    <span class="text-[11px] text-green-700">（拖到书签栏后右键可改名/删除）</span>
+                </p>
+                <p class="text-[11px] text-green-700">📱 手机：长按上面那个链接 → 复制链接 → 收藏到书签；用浏览器打开书签时点一下即可。</p>
+                <details class="ml-2">
+                    <summary class="cursor-pointer text-[11px] text-green-700 hover:underline">方法 1 不可用时点这里看替代方案</summary>
+                    <p class="mt-1 text-[11px] text-green-700">如果上面书签点了提示「读取失败（HttpOnly）」，说明浏览器把这几个 cookie 标成了 HttpOnly，JS 拿不到。<br>请改用 <b>方法 2</b>：F12 → Application → Cookies → 找到 <code>__client_id</code> / <code>_uid</code> / <code>C3VK</code> 三行 → 在 Value 列双击复制 → 粘到下面文本框。</p>
+                </details>
+                <p class="pt-1"><b>方法 2：手动复制</b> · F12 → Application → Storage → Cookies → 复制 <code>__client_id</code> / <code>_uid</code> / <code>C3VK</code> 三行的整段内容，粘到下面：</p>
+            </div>
+            <textarea id="cookieString" rows="5"
+                placeholder="支持以下任意格式：&#10;  __client_id=abc123; _uid=456; C3VK=def789&#10;  或 DevTools Tab 复制（name [Tab] value 换行）&#10;  或 Netscape 导出（# Netscape HTTP Cookie File ...）&#10;  或 JSON：[{\"name\":\"__client_id\",\"value\":\"abc\"}, ...]"
+                class="mt-2 w-full text-[11px] font-mono p-2 border border-green-300 rounded bg-white"></textarea>
+            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                <button type="button" id="parseCookieBtn" class="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700">解析并填入</button>
+                <button type="button" id="clearCookieBtn" class="px-3 py-1 bg-white text-green-700 border border-green-300 rounded text-xs hover:bg-green-50">清空</button>
+                <p id="parseHint" class="text-xs"></p>
+            </div>
+        </details>
         <form action="/generate" method="post" class="space-y-4">
             <input type="hidden" name="resume_task_id" value="{{ form_values.resume_task_id }}">
             <div>
@@ -531,6 +590,110 @@ INDEX_HTML = """
                     btn.textContent = '复制失败';
                     setTimeout(function () { btn.textContent = '复制'; }, 1200);
                 }
+            });
+        })();
+        (function () {
+            // ---- 一键填入 Cookies：textarea 解析 ----
+            // 支持以下任意格式（首行格式自动检测）：
+            //  1) DevTools 复制的 JSON:    [{"name":"__client_id","value":"abc"}, ...]
+            //  2) Netscape cookie 导出:    # Netscape HTTP Cookie File\n.luogu.com.cn\t...\t__client_id\tvalue
+            //  3) DevTools Tab 复制:       name\tvalue  (换行多行)
+            //  4) 标准 cookie 字符串:      __client_id=abc; _uid=123; C3VK=xyz
+            function parseCookieInput(raw) {
+                var text = (raw || '').trim();
+                var out = {};
+                if (!text) return out;
+                // 1) JSON
+                if (text[0] === '[' || text[0] === '{') {
+                    try {
+                        var arr = JSON.parse(text);
+                        var list = Array.isArray(arr) ? arr : [arr];
+                        for (var i = 0; i < list.length; i++) {
+                            var it = list[i];
+                            if (it && typeof it === 'object' && it.name && it.value != null) {
+                                out[String(it.name).trim()] = String(it.value);
+                            }
+                        }
+                    } catch (e) { /* fall through */ }
+                    if (Object.keys(out).length) return out;
+                }
+                // 2) 单行 cookie 头（无换行 + 有分号）：直接按 ; 拆，每段 key=val
+                //    兜底：value 含未编码 ; 的极端情况交给"一行一个"模式处理
+                if (text.indexOf('\n') === -1 && text.indexOf(';') !== -1) {
+                    text.split(';').forEach(function (p) {
+                        p = p.trim();
+                        if (!p) return;
+                        var eq = p.indexOf('=');
+                        if (eq > 0) out[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
+                    });
+                    return out;
+                }
+                // 3) 行级
+                var lines = text.split(/\r?\n/);
+                for (var li = 0; li < lines.length; li++) {
+                    var line = lines[li].trim();
+                    if (!line || line.charAt(0) === '#') continue;
+                    if (line.indexOf('\t') !== -1) {
+                        var parts = line.split('\t');
+                        if (parts.length >= 7 && parts[0].indexOf('.') !== -1) {
+                            // Netscape: domain\tflag\tpath\tsecure\texpiry\tname\tvalue
+                            out[parts[5]] = parts.slice(6).join('\t');
+                        } else if (parts.length >= 2) {
+                            // 通用 Tab: 首列=name, 其余拼接=value（value 可含 Tab）
+                            out[parts[0].trim()] = parts.slice(1).join('\t');
+                        }
+                    } else {
+                        var eq = line.indexOf('=');
+                        if (eq > 0) {
+                            out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+                        }
+                    }
+                }
+                return out;
+            }
+
+            var ta = document.getElementById('cookieString');
+            var btn = document.getElementById('parseCookieBtn');
+            var clr = document.getElementById('clearCookieBtn');
+            var hint = document.getElementById('parseHint');
+            if (!ta || !btn || !hint) return;
+
+            // 让书签脚本复制到剪贴板后，回本页面 Ctrl+V 自动粘到 textarea
+            ta.addEventListener('paste', function () {
+                setTimeout(function () { btn.click(); }, 30);
+            });
+
+            btn.addEventListener('click', function () {
+                var cookies = parseCookieInput(ta.value);
+                var map = { '__client_id': 'client_id', '_uid': 'uid', 'C3VK': 'c3vk' };
+                var filled = [], missing = [];
+                Object.keys(map).forEach(function (k) {
+                    var v = cookies[k];
+                    var el = document.querySelector('input[name="' + map[k] + '"]');
+                    if (el && v) { el.value = v; filled.push(k); }
+                    else { missing.push(k); }
+                });
+                if (filled.length === 3) {
+                    hint.textContent = '✓ 已填入：' + filled.join('、');
+                    hint.className = 'text-xs text-green-700 font-semibold';
+                } else if (filled.length > 0) {
+                    hint.textContent = '⚠ 已填入 ' + filled.length + ' 项，仍缺：' + missing.join('、');
+                    hint.className = 'text-xs text-amber-700 font-semibold';
+                } else {
+                    hint.textContent = '✗ 未识别到任何 cookie，请检查粘贴内容（需要包含 __client_id / _uid / C3VK）';
+                    hint.className = 'text-xs text-red-700 font-semibold';
+                }
+                // 触发已有的输入监听（更新"校验 Cookies"按钮可用状态）
+                ['client_id', 'uid', 'c3vk'].forEach(function (n) {
+                    var el = document.querySelector('input[name="' + n + '"]');
+                    if (el) el.dispatchEvent(new Event('input'));
+                });
+            });
+
+            if (clr) clr.addEventListener('click', function () {
+                ta.value = '';
+                hint.textContent = '';
+                hint.className = 'text-xs';
             });
         })();
     </script>
@@ -653,6 +816,7 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
         form_values=build_form_values(form),
         validation_result=validation_result,
         server_key_hint=server_key_hint,
+        bookmarklet_href=BOOKMARKLET_HREF,
     )
 
 
