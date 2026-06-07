@@ -427,9 +427,14 @@ INDEX_HTML = """
             <p class="font-semibold mb-1">如何获取洛谷 Cookies：</p>
             <ol class="list-decimal list-inside space-y-1 text-xs text-yellow-700">
                 <li>打开 <code>https://www.luogu.com.cn</code> 并登录</li>
-                <li>按 <kbd class="px-1 bg-yellow-100 rounded">F12</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Storage → Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
+                <li>在洛谷页面 <span class="font-semibold">右键 → 检查</span> → <kbd class="px-1 bg-yellow-100 rounded">Application(应用)</kbd> → <kbd class="px-1 bg-yellow-100 rounded">Storage(存储) → Cookies</kbd> → <code>https://www.luogu.com.cn</code></li>
                 <li>复制以下三个参数的 Name/Value 填入下方：</li>
             </ol>
+            <details class="mt-2 text-xs text-yellow-700">
+                <summary class="cursor-pointer select-none hover:text-yellow-900">📷 查看指引图（点击展开）</summary>
+                <img src="/static/luogu-cookies-guide.png" alt="洛谷 Cookies 获取指引图" class="mt-2 rounded-md border border-yellow-300 w-full max-w-full" loading="lazy" onerror="this.style.display='none'">
+                <p class="text-[11px] text-yellow-600 mt-1">提示：在已登录的洛谷页面按下 F12 也可呼出 DevTools，效果与右键检查一致。</p>
+            </details>
         </div>
         <form action="/generate" method="post" class="space-y-4">
             <input type="hidden" name="resume_task_id" value="{{ form_values.resume_task_id }}">
@@ -1396,6 +1401,20 @@ def retry_task(task_id):
     if can_resume_from_ai_stage(task):
         snapshot["resume_task_id"] = task_id
     return render_index(form=snapshot)
+
+
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    """Serve static assets (e.g. cookies guide image) from the project root."""
+    static_root = (_ROOT / "static").resolve()
+    target = (static_root / filename).resolve()
+    try:
+        target.relative_to(static_root)
+    except ValueError:
+        return ("Forbidden", 403)
+    if target.is_file():
+        return send_file(str(target), conditional=True)
+    return ("Not Found", 404)
 
 
 @app.route("/reports/<path:filename>")
