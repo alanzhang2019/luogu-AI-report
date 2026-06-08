@@ -109,6 +109,7 @@ from luogu_evaluator import (
     repair_behavior_analysis_from_items,
     summarize_detail_fetch_stats,
     enrich_problem_tags,
+    normalize_report_markdown,
 )
 from behavior_analyzer import (
     compute_six_dimension_scores,
@@ -1822,6 +1823,13 @@ def rebuild_existing_report_html(task_id: str, export_pdf: bool = False) -> str:
 
     export_data = json.loads(export_json_path.read_text(encoding="utf-8"))
     report_md = md_path.read_text(encoding="utf-8")
+    # 关键修复：retry/重建路径之前直接复用磁盘上的 report.md，
+    # 但 report.md 内的"知识点覆盖统计表"和"知识树"段是上一次跑出来的旧版本，
+    # 即便 luogu_evaluator.py 改了也会一直保留。
+    # 这里走一遍 normalize_report_markdown，自动用最新代码覆盖旧表格/知识树，
+    # 并把更新后的 markdown 写回 report.md，再渲染 HTML/PDF。
+    report_md = normalize_report_markdown(report_md, export_data)
+    md_path.write_text(report_md, encoding="utf-8")
     assets_dir.mkdir(parents=True, exist_ok=True)
     chart_paths = generate_chart_images(export_data, str(assets_dir))
     build_html_and_pdf(
