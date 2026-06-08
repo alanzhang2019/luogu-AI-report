@@ -752,9 +752,15 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     )
 
     # 知识树图谱（HTML 块，python-markdown 会原样保留到最终 HTML）
+    # 关键：包一层 page-break + 大标题，让它独占一页、视觉上不会被表格吞掉
+    # 注：python-markdown 默认不解析 <div> 内的 markdown 语法，所以直接用 <h2>
     lines.append("")
-    lines.append("### 知识树图谱（按算法标签 · 掌握度可视化）")
+    lines.append('<div style="page-break-before:always;margin-top:24px;">')
+    lines.append('<h2 style="font-size:1.45rem;font-weight:700;color:#065F46;border-bottom:3px solid #10B981;padding-bottom:8px;margin:18px 0 12px 0;">🌳 知识树图谱（按算法标签 · 掌握度可视化）</h2>')
+    lines.append("")
+    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。颜色越深 = AC 数越多 = 掌握越好；灰白 = 完全未接触。把鼠标悬停在胶囊上可查看该知识点的 AC 题目数与掌握等级。</p>')
     lines.append(build_knowledge_tree_html(syllabus_eval))
+    lines.append('</div>')
 
     return "\n".join(lines)
 
