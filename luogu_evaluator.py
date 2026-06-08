@@ -765,16 +765,15 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     return "\n".join(lines)
 
 
-# 知识树中每个掌握度等级对应的视觉样式
-# (font_size_px, font_weight, text_color, border_color, bg_color)
-# 设计：颜色按"绿色单色梯度"由浅到深，字号从 11px → 18px，
-# 掌握越好 → 颜色越深 + 字号越大；最差档 11px 仍清晰可见。
-_LEVEL_VIS = {
-    "精通": (18, 700, "#FFFFFF", "#14532D", "#15803D"),  # 深绿底白字
-    "熟练": (16, 700, "#FFFFFF", "#15803D", "#22C55E"),  # 中绿底白字
-    "入门": (14, 600, "#14532D", "#86EFAC", "#BBF7D0"),  # 浅绿底深绿字
-    "初窥": (12, 500, "#1E40AF", "#93C5FD", "#DBEAFE"),  # 浅蓝底
-    "空白": (11, 400, "#9CA3AF", "#E5E7EB", "#F3F4F6"),  # 灰底（仍可读）
+# 掌握度 → 果子的视觉样式（SVG 渲染用）
+# 关键设计：r 越大 = 掌握越好；颜色越深（绿色单色梯度）= 掌握越好
+# 最小档 r=6 仍清晰可辨；最大 r=18
+_FRUIT_VIS = {
+    "精通": dict(r=18, fill="#15803D", fg="#FFFFFF", fs=12, fw=700, bd="#14532D"),
+    "熟练": dict(r=15, fill="#22C55E", fg="#FFFFFF", fs=11, fw=700, bd="#15803D"),
+    "入门": dict(r=12, fill="#86EFAC", fg="#14532D", fs=11, fw=600, bd="#4ADE80"),
+    "初窥": dict(r=9,  fill="#93C5FD", fg="#1E40AF", fs=10, fw=500, bd="#60A5FA"),
+    "空白": dict(r=6,  fill="#D1D5DB", fg="#6B7280", fs=9,  fw=400, bd="#9CA3AF"),
 }
 
 
@@ -816,25 +815,273 @@ def _level_for_ac(ac_count: int) -> str:
     return "空白"
 
 
-def build_knowledge_tree_html(syllabus_eval: dict) -> str:
+def _build_one_tree_svg(
+    icon: str,
+    title: str,
+    cat_topics: list,
+    *,
+    width: int = 520,
+) -> str:
+    """把一个竞赛级别画成一棵"真正的树"（SVG：树干 + 树枝 + 果子）。
+
+    Parameters
+    ----------
+    icon : str
+        级别前的 emoji（🌱/🌿/🌳/🏆）
+    title : str
+        级别名（CSP-J 入门 / CSP-S 提高 / 省选级 / NOI 级）
+    cat_topics : list
+        已按"掌握度从高到低"排好序的 [(cat, [(topic, ac, level), ...]), ...]
+        排在最上面的是掌握度最高的分类。
+    width : int
+        SVG 宽度（px）。树高根据分类数自适应。
+
+    设计
+    ----
+    - 棕色树干在左侧，向上长
+    - 树干上的小白牌：级别名
+    - 树根处一条棕色虚线 + 草尖，模拟"地面"
+    - 每条主分支 = 一个算法分类，曲线（Q 二次贝塞尔）从树干右弯出去
+    - 分支上点缀几片小绿叶（装饰用）
+    - 分支右端挂一排"果子" = 知识点
+        - 半径 r 越大 → 掌握越好（6px 空白 → 18px 精通）
+        - 颜色越深（灰 → 浅蓝 → 浅绿 → 中绿 → 深绿）→ 掌握越好
+        - 果子中心写 AC 数（半径够大才写，避免溢出）
+        - 果子下方写知识点名（>5 字截断）
+    - 树干不透明度最低；果子最显眼
     """
-    渲染"知识树"HTML（真正的树形，非卡片网格）：
+    if not cat_topics:
+        return (
+            '<div style="color:#9CA3AF;text-align:center;'
+            'padding:30px 0;font-size:12px;">（该级别暂无知识点数据）</div>'
+        )
 
-    结构
-    ----
-    [图例]
-    ┌─ 4 个独立的"子树"（CSP-J / CSP-S / 省选 / NOI），每个子树：
-    │  ├─ 根节点  🏷 级别名 + 覆盖度
-    │  └─ 一组"分类"节点（基础实现 / 搜索/DFS / 动态规划 / …）
-    │      └─ 叶子节点 = 知识点（按 _CATEGORY_KEYWORDS 分类）
+    # 布局常量
+    HEADER_H = 14          # 顶部留白（标题由外层 wrapper 提供）
+    BRANCH_H = 84          # 每条主分支占的高度（含两行标签 + 间距）
+    BOTTOM_PAD = 28
+    MAX_FRUITS = 6         # 每条分支最多挂几个果子（超出的写"+N"）
+    FRUIT_W = 62           # 果子之间的水平间距
 
-    视觉
-    ----
-    - 树的层级缩进线用 CSS ::before / ::after 伪元素绘制
-    - 掌握度越高 → 颜色越深（绿色单色梯度）+ 字号越大
-      11px(空白) → 12px(初窥) → 14px(入门) → 16px(熟练) → 18px(精通)
-    - 最小档（空白）字号 11px 仍可读；空白项用浅灰区分
-    - 鼠标悬停看 AC 数与等级
+    n_branches = len(cat_topics)
+    height = HEADER_H + n_branches * BRANCH_H + BOTTOM_PAD
+
+    # 树干几何
+    trunk_x = 32
+    ground_y = HEADER_H + 6
+    trunk_top = ground_y + 4
+    trunk_bottom = height - 12
+
+    svg: list[str] = []
+    svg.append(
+        f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'font-family="-apple-system, BlinkMacSystemFont, \'PingFang SC\', '
+        f'\'Microsoft YaHei\', sans-serif">'
+    )
+
+    # 背景渐变（淡绿天 → 白）
+    grad_id = f"sky_{title[:3].replace(' ', '')}"
+    svg.append(
+        f'<defs><linearGradient id="{grad_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0" stop-color="#F0FDF4"/>'
+        f'<stop offset="1" stop-color="#FFFFFF"/>'
+        f'</linearGradient></defs>'
+    )
+    svg.append(
+        f'<rect x="0" y="0" width="{width}" height="{ground_y + 2}" '
+        f'fill="url(#{grad_id})"/>'
+    )
+
+    # 地面（虚线 + 草尖）
+    svg.append(
+        f'<line x1="0" y1="{ground_y}" x2="{width}" y2="{ground_y}" '
+        f'stroke="#A89878" stroke-width="1.5" stroke-dasharray="2 3"/>'
+    )
+    for gx in range(8, width, 22):
+        svg.append(
+            f'<line x1="{gx}" y1="{ground_y}" x2="{gx - 2}" '
+            f'y2="{ground_y + 5}" stroke="#86EFAC" stroke-width="1.2"/>'
+        )
+
+    # 树干（外深 → 中棕 → 内高光，三层叠加出立体感）
+    trunk_path = (
+        f'M {trunk_x} {trunk_bottom} '
+        f'C {trunk_x + 1.5} {(trunk_top + trunk_bottom) * 0.7} '
+        f'{trunk_x - 1.5} {(trunk_top + trunk_bottom) * 0.3} '
+        f'{trunk_x} {trunk_top}'
+    )
+    svg.append(
+        f'<path d="{trunk_path}" stroke="#3F2410" stroke-width="18" '
+        f'fill="none" stroke-linecap="round"/>'
+    )
+    svg.append(
+        f'<path d="{trunk_path}" stroke="#6B4423" stroke-width="13" '
+        f'fill="none" stroke-linecap="round"/>'
+    )
+    svg.append(
+        f'<path d="{trunk_path}" stroke="#A07A50" stroke-width="6" '
+        f'fill="none" stroke-linecap="round" opacity="0.55"/>'
+    )
+
+    # 树冠（一簇小绿叶 + 一颗大果子装饰在树顶，强化"树"的形象）
+    canopy_y = trunk_top - 4
+    for cx, cy, rr in [(trunk_x - 12, canopy_y, 9), (trunk_x + 10, canopy_y - 4, 11),
+                       (trunk_x - 2, canopy_y - 12, 10), (trunk_x + 16, canopy_y + 4, 7),
+                       (trunk_x - 16, canopy_y + 5, 7)]:
+        svg.append(
+            f'<ellipse cx="{cx}" cy="{cy}" rx="{rr}" ry="{rr * 0.75:.2f}" '
+            f'fill="#4ADE80" opacity="0.85"/>'
+        )
+        svg.append(
+            f'<ellipse cx="{cx - rr * 0.3:.2f}" cy="{cy - rr * 0.3:.2f}" '
+            f'rx="{rr * 0.35:.2f}" ry="{rr * 0.2:.2f}" '
+            f'fill="#FFFFFF" opacity="0.45"/>'
+        )
+
+    # 主分支 = 分类；按 cat_topics 顺序（已排好）从下往上画
+    branch_zone = trunk_bottom - trunk_top - 14
+    for i, (cat, topics) in enumerate(cat_topics):
+        # 分支 y：均匀分布（i=0 在最下，越往上 i 越大）
+        by = trunk_top + 7 + (i + 0.5) * (branch_zone / n_branches)
+        # 轻微上下错落，让树看起来"自然"
+        if i % 2 == 0:
+            by += 1
+        else:
+            by -= 1
+
+        # 限长 + 按 AC 降序
+        topics_sorted = sorted(topics, key=lambda t: -t[1])[:MAX_FRUITS]
+        hidden = len(topics) - len(topics_sorted)
+        n_fruits = len(topics_sorted)
+        if n_fruits == 0:
+            continue
+
+        # 果子 x 位置（分支上等距排列，超宽自动压缩）
+        first_fruit_x = trunk_x + 42
+        last_fruit_x = first_fruit_x + (n_fruits - 1) * FRUIT_W
+        if last_fruit_x > width - 30:
+            avail = width - 30 - first_fruit_x
+            fw = max(40, avail / max(1, n_fruits - 1)) if n_fruits > 1 else FRUIT_W
+            last_fruit_x = first_fruit_x + (n_fruits - 1) * fw
+        else:
+            fw = FRUIT_W
+        branch_end_x = last_fruit_x + 12
+
+        # 主分支曲线（Q 二次贝塞尔）
+        ctrl_x = (trunk_x + branch_end_x) / 2
+        ctrl_y = by - 16
+        branch_path = (
+            f'M {trunk_x + 8} {by} '
+            f'Q {ctrl_x} {ctrl_y} {branch_end_x - 5} {by - 1}'
+        )
+        # 阴影 + 主色
+        svg.append(
+            f'<path d="{branch_path}" stroke="#5C3A1E" stroke-width="6" '
+            f'fill="none" stroke-linecap="round"/>'
+        )
+        svg.append(
+            f'<path d="{branch_path}" stroke="#8B7355" stroke-width="3" '
+            f'fill="none" stroke-linecap="round" opacity="0.7"/>'
+        )
+
+        # 分支上的几片小叶子（装饰，给点绿意）
+        for lx_frac, lrot in [(0.32, -32), (0.55, 28), (0.78, -24)]:
+            lx = trunk_x + 18 + (branch_end_x - trunk_x - 18) * lx_frac
+            if lx < first_fruit_x - 6 and lx < branch_end_x - 8:
+                ly = by - (5 if lrot > 0 else 7)
+                svg.append(
+                    f'<ellipse cx="{lx}" cy="{ly}" rx="4" ry="2" '
+                    f'fill="#4ADE80" opacity="0.75" '
+                    f'transform="rotate({lrot} {lx} {ly})"/>'
+                )
+
+        # 分类小帽（深灰底白字，挂在分支根处）
+        chip_w = max(40, len(cat) * 9 + 16)
+        svg.append(
+            f'<rect x="{trunk_x + 14}" y="{by - 24}" width="{chip_w}" '
+            f'height="16" rx="3" fill="#1F2937" opacity="0.9"/>'
+        )
+        svg.append(
+            f'<text x="{trunk_x + 22}" y="{by - 12}" font-size="10" '
+            f'font-weight="700" fill="#FFFFFF">{cat}</text>'
+        )
+
+        # 果子们
+        for j, (topic, ac, level) in enumerate(topics_sorted):
+            fx = first_fruit_x + j * fw
+            fy = by - 2
+            st = _FRUIT_VIS[level]
+            # 完整信息（hover/assistive 显示）
+            full_info = f"{topic} · AC {ac} · {level}"
+            # 果柄（短竖线，从果子底部到分支）
+            svg.append(
+                f'<line x1="{fx}" y1="{fy + st["r"]}" '
+                f'x2="{fx}" y2="{fy + st["r"] + 4}" '
+                f'stroke="#5C3A1E" stroke-width="1.5"/>'
+            )
+            # 果子本体（带 <title> 鼠标悬停看完整信息）
+            svg.append(
+                f'<circle cx="{fx}" cy="{fy}" r="{st["r"]}" '
+                f'fill="{st["fill"]}" stroke="{st["bd"]}" '
+                f'stroke-width="1.4">'
+                f'<title>{full_info}</title>'
+                f'</circle>'
+            )
+            # 高光（左上）
+            svg.append(
+                f'<ellipse cx="{fx - st["r"] * 0.32:.2f}" '
+                f'cy="{fy - st["r"] * 0.4:.2f}" '
+                f'rx="{st["r"] * 0.35:.2f}" '
+                f'ry="{st["r"] * 0.22:.2f}" '
+                f'fill="#FFFFFF" opacity="0.5"/>'
+            )
+            # 果子内写 AC 数（半径 >= 11 才写，避免溢出）
+            if st["r"] >= 11:
+                svg.append(
+                    f'<text x="{fx}" y="{fy + 4}" font-size="{st["fs"]}" '
+                    f'font-weight="700" fill="{st["fg"]}" '
+                    f'text-anchor="middle">{ac}</text>'
+                )
+            # 果子下写知识点名
+            # 规则：<=4 字直接显示；5~7 字第一行 3-4 字，第二行 3 字；>=8 字则 4+4
+            topic_chars = list(topic)
+            n = len(topic_chars)
+            if n <= 4:
+                lines = ["".join(topic_chars)]
+            else:
+                # 拆两行
+                mid = (n + 1) // 2
+                lines = ["".join(topic_chars[:mid]), "".join(topic_chars[mid:])]
+            label_y_start = fy + st["r"] + 12
+            for li, line in enumerate(lines):
+                svg.append(
+                    f'<text x="{fx}" y="{label_y_start + li * 10}" '
+                    f'font-size="8.5" font-weight="600" fill="#1F2937" '
+                    f'text-anchor="middle">{line}</text>'
+                )
+
+        # 被截掉的 "+N"
+        if hidden > 0:
+            svg.append(
+                f'<text x="{branch_end_x + 6}" y="{by + 3}" font-size="10" '
+                f'fill="#9CA3AF" font-style="italic">+{hidden}</text>'
+            )
+
+    svg.append('</svg>')
+    return '\n'.join(svg)
+
+
+def build_knowledge_tree_html(syllabus_eval: dict) -> str:
+    """渲染 4 棵独立的"真·知识树"（SVG：每棵一个竞赛级别）。
+
+    每棵树 = 1 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）：
+        - 棕色树干
+        - 分类作为主分支（带小绿叶装饰）
+        - 知识点作为果子挂枝头
+        - 果子大小 + 颜色 = 掌握度
+
+    返回完整 HTML（含图例、说明、4 棵树）。"
     """
     group_keys = (
         ("csp_j", "CSP-J 入门", "🌱"),
@@ -843,29 +1090,42 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         ("noi", "NOI 级", "🏆"),
     )
 
-    # ---------- 图例 ----------
-    # 用"示例胶囊"展示每档的真实字号 + 颜色，让用户一眼看到梯度
-    # （文字固定深色避免白字在白底消失）
-    legend_items = "".join(
-        f'<span class="kt-legend-item">'
-        f'<span class="kt-leaf kt-l{name}" style="font-size:{fs}px;">'
-        f'<span class="kt-leaf-name">{name}</span>'
-        f'<em style="display:none;">0</em>'
-        f'</span></span>'
-        for name, (fs, fw, fg, bd, bg) in _LEVEL_VIS.items()
-    )
+    # ---------- 图例：用真实果子样式展示梯度 ----------
+    legend_fruits: list[str] = []
+    for name in ("精通", "熟练", "入门", "初窥", "空白"):
+        st = _FRUIT_VIS[name]
+        r = st["r"]
+        legend_fruits.append(
+            f'<span style="display:inline-flex;align-items:center;'
+            f'gap:5px;margin-right:14px;">'
+            f'<svg width="{r * 2 + 4}" height="{r * 2 + 4}" '
+            f'viewBox="-{r + 2} -{r + 2} {r * 2 + 4} {r * 2 + 4}" '
+            f'xmlns="http://www.w3.org/2000/svg">'
+            f'<circle r="{r}" fill="{st["fill"]}" stroke="{st["bd"]}" '
+            f'stroke-width="1.2"/>'
+            f'<ellipse cx="{-r * 0.32:.2f}" cy="{-r * 0.4:.2f}" '
+            f'rx="{r * 0.35:.2f}" ry="{r * 0.22:.2f}" '
+            f'fill="#FFFFFF" opacity="0.5"/>'
+            f'</svg>'
+            f'<span style="font-size:11px;color:#1F2937;">{name}</span>'
+            f'</span>'
+        )
     legend = (
-        '<div class="kt-legend">'
-        '<span style="font-weight:600;color:#1F2937;">图例：</span>'
-        + legend_items
-        + '<span style="color:#6B7280;">'
-        '（颜色越深 + 字号越大 = AC 数越多 = 掌握越好；灰 = 未接触）'
+        '<div style="background:#F9FAFB;border:1px solid #E5E7EB;'
+        'border-radius:6px;padding:10px 14px;margin:0 0 14px 0;'
+        'font-size:11px;color:#374151;display:flex;'
+        'flex-wrap:wrap;align-items:center;gap:6px;">'
+        '<span style="font-weight:700;color:#1F2937;margin-right:4px;">'
+        '果子大小 = 掌握度</span>'
+        + ''.join(legend_fruits)
+        + '<span style="color:#6B7280;margin-left:6px;">'
+        '| 颜色越深 → 掌握越好；灰 = 未接触；树状结构 = 分类层级'
         '</span></div>'
     )
 
-    # ---------- 4 个子树 ----------
-    blocks: list[str] = []
-    for key, title, icon in group_keys:
+    # ---------- 4 棵树 ----------
+    tree_blocks: list[str] = []
+    for idx, (key, title, icon) in enumerate(group_keys):
         group = syllabus_eval.get(key, {}) or {}
         details = group.get("details", []) or []
         stats = group.get("stats", {}) or {}
@@ -874,7 +1134,7 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         blank = int(stats.get("空白", 0))
         lit = total - blank
 
-        # 按分类聚合；保持分类的"出现顺序"（出现过的优先，未出现过的隐藏）
+        # 按分类聚合
         cat_to_topics: dict[str, list[tuple[str, int, str]]] = {}
         cat_order: list[str] = []
         for item in details:
@@ -889,134 +1149,58 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
                 cat_order.append(cat)
             cat_to_topics[cat].append((topic, ac, level))
 
-        # 按掌握度降序排（AC 多的在上面），便于一眼看出强弱
-        for cat in cat_to_topics:
-            cat_to_topics[cat].sort(key=lambda t: -t[1])
+        # 排序：分类按"该分类最高 AC 数"降序（强的分类画在树上更高位置）
+        def _cat_score(cat: str) -> int:
+            return max((t[1] for t in cat_to_topics[cat]), default=0)
 
-        # 组装该子树的 HTML
-        if not cat_order:
-            cat_html = (
-                '<div style="color:#9CA3AF;font-size:12px;padding:4px 0 4px 8px;">'
-                '（该级别暂无知识点数据）</div>'
-            )
-        else:
-            cat_lis: list[str] = []
-            for cat in cat_order:
-                items = cat_to_topics[cat]
-                # 分类小帽 + 叶子列表
-                leaf_spans: list[str] = []
-                for topic, ac, level in items:
-                    fs, fw, fg, bd, bg = _LEVEL_VIS[level]
-                    leaf_spans.append(
-                        f'<li>'
-                        f'<span class="kt-leaf kt-l{level}" '
-                        f'title="{topic} · AC {ac} · {level}">'
-                        f'<span class="kt-leaf-name">{topic}</span>'
-                        f'<em>{ac}</em>'
-                        f'</span>'
-                        f'</li>'
-                    )
-                # 该分类下 5 档中最高的等级（用于决定分组颜色边框）
-                lvls = {it[2] for it in items}
-                cat_color = "#10B981"  # 默认绿
-                if "精通" in lvls or "熟练" in lvls:
-                    cat_color = "#15803D"  # 深绿
-                elif "入门" in lvls:
-                    cat_color = "#22C55E"  # 中绿
-                elif "初窥" in lvls:
-                    cat_color = "#3B82F6"  # 蓝
+        cat_topics = [(c, cat_to_topics[c]) for c in cat_order]
+        cat_topics.sort(key=lambda kv: _cat_score(kv[0]), reverse=True)
 
-                cat_lis.append(
-                    f'<li class="kt-cat-row">'
-                    f'<span class="kt-cat" style="border-left-color:{cat_color};">'
-                    f'{cat} <span style="color:#9CA3AF;font-weight:500;font-size:11px;">'
-                    f'· {len(items)}</span></span>'
-                    f'<ul class="kt-leaves">'
-                    + "".join(leaf_spans)
-                    + "</ul></li>"
-                )
-            cat_html = '<ul class="kt-tree">' + "".join(cat_lis) + "</ul>"
+        svg = _build_one_tree_svg(icon, title, cat_topics)
 
-        # 子树根
-        root_html = (
-            f'<div class="kt-root">'
-            f'<span>{icon} {title}</span>'
-            f'<span class="kt-meta">已点亮 <b>{lit}</b> / {total}'
-            f'（{coverage}%）</span>'
+        # 该棵树的统计条
+        meta = (
+            f'已点亮 <b style="color:#059669;font-weight:700;">{lit}</b>'
+            f' / {total}（{coverage}%）'
+        )
+
+        # 第一棵树不强制分页；之后每 2 棵分页一次
+        # （4 棵树约 1300px 高，自然落到 2 张 A4 上）
+        page_break = ""
+        if idx == 2:
+            page_break = "page-break-before:always;"
+
+        tree_blocks.append(
+            f'<div class="kt-tree-block" style="{page_break}'
+            f'margin:0 0 8px 0;padding:0;">'
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;border-bottom:2px solid #10B981;'
+            f'padding:0 0 5px 0;margin:0 0 4px 0;">'
+            f'<span style="font-size:14px;font-weight:700;'
+            f'color:#065F46;">{icon} {title} · 知识树</span>'
+            f'<span style="font-size:11px;color:#6B7280;">{meta}</span>'
+            f'</div>'
+            f'{svg}'
             f'</div>'
         )
 
-        blocks.append(
-            f'<div class="kt-block">{root_html}{cat_html}</div>'
-        )
-
-    # ---------- CSS（嵌在 div 内，仅影响本节） ----------
-    # 树线、字号梯度、颜色都集中在此；不污染其他模块
-    style_block = """
-<style>
-.kt-block { margin: 0 0 16px 0; }
-.kt-root {
-  font-weight: 700; font-size: 16px; color: #065F46;
-  border-bottom: 1.5px solid #10B981;
-  padding: 4px 0 6px 0; margin: 6px 0 8px 0;
-  display: flex; justify-content: space-between; align-items: baseline;
-  gap: 12px;
-}
-.kt-root .kt-meta { font-size: 12px; color: #6B7280; font-weight: 500; }
-.kt-root .kt-meta b { color: #059669; font-weight: 700; }
-.kt-cat-row { margin: 0; padding: 0; }
-.kt-cat {
-  display: inline-block; font-weight: 700; font-size: 13px; color: #374151;
-  background: #F9FAFB; border-left: 3px solid #10B981;
-  padding: 2px 8px; border-radius: 0 6px 6px 0;
-  margin: 4px 0 2px 0;
-}
-.kt-tree, .kt-leaves {
-  list-style: none; padding-left: 18px; margin: 2px 0 6px 0;
-}
-.kt-tree > li, .kt-leaves > li {
-  position: relative; padding: 3px 0 3px 4px; margin: 0;
-}
-.kt-tree > li::before, .kt-leaves > li::before {
-  content: ''; position: absolute; left: -8px; top: 0; bottom: 0;
-  width: 1.5px; background: #C7CDD6;
-}
-.kt-tree > li::after, .kt-leaves > li::after {
-  content: ''; position: absolute; left: -8px; top: 14px;
-  width: 9px; height: 1.5px; background: #C7CDD6;
-}
-.kt-leaves > li:first-child::before { top: 14px; }
-.kt-leaves > li:last-child::before { bottom: auto; height: 14px; }
-.kt-leaf {
-  display: inline-flex; align-items: baseline; gap: 4px;
-  padding: 2px 9px; border-radius: 9999px; border: 1.5px solid;
-  font-weight: 600; line-height: 1.3; cursor: default;
-  white-space: nowrap;
-}
-.kt-leaf em {
-  font-style: normal; font-weight: 500; opacity: 0.7; font-size: 0.82em;
-  margin-left: 2px;
-}
-.kt-leaf-name { white-space: nowrap; }
-.kt-l精通 { font-size: 18px; color: #FFFFFF; border-color: #14532D; background: #15803D; font-weight: 700; }
-.kt-l熟练 { font-size: 16px; color: #FFFFFF; border-color: #15803D; background: #22C55E; font-weight: 700; }
-.kt-l入门 { font-size: 14px; color: #14532D; border-color: #86EFAC; background: #BBF7D0; font-weight: 600; }
-.kt-l初窥 { font-size: 12px; color: #1E40AF; border-color: #93C5FD; background: #DBEAFE; font-weight: 500; }
-.kt-l空白 { font-size: 11px; color: #6B7280; border-color: #E5E7EB; background: #F3F4F6; font-weight: 400; }
-.kt-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 14px 0;
-  font-size: 12px; color: #374151; align-items: center; }
-.kt-legend-item { display: inline-flex; align-items: center; gap: 4px; }
-.kt-legend-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 9999px;
-  border: 1px solid; }
-</style>
-""".strip()
-
     return (
         '<div class="kt-section" style="margin:8px 0 18px 0;">'
+        '<h2 style="font-size:18px;font-weight:700;color:#065F46;'
+        'border-left:5px solid #10B981;padding:6px 0 6px 10px;'
+        'margin:0 0 8px 0;background:#F0FDF4;border-radius:0 6px 6px 0;">'
+        '🌳 知识树图谱（按竞赛级别 · 果子大小/颜色 = 掌握度）</h2>'
+        '<p style="font-size:12px;color:#4B5563;margin:0 0 10px 0;'
+        'line-height:1.6;">下图为按 4 个竞赛级别（CSP-J / CSP-S / 省选 / '
+        'NOI）分别画出的 4 棵"知识树"。每棵树上，<b>主干</b>代表该级别，'
+        '<b>分支</b>代表算法分类（基础实现 / 搜索 · DFS / 动态规划 / '
+        '贪心 · 二分 / 图论 / 数据结构 / 字符串 / 数学 · 数论 / '
+        '计算几何 / 其他），<b>果子</b>就是该分类下的具体知识点。'
+        '<b>果子越大、颜色越深</b> = 该知识点 AC 数越多 = 掌握越好；'
+        '灰色小果子 = 该知识点尚未接触（AC=0）。</p>'
         + legend
-        + style_block
-        + "".join(blocks)
-        + "</div>"
+        + ''.join(tree_blocks)
+        + '</div>'
     )
 
 
