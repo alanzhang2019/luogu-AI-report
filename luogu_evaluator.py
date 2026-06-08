@@ -765,14 +765,43 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     return "\n".join(lines)
 
 
-# 知识树中每个掌握度等级对应的视觉样式（背景色 / 边框 / 文字色）
-_LEVEL_STYLES = {
-    "精通": ("#166534", "#22C55E", "#DCFCE7"),  # 深绿字 / 绿色边 / 浅绿底
-    "熟练": ("#854D0E", "#EAB308", "#FEF3C7"),  # 棕字 / 黄边 / 浅黄底
-    "入门": ("#9A3412", "#F97316", "#FFEDD5"),  # 棕红字 / 橙边 / 浅橙底
-    "初窥": ("#1E40AF", "#3B82F6", "#DBEAFE"),  # 深蓝字 / 蓝边 / 浅蓝底
-    "空白": ("#9CA3AF", "#D1D5DB", "#F3F4F6"),  # 灰字 / 灰边 / 灰底
+# 知识树中每个掌握度等级对应的视觉样式
+# (font_size_px, font_weight, text_color, border_color, bg_color)
+# 设计：颜色按"绿色单色梯度"由浅到深，字号从 11px → 18px，
+# 掌握越好 → 颜色越深 + 字号越大；最差档 11px 仍清晰可见。
+_LEVEL_VIS = {
+    "精通": (18, 700, "#FFFFFF", "#14532D", "#15803D"),  # 深绿底白字
+    "熟练": (16, 700, "#FFFFFF", "#15803D", "#22C55E"),  # 中绿底白字
+    "入门": (14, 600, "#14532D", "#86EFAC", "#BBF7D0"),  # 浅绿底深绿字
+    "初窥": (12, 500, "#1E40AF", "#93C5FD", "#DBEAFE"),  # 浅蓝底
+    "空白": (11, 400, "#9CA3AF", "#E5E7EB", "#F3F4F6"),  # 灰底（仍可读）
 }
+
+
+# 知识点 → 分类的关键词映射（树形分组用）
+# 顺序敏感：先匹配先赢，所以"图论"要在"数据结构"之前以避免"树"被错配
+_CATEGORY_KEYWORDS = (
+    ("基础实现", ["模拟", "枚举", "排序", "高精度", "进制", "字符串基础", "递推", "分治", "构造"]),
+    ("搜索/DFS", ["搜索", "dfs", "bfs", "回溯", "剪枝", "递归", "双向搜索", "启发式"]),
+    ("动态规划", ["dp", "动态规划", "背包", "区间dp", "树形dp", "状压", "数位dp", "记忆化", "概率dp"]),
+    ("贪心/二分", ["贪心", "二分", "倍增", "三分", "中位数"]),
+    ("图论", ["图", "最短路", "dijkstra", "floyd", "spfa", "tarjan", "lca", "并查集", "网络流", "二分图", "匹配", "拓扑", "差分约束", "最小生成树", "mst", "基环树", "欧拉"]),
+    ("数据结构", ["线段树", "树状数组", "堆", "单调栈", "单调队列", "平衡树", "st表", "treap", "splay", "红黑树", "字典树", "trie", "树链剖分", "树剖", "树分治", "cdq", "kdtree", "树套树", "跳表", "左偏树"]),
+    ("字符串", ["kmp", "字符串", "hash", "sam", "后缀", "manacher", "ac自动机", "回文", "z函数", "最小表示"]),
+    ("数学/数论", ["数学", "数论", "组合", "计数", "概率", "期望", "博弈", "矩阵", "高斯消元", "线性基", "生成函数", "多项式", "fft", "ntt", "中国剩余", "原根"]),
+    ("计算几何", ["几何", "凸包", "旋转卡壳", "半平面交", "辛普森", "扫描线", "pick"]),
+    ("其他", []),  # 兜底
+)
+
+
+def _classify_topic(topic: str) -> str:
+    """把一个知识点名归类到上面的 9 个分类中。"""
+    t = str(topic or "").lower()
+    for cat, kws in _CATEGORY_KEYWORDS:
+        for kw in kws:
+            if kw and kw.lower() in t:
+                return cat
+    return "其他"
 
 
 def _level_for_ac(ac_count: int) -> str:
@@ -789,11 +818,23 @@ def _level_for_ac(ac_count: int) -> str:
 
 def build_knowledge_tree_html(syllabus_eval: dict) -> str:
     """
-    渲染"知识树"HTML：
-    - 4 大等级（CSP-J / CSP-S / 省选 / NOI）= 4 个分支
-    - 每个知识点是一个胶囊/圆角标签，未点亮的（空白）置灰
-    - 掌握度越高，背景越深；颜色为 5 档（绿/黄/橙/蓝/灰）
-    - 顶部带图例，鼠标悬停可看 AC 数
+    渲染"知识树"HTML（真正的树形，非卡片网格）：
+
+    结构
+    ----
+    [图例]
+    ┌─ 4 个独立的"子树"（CSP-J / CSP-S / 省选 / NOI），每个子树：
+    │  ├─ 根节点  🏷 级别名 + 覆盖度
+    │  └─ 一组"分类"节点（基础实现 / 搜索/DFS / 动态规划 / …）
+    │      └─ 叶子节点 = 知识点（按 _CATEGORY_KEYWORDS 分类）
+
+    视觉
+    ----
+    - 树的层级缩进线用 CSS ::before / ::after 伪元素绘制
+    - 掌握度越高 → 颜色越深（绿色单色梯度）+ 字号越大
+      11px(空白) → 12px(初窥) → 14px(入门) → 16px(熟练) → 18px(精通)
+    - 最小档（空白）字号 11px 仍可读；空白项用浅灰区分
+    - 鼠标悬停看 AC 数与等级
     """
     group_keys = (
         ("csp_j", "CSP-J 入门", "🌱"),
@@ -802,81 +843,181 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         ("noi", "NOI 级", "🏆"),
     )
 
+    # ---------- 图例 ----------
+    # 用"示例胶囊"展示每档的真实字号 + 颜色，让用户一眼看到梯度
+    # （文字固定深色避免白字在白底消失）
+    legend_items = "".join(
+        f'<span class="kt-legend-item">'
+        f'<span class="kt-leaf kt-l{name}" style="font-size:{fs}px;">'
+        f'<span class="kt-leaf-name">{name}</span>'
+        f'<em style="display:none;">0</em>'
+        f'</span></span>'
+        for name, (fs, fw, fg, bd, bg) in _LEVEL_VIS.items()
+    )
     legend = (
-        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 14px 0;'
-        'font-size:12px;color:#374151;">'
+        '<div class="kt-legend">'
         '<span style="font-weight:600;color:#1F2937;">图例：</span>'
-        + "".join(
-            f'<span style="display:inline-flex;align-items:center;gap:4px;">'
-            f'<span style="display:inline-block;width:14px;height:14px;border-radius:4px;'
-            f'background:{bg};border:1px solid {bd};"></span>'
-            f'<span style="color:{fg};">{name}</span></span>'
-            for name, (fg, bd, bg) in _LEVEL_STYLES.items()
-        )
-        + '<span style="color:#6B7280;">（颜色越深 = AC 数越多 = 掌握越好；灰白 = 完全未接触）</span>'
-        "</div>"
+        + legend_items
+        + '<span style="color:#6B7280;">'
+        '（颜色越深 + 字号越大 = AC 数越多 = 掌握越好；灰 = 未接触）'
+        '</span></div>'
     )
 
-    branches_html: list[str] = []
+    # ---------- 4 个子树 ----------
+    blocks: list[str] = []
     for key, title, icon in group_keys:
         group = syllabus_eval.get(key, {}) or {}
         details = group.get("details", []) or []
         stats = group.get("stats", {}) or {}
         coverage = group.get("coverage", 0)
         total = int(stats.get("total", 0))
-        red = int(stats.get("空白", 0))
+        blank = int(stats.get("空白", 0))
+        lit = total - blank
 
-        topic_chips: list[str] = []
+        # 按分类聚合；保持分类的"出现顺序"（出现过的优先，未出现过的隐藏）
+        cat_to_topics: dict[str, list[tuple[str, int, str]]] = {}
+        cat_order: list[str] = []
         for item in details:
-            topic = str(item.get("topic", ""))
+            topic = str(item.get("topic", "")).strip()
+            if not topic:
+                continue
             ac = int(item.get("ac_count", 0) or 0)
             level = _level_for_ac(ac)
-            fg, bd, bg = _LEVEL_STYLES[level]
-            # 空白项 40% 透明度，看起来"未点亮"
-            opacity = "0.45" if level == "空白" else "1"
-            # 边框粗细：接触的更显眼
-            border_w = "1px" if level == "空白" else ("2px" if level in ("初窥", "入门") else "2.5px")
-            topic_chips.append(
-                f'<span title="{topic} · AC {ac} · {level}" '
-                f'style="display:inline-flex;align-items:center;gap:4px;'
-                f'padding:4px 9px;border-radius:9999px;'
-                f'background:{bg};border:{border_w} solid {bd};'
-                f'color:{fg};font-size:12.5px;font-weight:600;'
-                f'opacity:{opacity};cursor:default;'
-                f'box-shadow:0 1px 2px rgba(0,0,0,0.04);">'
-                f'<span>{topic}</span>'
-                f'<span style="opacity:0.75;font-size:11px;font-weight:500;">{ac}</span>'
-                f'</span>'
-            )
+            cat = _classify_topic(topic)
+            if cat not in cat_to_topics:
+                cat_to_topics[cat] = []
+                cat_order.append(cat)
+            cat_to_topics[cat].append((topic, ac, level))
 
-        # 分支根节点 + 子节点列表
-        branches_html.append(
-            f'<div style="border:1px solid #E5E7EB;border-radius:14px;'
-            f'padding:14px 14px 12px 14px;background:#FFFFFF;'
-            f'box-shadow:0 1px 3px rgba(0,0,0,0.04);">'
-            f'<div style="display:flex;align-items:center;justify-content:space-between;'
-            f'margin-bottom:10px;">'
-            f'<div style="font-weight:700;font-size:15px;color:#111827;">'
-            f'{icon} {title}</div>'
-            f'<div style="font-size:12px;color:#6B7280;">'
-            f'已点亮 <span style="color:#059669;font-weight:700;">{total - red}</span>'
-            f' / {total}（{coverage}%）</div>'
+        # 按掌握度降序排（AC 多的在上面），便于一眼看出强弱
+        for cat in cat_to_topics:
+            cat_to_topics[cat].sort(key=lambda t: -t[1])
+
+        # 组装该子树的 HTML
+        if not cat_order:
+            cat_html = (
+                '<div style="color:#9CA3AF;font-size:12px;padding:4px 0 4px 8px;">'
+                '（该级别暂无知识点数据）</div>'
+            )
+        else:
+            cat_lis: list[str] = []
+            for cat in cat_order:
+                items = cat_to_topics[cat]
+                # 分类小帽 + 叶子列表
+                leaf_spans: list[str] = []
+                for topic, ac, level in items:
+                    fs, fw, fg, bd, bg = _LEVEL_VIS[level]
+                    leaf_spans.append(
+                        f'<li>'
+                        f'<span class="kt-leaf kt-l{level}" '
+                        f'title="{topic} · AC {ac} · {level}">'
+                        f'<span class="kt-leaf-name">{topic}</span>'
+                        f'<em>{ac}</em>'
+                        f'</span>'
+                        f'</li>'
+                    )
+                # 该分类下 5 档中最高的等级（用于决定分组颜色边框）
+                lvls = {it[2] for it in items}
+                cat_color = "#10B981"  # 默认绿
+                if "精通" in lvls or "熟练" in lvls:
+                    cat_color = "#15803D"  # 深绿
+                elif "入门" in lvls:
+                    cat_color = "#22C55E"  # 中绿
+                elif "初窥" in lvls:
+                    cat_color = "#3B82F6"  # 蓝
+
+                cat_lis.append(
+                    f'<li class="kt-cat-row">'
+                    f'<span class="kt-cat" style="border-left-color:{cat_color};">'
+                    f'{cat} <span style="color:#9CA3AF;font-weight:500;font-size:11px;">'
+                    f'· {len(items)}</span></span>'
+                    f'<ul class="kt-leaves">'
+                    + "".join(leaf_spans)
+                    + "</ul></li>"
+                )
+            cat_html = '<ul class="kt-tree">' + "".join(cat_lis) + "</ul>"
+
+        # 子树根
+        root_html = (
+            f'<div class="kt-root">'
+            f'<span>{icon} {title}</span>'
+            f'<span class="kt-meta">已点亮 <b>{lit}</b> / {total}'
+            f'（{coverage}%）</span>'
             f'</div>'
-            f'<div style="display:flex;flex-wrap:wrap;gap:6px;line-height:1.6;">'
-            + "".join(topic_chips)
-            + "</div></div>"
         )
 
-    # 整体用 grid 排版（>=900px 时 2 列；>=1200px 时 4 列；否则 1 列）
-    html = (
-        '<div style="margin:8px 0 18px 0;">'
+        blocks.append(
+            f'<div class="kt-block">{root_html}{cat_html}</div>'
+        )
+
+    # ---------- CSS（嵌在 div 内，仅影响本节） ----------
+    # 树线、字号梯度、颜色都集中在此；不污染其他模块
+    style_block = """
+<style>
+.kt-block { margin: 0 0 16px 0; }
+.kt-root {
+  font-weight: 700; font-size: 16px; color: #065F46;
+  border-bottom: 1.5px solid #10B981;
+  padding: 4px 0 6px 0; margin: 6px 0 8px 0;
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px;
+}
+.kt-root .kt-meta { font-size: 12px; color: #6B7280; font-weight: 500; }
+.kt-root .kt-meta b { color: #059669; font-weight: 700; }
+.kt-cat-row { margin: 0; padding: 0; }
+.kt-cat {
+  display: inline-block; font-weight: 700; font-size: 13px; color: #374151;
+  background: #F9FAFB; border-left: 3px solid #10B981;
+  padding: 2px 8px; border-radius: 0 6px 6px 0;
+  margin: 4px 0 2px 0;
+}
+.kt-tree, .kt-leaves {
+  list-style: none; padding-left: 18px; margin: 2px 0 6px 0;
+}
+.kt-tree > li, .kt-leaves > li {
+  position: relative; padding: 3px 0 3px 4px; margin: 0;
+}
+.kt-tree > li::before, .kt-leaves > li::before {
+  content: ''; position: absolute; left: -8px; top: 0; bottom: 0;
+  width: 1.5px; background: #C7CDD6;
+}
+.kt-tree > li::after, .kt-leaves > li::after {
+  content: ''; position: absolute; left: -8px; top: 14px;
+  width: 9px; height: 1.5px; background: #C7CDD6;
+}
+.kt-leaves > li:first-child::before { top: 14px; }
+.kt-leaves > li:last-child::before { bottom: auto; height: 14px; }
+.kt-leaf {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 2px 9px; border-radius: 9999px; border: 1.5px solid;
+  font-weight: 600; line-height: 1.3; cursor: default;
+  white-space: nowrap;
+}
+.kt-leaf em {
+  font-style: normal; font-weight: 500; opacity: 0.7; font-size: 0.82em;
+  margin-left: 2px;
+}
+.kt-leaf-name { white-space: nowrap; }
+.kt-l精通 { font-size: 18px; color: #FFFFFF; border-color: #14532D; background: #15803D; font-weight: 700; }
+.kt-l熟练 { font-size: 16px; color: #FFFFFF; border-color: #15803D; background: #22C55E; font-weight: 700; }
+.kt-l入门 { font-size: 14px; color: #14532D; border-color: #86EFAC; background: #BBF7D0; font-weight: 600; }
+.kt-l初窥 { font-size: 12px; color: #1E40AF; border-color: #93C5FD; background: #DBEAFE; font-weight: 500; }
+.kt-l空白 { font-size: 11px; color: #6B7280; border-color: #E5E7EB; background: #F3F4F6; font-weight: 400; }
+.kt-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 14px 0;
+  font-size: 12px; color: #374151; align-items: center; }
+.kt-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.kt-legend-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 9999px;
+  border: 1px solid; }
+</style>
+""".strip()
+
+    return (
+        '<div class="kt-section" style="margin:8px 0 18px 0;">'
         + legend
-        + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));'
-        'gap:14px;">'
-        + "".join(branches_html)
-        + "</div></div>"
+        + style_block
+        + "".join(blocks)
+        + "</div>"
     )
-    return html
 
 
 def normalize_report_markdown(report_md: str, export_data: dict) -> str:
