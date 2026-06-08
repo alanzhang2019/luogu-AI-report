@@ -1,0 +1,43 @@
+{
+  "_comment": "2026 年 OI 赛事 + 政策日历种子数据。CCF 12 月公布下一年；本数据为占位骨架，录入时务必核对官网。",
+  "version": "2026.0",
+  "source": "CCF GESP 官网 + 洛谷 + 教育部",
+  "last_updated": "2026-01-15",
+  "competitions": [
+    {"code": "GESP-2026-03-L1-4", "name": "GESP 等级认证（1-4 级春考）", "type": "gesp", "level_min": 1, "level_max": 4, "exam_date": "2026-03-15", "registration_deadline": "2026-03-08", "target_audience": "小学 5-6 年级", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-03-L5-6", "name": "GESP 等级认证（5-6 级春考）", "type": "gesp", "level_min": 5, "level_max": 6, "exam_date": "2026-03-15", "registration_deadline": "2026-03-08", "target_audience": "初中", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-06-L1-4", "name": "GESP 等级认证（1-4 级夏考）", "type": "gesp", "level_min": 1, "level_max": 4, "exam_date": "2026-06-13", "registration_deadline": "2026-06-06", "target_audience": "小学 5-6 年级", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-06-L5-6", "name": "GESP 等级认证（5-6 级夏考）", "type": "gesp", "level_min": 5, "level_max": 6, "exam_date": "2026-06-13", "registration_deadline": "2026-06-06", "target_audience": "初中", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-09-L1-4", "name": "GESP 等级认证（1-4 级秋考）", "type": "gesp", "level_min": 1, "level_max": 4, "exam_date": "2026-09-12", "registration_deadline": "2026-09-05", "target_audience": "小学 5-6 年级", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-09-L7-8", "name": "GESP 等级认证（7-8 级秋考）", "type": "gesp", "level_min": 7, "level_max": 8, "exam_date": "2026-09-12", "registration_deadline": "2026-09-05", "target_audience": "高中", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-12-L1-4", "name": "GESP 等级认证（1-4 级冬考）", "type": "gesp", "level_min": 1, "level_max": 4, "exam_date": "2026-12-19", "registration_deadline": "2026-12-12", "target_audience": "小学 5-6 年级", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+    {"code": "GESP-2026-12-L5-8", "name": "GESP 等级认证（5-8 级冬考）", "type": "gesp", "level_min": 5, "level_max": 8, "exam_date": "2026-12-19", "registration_deadline": "2026-12-12", "target_audience": "初高中", "fee_cny": 240, "source_url": "https://gesp.ccf.org.cn", "data_year": 2026},
+
+    {"code": "CSP-J-1-2026", "name": "CSP-J 2026 第一轮（初赛）", "type": "csp_j1", "exam_date": "2026-09-19", "registration_deadline": "2026-09-05", "target_audience": "初中为主", "fee_cny": 50, "source_url": "https://www.cspro.org", "data_year": 2026, "notes": "GESP 7 级 80+ 或 8 级 60+ 可免"},
+    {"code": "CSP-S-1-2026", "name": "CSP-S 2026 第一轮（初赛）", "type": "csp_s1", "exam_date": "2026-09-19", "registration_deadline": "2026-09-05", "target_audience": "高中为主", "fee_cny": 50, "source_url": "https://www.cspro.org", "data_year": 2026, "notes": "GESP 8 级 80+ 可免"},
+    {"code": "CSP-J-2-2026", "name": "CSP-J 2026 第二轮（复赛）", "type": "csp_j2", "exam_date": "2026-10-31", "registration_deadline": "2026-10-25", "target_audience": "CSP-J 1 晋级者", "fee_cny": 100, "source_url": "https://www.cspro.org", "data_year": 2026},
+    {"code": "CSP-S-2-2026", "name": "CSP-S 2026 第二轮（复赛）", "type": "csp_s2", "exam_date": "2026-11-07", "registration_deadline": "2026-10-30", "target_audience": "CSP-S 1 晋级者", "fee_cny": 100, "source_url": "https://www.cspro.org", "data_year": 2026},
+
+    {"code": "NOIP-2026", "name": "NOIP 2026 全国赛", "type": "noip", "exam_date": "2026-11-28", "registration_deadline": "2026-11-20", "target_audience": "各省高一/高二", "fee_cny": 0, "source_url": "https://www.noi.cn", "data_year": 2026, "notes": "需省一等奖才能获 NOI 资格"},
+    {"code": "WC-2026", "name": "WC 2026 冬令营", "type": "wc", "exam_date": "2026-02-05", "registration_deadline": "2026-01-25", "target_audience": "NOIP 省一/省队", "fee_cny": 0, "source_url": "https://www.noi.cn", "data_year": 2026},
+    {"code": "APIO-2026", "name": "APIO 2026", "type": "apio", "exam_date": "2026-05-22", "registration_deadline": "2026-05-10", "target_audience": "国际赛，中国区各省", "fee_cny": 0, "source_url": "https://www.noi.cn", "data_year": 2026},
+    {"code": "CTSC-2026", "name": "CTSC 2026", "type": "ctsc", "exam_date": "2026-05-15", "registration_deadline": "2026-05-01", "target_audience": "NOI 候选队", "fee_cny": 0, "source_url": "https://www.noi.cn", "data_year": 2026},
+    {"code": "NOI-2026", "name": "NOI 2026", "type": "noi", "exam_date": "2026-07-15", "registration_deadline": "2026-07-01", "target_audience": "NOIP 省队/省一", "fee_cny": 0, "source_url": "https://www.noi.cn", "data_year": 2026, "notes": "国赛，保送/降分核心"}
+  ],
+  "policy_events": [
+    {"event_code": "QJ-2026-PUB", "name": "强基计划招生简章发布", "category": "qiangji", "event_date": "2026-03-25", "target_audience": "高三家长", "source_url": "https://gaokao.chsi.com.cn", "description": "39 所强基高校陆续发布当年招生简章。清华大学、北京大学、复旦大学、上海交通大学、浙江大学、中国科学技术大学、南京大学、西安交通大学", "data_year": 2026},
+    {"event_code": "QJ-2026-REG", "name": "强基计划报名", "category": "qiangji", "event_date": "2026-04-15", "target_audience": "高三家长 + 学员", "source_url": "https://gaokao.chsi.com.cn", "description": "阳光高考平台网上报名，5 月初统一考试", "data_year": 2026},
+    {"event_code": "QJ-2026-EXAM", "name": "强基计划校测", "category": "qiangji", "event_date": "2026-06-10", "target_audience": "通过初审高三学员", "source_url": "https://gaokao.chsi.com.cn", "description": "各校自行组织，5/3/2 高考后第二周集中校测", "data_year": 2026},
+    {"event_code": "GK-2026", "name": "全国高考", "category": "gaokao", "event_date": "2026-06-07", "target_audience": "高三学员", "source_url": "https://gaokao.chsi.com.cn", "description": "6 月 7-10 日全国统考", "data_year": 2026},
+    {"event_code": "ZK-2026", "name": "全国中考", "category": "zk_zhongkao", "event_date": "2026-06-15", "target_audience": "初三学员", "source_url": "https://www.edu.cn", "description": "6 月中下旬各省市组织，OI 特长生测试通常 4-5 月单独举行", "data_year": 2026}
+  ],
+  "exemption_rules": {
+    "_comment": "GESP 等级 → 分数阈值 → 免初赛。CCF 官方规则，可能调整，录入时务必核对官网。",
+    "source": "CCF GESP 官网 + CSP 官方公告",
+    "rules": {
+      "7": {"80": ["csp_j"]},
+      "8": {"60": ["csp_j"], "80": ["csp_j", "csp_s"]}
+    },
+    "expiry_note": "免初赛资格有效期及每年是否重新申请待 CCF 公告（v3.5 占位，2026 赛季启用后核对）"
+  }
+}

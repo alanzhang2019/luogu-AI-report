@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>luogu-AI-report · Admin 后端导航</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+  <div class="max-w-3xl mx-auto">
+    <div class="bg-gradient-to-r from-blue-900 via-indigo-700 to-purple-700 text-white rounded-xl p-6 mb-6 shadow-lg">
+      <h1 class="text-3xl font-bold mb-2">🛠️ Admin 后端导航</h1>
+      <p class="text-sm opacity-90">v3.5 学员档案 + GESP 段位 + 家长 + 目标 + 周报 + 激活码</p>
+      <p class="text-xs opacity-75 mt-2">Flask 服务 http://localhost:5000 · 静态面板 http://localhost:8765</p>
+    </div>
+
+    <!-- 登录信息 -->
+    <div class="bg-amber-50 border-l-4 border-amber-500 p-4 mb-6 rounded">
+      <p class="font-bold text-amber-900 mb-1">🔑 登录凭证</p>
+      <p class="text-sm text-amber-800">账号 <code class="bg-amber-100 px-2 py-0.5 rounded font-mono">admin</code> · 密码 <code class="bg-amber-100 px-2 py-0.5 rounded font-mono">KCJ@6666</code>（来自 .env）</p>
+    </div>
+
+    <!-- Admin 核心 -->
+    <div class="grid gap-4 mb-6">
+      <a href="http://localhost:5000/admin/students" target="_blank"
+         class="block bg-white rounded-xl shadow p-5 hover:shadow-lg transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-800">👥 学员档案列表</h2>
+            <p class="text-sm text-gray-500 mt-1">8 名 demo 学员 · 段位图 · 跳级状态 · 删除</p>
+          </div>
+          <span class="text-purple-600 text-2xl">→</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">/admin/students</p>
+      </a>
+
+      <a href="http://localhost:5000/admin/students/new" target="_blank"
+         class="block bg-white rounded-xl shadow p-5 hover:shadow-lg transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-800">➕ 新建学员</h2>
+            <p class="text-sm text-gray-500 mt-1">uid / 昵称 / 学校 / is_minor / 当前 GESP 等级</p>
+          </div>
+          <span class="text-purple-600 text-2xl">→</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">/admin/students/new</p>
+      </a>
+
+      <a href="http://localhost:5000/admin" target="_blank"
+         class="block bg-white rounded-xl shadow p-5 hover:shadow-lg transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-800">🏠 Admin 后台首页</h2>
+            <p class="text-sm text-gray-500 mt-1">进行中任务数 · 入口总览</p>
+          </div>
+          <span class="text-purple-600 text-2xl">→</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">/admin</p>
+      </a>
+    </div>
+
+    <!-- 学员详情（8 个） -->
+    <h2 class="text-xl font-bold text-gray-800 mb-3 mt-6">👤 学员详情（8 名 demo）</h2>
+    <div class="grid grid-cols-2 gap-3 mb-6">
+      <a href="http://localhost:5000/admin/students/6" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#6</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/7" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#7</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/8" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#8</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/15" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#15</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/21" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#21</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/26" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#26</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/31" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#31</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+      <a href="http://localhost:5000/admin/students/32" target="_blank" class="block bg-white rounded-lg shadow p-3 hover:shadow-md transition">
+        <p class="font-mono text-sm text-purple-700">#32</p>
+        <p class="text-xs text-gray-500">含家长 / GESP / 目标</p>
+      </a>
+    </div>
+
+    <!-- 家长端（无登录） -->
+    <h2 class="text-xl font-bold text-gray-800 mb-3 mt-6">👪 家长端（无登录 · token 直链）</h2>
+    <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4 mb-4 rounded">
+      <p class="text-sm text-emerald-800">测试学员：<code class="bg-emerald-100 px-2 py-0.5 rounded font-mono">uid=999105 (李同学, sid=15)</code> · 测试妈妈：<code class="bg-emerald-100 px-2 py-0.5 rounded font-mono">测试妈妈</code> · 30 天有效</p>
+    </div>
+    <div class="grid gap-3 mb-6">
+      <a href="http://localhost:5000/parent/wHLwxI4GTp4SBdSdRBdycldJMSUDYD_LouO0Rv4wZ6w" target="_blank"
+         class="block bg-white rounded-lg shadow p-4 hover:shadow-md transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-bold text-gray-800">🏠 家长面板首页（学员卡片 + 周报列表 + 目标路径）</p>
+            <p class="text-xs text-gray-400 mt-1">/parent/&lt;token&gt; · 包含段位 / 强基 / 跳级建议</p>
+          </div>
+          <span class="text-purple-600 text-2xl">→</span>
+        </div>
+      </a>
+      <a href="http://localhost:5000/parent/wHLwxI4GTp4SBdSdRBdycldJMSUDYD_LouO0Rv4wZ6w/report/2" target="_blank"
+         class="block bg-white rounded-lg shadow p-4 hover:shadow-md transition">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-bold text-gray-800">📄 周报详情 (2026-06-01 · GESP 段位 + 倒计时 + 强基 5 校)</p>
+            <p class="text-xs text-gray-400 mt-1">/parent/&lt;token&gt;/report/2 · 访问后 open_count + 1</p>
+          </div>
+          <span class="text-purple-600 text-2xl">→</span>
+        </div>
+      </a>
+    </div>
+    <h2 class="text-xl font-bold text-gray-800 mb-3 mt-6">📊 静态面板预览（端口 8765）</h2>
+    <div class="grid gap-3 mb-6">
+      <a href="http://localhost:8765/studymate_panels/batch_common_mistakes.html" target="_blank"
+         class="block bg-white rounded-lg shadow p-4 hover:shadow-md transition">
+        <p class="font-bold text-gray-800">🤖 班级共性错题（教练视角）</p>
+        <p class="text-xs text-gray-400 mt-1">studymate_panels/batch_common_mistakes.html</p>
+      </a>
+      <a href="http://localhost:8765/studymate_panels/phase3_dashboard.html" target="_blank"
+         class="block bg-white rounded-lg shadow p-4 hover:shadow-md transition">
+        <p class="font-bold text-gray-800">📊 Phase 3 完整 Dashboard</p>
+        <p class="text-xs text-gray-400 mt-1">studymate_panels/phase3_dashboard.html</p>
+      </a>
+      <a href="http://localhost:8765/studymate_panels/student_960557_panel.html" target="_blank"
+         class="block bg-white rounded-lg shadow p-4 hover:shadow-md transition">
+        <p class="font-bold text-gray-800">👤 学员 Pro 错题本 (960557, 582 题)</p>
+        <p class="text-xs text-gray-400 mt-1">studymate_panels/student_960557_panel.html</p>
+      </a>
+    </div>
+
+    <p class="text-center text-xs text-gray-400 mt-8">v3.5 Phase 1+2+3 · Admin 后端 + 静态面板 双服务</p>
+  </div>
+</body>
+</html>
