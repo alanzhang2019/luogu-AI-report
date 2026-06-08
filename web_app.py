@@ -350,7 +350,9 @@ def describe_generation_error(exc: Exception, stage: str) -> str:
             base_detail += f" [code={code}]"
     except Exception:
         pass
-    print(f"[ERROR][{stage}] {base_detail}", flush=True)
+    import traceback
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(f"[ERROR][{stage}] {base_detail}\n{tb}", flush=True)
     return stage_prefix + f"{base_detail}"
 
 
