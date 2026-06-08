@@ -471,6 +471,28 @@ INDEX_HTML = """
         .role-card-amber:hover{border-color:#f59e0b;box-shadow:0 8px 20px rgba(245,158,11,.15);}
         .engine-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
         .role-emoji{font-size:32px;line-height:1;margin-bottom:4px;display:block;}
+        /* Cookie guide mock (self-contained DevTools schematic) */
+        .cg-mock{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#1f2937;font-size:11px;}
+        .cg-titlebar{background:#e5e7eb;padding:5px 8px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #d1d5db;}
+        .cg-dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+        .cg-r{background:#ef4444;} .cg-y{background:#eab308;} .cg-g{background:#22c55e;}
+        .cg-url{flex:1;background:#fff;border:1px solid #d1d5db;border-radius:3px;padding:2px 8px;font-size:10.5px;color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .cg-tabs{display:flex;background:#f3f4f6;border-bottom:1px solid #d1d5db;font-size:10.5px;color:#6b7280;overflow-x:auto;}
+        .cg-tab{padding:5px 10px;border-right:1px solid #e5e7eb;white-space:nowrap;}
+        .cg-tab.cg-on{background:#fff;color:#2563eb;font-weight:700;border-bottom:2px solid #2563eb;}
+        .cg-body{display:flex;background:#fff;min-height:160px;}
+        .cg-tree{flex:0 0 44%;border-right:1px solid #e5e7eb;padding:6px 8px;font-size:11px;line-height:1.55;color:#374151;}
+        .cg-indent{padding-left:10px;}
+        .cg-indent-2{padding-left:22px;}
+        .cg-sel{background:#fef3c7;padding:1px 5px;border-radius:2px;color:#92400e;}
+        .cg-tip{color:#9ca3af;font-size:10px;margin-left:2px;}
+        .cg-table{flex:1;padding:0;font-size:11px;}
+        .cg-th{background:#f9fafb;padding:4px 8px;font-weight:600;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:10.5px;}
+        .cg-tr{padding:4px 8px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:6px;}
+        .cg-tr.cg-hl{background:#fef3c7;}
+        .cg-tr.cg-hl b{color:#b45309;}
+        .cg-val{color:#9ca3af;font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .cg-tag{background:#fbbf24;color:#78350f;font-size:9.5px;padding:1px 6px;border-radius:8px;font-weight:700;letter-spacing:.5px;flex-shrink:0;}
     </style>
 </head>
 <body class="app-body p-4">
@@ -1212,10 +1234,61 @@ def run_generation(task_id: str, form: dict):
         luogu.get_record_list(page=1, uid=uid, user=str(uid))
 
         all_passed, all_failed = split_practice_problems(practice)
-        with TASKS_LOCK:
-            update_task(task_id, message="正在补全题目标签数据...")
+
+        # 预判：是否需要补全标签？避免无意义地卡在"正在补全题目标签数据..."上
+        tag_already_present = sum(
+            1 for p in all_passed if list(getattr(p, "tags", []) or [])
+        )
+        tag_missing = len(all_passed) - tag_already_present
         current_stage = "补全题目标签"
-        enrich_problem_tags(luogu, all_passed)
+
+        # 标签补全进度回调
+        tag_last_update = [0.0]
+
+        def _on_tag_progress(fetched: int, enriched: int, total_missing: int) -> None:
+            if total_missing <= 0:
+                return
+            now = time.time()
+            # 限制更新频率：每 0.4s 或每 5 题一次
+            if (now - tag_last_update[0]) < 0.4 and fetched % 5 != 0 and fetched != total_missing:
+                return
+            tag_last_update[0] = now
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=(
+                        f"正在补全题目标签（按需抓取，最慢的阶段）... "
+                        f"已补全 {enriched}/{total_missing} 题（已抓 {fetched} 题详情）"
+                    ),
+                    stage=current_stage,
+                    tag_fetch_success=enriched,
+                    tag_fetch_total=total_missing,
+                )
+
+        if tag_missing > 0:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=(
+                        f"正在补全题目标签（按需抓取，最慢的阶段）... "
+                        f"0/{tag_missing} 题"
+                    ),
+                    stage=current_stage,
+                    tag_fetch_success=0,
+                    tag_fetch_total=tag_missing,
+                )
+            enrich_problem_tags(luogu, all_passed, progress_callback=_on_tag_progress)
+        else:
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=(
+                        f"题目标签已齐全（{tag_already_present} 题均有标签，无需补全）"
+                    ),
+                    stage=current_stage,
+                    tag_fetch_success=0,
+                    tag_fetch_total=0,
+                )
 
         all_passed.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
         all_failed.sort(key=lambda p: (p.difficulty if p.difficulty is not None else 10, p.pid), reverse=True)
@@ -1296,26 +1369,14 @@ def run_generation(task_id: str, form: dict):
             )
         _maybe_update_progress(force=True)
 
-        for idx, problem in enumerate(pending_passed_problems):
-            try:
-                record = _pick_record_for_problem(
-                    luogu=luogu,
-                    uid=uid,
-                    pid=problem.pid,
-                    max_records_to_try=5,
-                    require_source_code=True,
-                    detail_fetch_state=detail_fetch_state,
-                )
-            except Exception as e:
-                record = {"error": str(e)}
-            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
-            passed_items.append({"problem": problem.to_json(), "record": record})
-            processed += 1
-            if _is_source_code_present(record):
-                source_code_success += 1
-            _maybe_update_progress()
+        # 并发抓取源码：4 worker，httpx.Client 线程安全；detail_fetch_state 复制到线程内避免跨线程改
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        for idx, problem in enumerate(pending_failed_problems):
+        SOURCE_FETCH_CONCURRENCY = 4
+        _state_lock = threading.Lock()
+
+        def _fetch_one_record(problem):
+            state_snapshot = dict(detail_fetch_state)
             try:
                 record = _pick_record_for_problem(
                     luogu=luogu,
@@ -1323,16 +1384,36 @@ def run_generation(task_id: str, form: dict):
                     pid=problem.pid,
                     max_records_to_try=5,
                     require_source_code=True,
-                    detail_fetch_state=detail_fetch_state,
+                    detail_fetch_state=state_snapshot,
                 )
             except Exception as e:
                 record = {"error": str(e)}
-            save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
-            failed_items.append({"problem": problem.to_json(), "record": record})
-            processed += 1
-            if _is_source_code_present(record):
-                source_code_success += 1
-            _maybe_update_progress()
+            # 跨线程合并 circuit breaker 状态
+            with _state_lock:
+                if state_snapshot.get("stop_detail_fetch") and not detail_fetch_state.get("stop_detail_fetch"):
+                    detail_fetch_state["stop_detail_fetch"] = True
+                    detail_fetch_state["last_detail_error"] = state_snapshot.get("last_detail_error")
+            return record
+
+        def _run_concurrently(problems, items_sink):
+            nonlocal processed, source_code_success
+            with ThreadPoolExecutor(max_workers=SOURCE_FETCH_CONCURRENCY) as ex:
+                futures = {ex.submit(_fetch_one_record, p): p for p in problems}
+                for fut in as_completed(futures):
+                    problem = futures[fut]
+                    try:
+                        record = fut.result()
+                    except Exception as e:
+                        record = {"error": str(e)}
+                    save_cached_source_record(uid, problem.pid, record if isinstance(record, dict) else None)
+                    items_sink.append({"problem": problem.to_json(), "record": record})
+                    processed += 1
+                    if _is_source_code_present(record):
+                        source_code_success += 1
+                    _maybe_update_progress()
+
+        _run_concurrently(pending_passed_problems, passed_items)
+        _run_concurrently(pending_failed_problems, failed_items)
 
         _maybe_update_progress(force=True)
         detail_fetch_stats = summarize_detail_fetch_stats(passed_items, failed_items, detail_fetch_state)
@@ -1486,6 +1567,17 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
+        {% if tag_fetch_total and tag_fetch_total|int > 0 %}
+        <div class="mb-4 text-left">
+            <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
+                <span>标签补全进度</span>
+                <span class="font-semibold text-gray-800">{{ tag_fetch_success }}/{{ tag_fetch_total }}</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div class="bg-amber-500 h-3" style="width: {{ (100 * (tag_fetch_success|int) / (tag_fetch_total|int)) if (tag_fetch_total|int) > 0 else 0 }}%;"></div>
+            </div>
+        </div>
+        {% endif %}
         {% if stage == '生成 AI 报告' %}
         <div class="mb-4 text-left">
             <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
@@ -1537,6 +1629,8 @@ def status_page(task_id):
         stage=str(task.get("stage", "") or ""),
         source_code_success=int(task.get("source_code_success", 0) or 0),
         source_code_total=int(task.get("source_code_total", 0) or 0),
+        tag_fetch_success=int(task.get("tag_fetch_success", 0) or 0),
+        tag_fetch_total=int(task.get("tag_fetch_total", 0) or 0),
         ai_progress=int(task.get("ai_progress", 0) or 0),
         ai_elapsed_seconds=int(task.get("ai_elapsed_seconds", 0) or 0),
         html=task.get("html", ""),
@@ -1556,6 +1650,20 @@ def retry_task(task_id):
     if can_resume_from_ai_stage(task):
         snapshot["resume_task_id"] = task_id
     return render_index(form=snapshot)
+
+
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    """Serve static assets (e.g. cookies guide image) from the project root."""
+    static_root = (_ROOT / "static").resolve()
+    target = (static_root / filename).resolve()
+    try:
+        target.relative_to(static_root)
+    except ValueError:
+        return ("Forbidden", 403)
+    if target.is_file():
+        return send_file(str(target), conditional=True)
+    return ("Not Found", 404)
 
 
 @app.route("/reports/<path:filename>")

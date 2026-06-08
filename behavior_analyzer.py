@@ -216,45 +216,157 @@ def compute_personality_scores(behavior_data: dict) -> dict[str, int]:
     """
     计算性格画像各维度的评分 (0-100)
     包含: 坚韧度, 完美主义, 冒险精神, 自律性, 调试耐心, 作息规律
+
+    设计目标：与 LLM 文字评级同向同量级。
+    LLM 5/4/3/2/1 星 ≈ 90/70/50/30/15 分。
     """
     scores = {}
 
-    # 1. 坚韧度 (根据死磕题目数量和整体放弃率)
     stuck_problems = behavior_data.get("stuck_problems", [])
     total_records = behavior_data.get("total_records", 1)
-    stuck_score = min(100, 50 + len(stuck_problems) * 5)
-    ac_rate = behavior_data.get("ac_rate", 0.5)
-    scores["坚韧度"] = int(stuck_score * 0.7 + ac_rate * 100 * 0.3)
-
-    # 2. 完美主义 (简化：根据AC率和CE率反向推断，暂用一次AC率作为参考)
-    first_try_rate = behavior_data.get("first_try_ac_rate", 0)
-    ce_rate = behavior_data.get("ce_rate", 0)
-    scores["完美主义"] = int(max(0, min(100, 40 + first_try_rate * 100 * 0.8 - ce_rate * 100)))
-
-    # 3. 冒险精神 (根据未AC但多次尝试的比例，或者尝试新题的频率)
-    # 这里用未AC死磕题目的比例粗略估计
-    stuck_unac = sum(1 for p in stuck_problems if p.get("final_status") != "AC")
-    scores["冒险精神"] = int(min(100, 60 + stuck_unac * 10))
-
-    # 4. 自律性 (根据活跃率和连续训练天数)
-    active_rate = behavior_data.get("active_rate", 0)
-    max_consecutive = behavior_data.get("max_consecutive_days", 0)
-    scores["自律性"] = int(min(100, active_rate * 100 * 0.6 + max_consecutive * 5))
-
-    # 5. 调试耐心 (根据WA后重交间隔，间隔长说明有耐心分析)
-    debug = behavior_data.get("debug_patience", {})
+    total_tried = behavior_data.get("total_unique_problems", 1) or 1
+    ac_rate = behavior_data.get("ac_rate", 0) or 0
+    first_try_rate = behavior_data.get("first_try_ac_rate", 0) or 0
+    ce_rate = behavior_data.get("ce_rate", 0) or 0
+    active_rate = behavior_data.get("active_rate", 0) or 0
+    max_consecutive = behavior_data.get("max_consecutive_days", 0) or 0
+    debug = behavior_data.get("debug_patience", {}) or {}
+    quick_rate = debug.get("quick_resubmit_under_60s_rate", 0) or 0
     median_interval = debug.get("median_resubmit_interval_seconds") or 60
-    # 假设300秒(5分钟)为满分基准
-    patience_score = min(100, (median_interval / 300) * 100)
-    scores["调试耐心"] = int(max(20, patience_score))
 
-    # 6. 作息规律 (根据深夜提交比例反向扣分)
-    time_slots = behavior_data.get("time_slot_distribution", {})
-    midnight_submits = time_slots.get("凌晨 (0-5点)", 0)
-    late_submits = time_slots.get("晚上 (20-23点)", 0)
+    # ---- 1. 坚韧度 (Perseverance) ----
+    # 单题死磕强度是核心：30+ 次的卡题 = 顶级坚韧
+    stuck_count = len(stuck_problems)
+    max_stuck = max((p.get("submit_count", 0) for p in stuck_problems), default=0)
+    avg_stuck = (
+        sum(p.get("submit_count", 0) for p in stuck_problems) / stuck_count
+        if stuck_count else 0
+    )
+    if max_stuck >= 20:
+        base_pers = 70
+    elif max_stuck >= 10:
+        base_pers = 50
+    elif max_stuck >= 5:
+        base_pers = 38
+    elif stuck_count >= 3:
+        base_pers = 32
+    else:
+        base_pers = 18
+    count_bonus = min(20, stuck_count * 4)
+    avg_bonus = min(10, avg_stuck * 0.5)
+    # AC 率 >= 5% 时按比例加分
+    ac_factor = max(0.0, min(15.0, (ac_rate - 0.05) * 50))
+    scores["坚韧度"] = int(max(0, min(100, base_pers + count_bonus + avg_bonus + ac_factor)))
+
+    # ---- 2. 完美主义 (Perfectionism) ----
+    # 一次 AC 率高 = 写代码细致 + CE 率低 = 语法不马虎 + 不急着重交
+    first_try_score = first_try_rate * 55
+    ce_penalty = ce_rate * 35
+    not_rush_score = (1 - quick_rate) * 20
+    scores["完美主义"] = int(max(0, min(100, first_try_score + not_rush_score - ce_penalty)))
+
+    # ---- 3. 冒险精神 (Adventurous Spirit) ----
+    # 卡题数量 + 卡题强度（≥5 次的算高强度挑战）
+    stuck_count_score = min(40, stuck_count * 8)
+    hard_stuck = sum(1 for p in stuck_problems if p.get("submit_count", 0) >= 5)
+    hard_score = min(30, hard_stuck * 10)
+    base = 25
+    scores["冒险精神"] = int(max(0, min(100, stuck_count_score + hard_score + base)))
+
+    # ---- 4. 自律性 (Self-Discipline) ----
+    # 时段集中度（top 3 小时占比）+ 峰值集中度 + 星期集中度 + 持续性
+    hourly = behavior_data.get("hourly_distribution", {}) or {}
+    total_h = sum(hourly.values()) or 1
+    sorted_counts = sorted(hourly.values(), reverse=True) if hourly else []
+    top1 = sorted_counts[0] if sorted_counts else 0
+    top3 = sum(sorted_counts[:3])
+    top1_share = top1 / total_h
+    top3_share = top3 / total_h
+
+    if top3_share >= 0.5:
+        time_score = 55
+    elif top3_share >= 0.4:
+        time_score = 42
+    elif top3_share >= 0.3:
+        time_score = 30
+    else:
+        time_score = 20
+    # peak 小时单独大权重（"7:00 整点 106 次"这种信号）
+    time_score += min(25, top1_share * 65)
+    # 固定训练小时数（每小时达到峰值 1/3 的算"固定时段"）
+    threshold = top1 / 3 if top1 else 0
+    fixed_hours = sum(1 for v in hourly.values() if v >= threshold and v > 0)
+    time_score += min(15, fixed_hours * 2)
+
+    wd = behavior_data.get("weekend_vs_weekday", {}) or {}
+    we_total = wd.get("周末", 0) + wd.get("工作日", 0)
+    weekend_share = (wd.get("周末", 0) / we_total) if we_total > 0 else 0.5
+    # 0=工作日集中, 1=周末集中, 偏离 0.5 越远 = 越有固定训练时段
+    week_concentration = abs(weekend_share - 0.5) * 2
+    week_score = week_concentration * 20
+
+    habit_score = min(20, max_consecutive * 0.7 + active_rate * 100 * 0.15)
+
+    scores["自律性"] = int(max(0, min(100, time_score + week_score + habit_score)))
+
+    # ---- 5. 调试耐心 (Debugging Patience) ----
+    # 主信号：1 分钟内快速重交占比（越低越耐心）
+    if quick_rate < 0.10:
+        base_dp = 80
+    elif quick_rate < 0.20:
+        base_dp = 65
+    elif quick_rate < 0.30:
+        base_dp = 50
+    elif quick_rate < 0.40:
+        base_dp = 40
+    elif quick_rate < 0.50:
+        base_dp = 32
+    else:
+        base_dp = 25
+    # 中位数间隔微调
+    if median_interval >= 600:
+        base_dp += 15
+    elif median_interval >= 300:
+        base_dp += 10
+    elif median_interval >= 120:
+        base_dp += 5
+    elif median_interval < 60:
+        base_dp -= 5
+    scores["调试耐心"] = int(max(15, min(100, base_dp)))
+
+    # ---- 6. 作息规律 (Rest Pattern) ----
+    # 核心信号：训练时段集中度（top 2 时段占比，越集中 = 越有固定作息）
+    time_slots = behavior_data.get("time_slot_distribution", {}) or {}
     total_slots = sum(time_slots.values()) or 1
-    bad_time_rate = (midnight_submits * 2 + late_submits * 0.5) / total_slots
-    scores["作息规律"] = int(max(0, 100 - bad_time_rate * 100))
+    sorted_slot_vals = sorted(time_slots.values(), reverse=True)
+    top2_slots = sum(sorted_slot_vals[:2])
+    top2_share = top2_slots / total_slots
+
+    if top2_share >= 0.95:
+        base_rp = 90
+    elif top2_share >= 0.85:
+        base_rp = 75
+    elif top2_share >= 0.70:
+        base_rp = 60
+    elif top2_share >= 0.50:
+        base_rp = 45
+    else:
+        base_rp = 30
+
+    # 健康时段（早晨/上午/下午）比例微调
+    healthy_keys = ["早晨 (6-9点)", "上午 (9-12点)", "下午 (13-17点)"]
+    healthy = sum(time_slots.get(k, 0) for k in healthy_keys)
+    healthy_share = healthy / total_slots
+    if healthy_share >= 0.70:
+        health_adj = 10
+    elif healthy_share >= 0.40:
+        health_adj = 5
+    elif healthy_share >= 0.20:
+        health_adj = 0
+    else:
+        health_adj = -5
+
+    scores["作息规律"] = int(max(0, min(100, base_rp + health_adj)))
 
     return scores
 

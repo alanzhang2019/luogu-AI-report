@@ -22,14 +22,15 @@ class luoguAPI(SyncLuoguTransportMixin):
             self,
             base_url="https://www.luogu.com.cn",
             cookies: LuoguCookies | None = None,
-            timeout: float | httpx.Timeout | None = 10,
-            max_retries: int = 5,
+            timeout: float | httpx.Timeout | None = 30,
+            max_retries: int = 10,
     ):
         self._init_transport(base_url, cookies, max_retries)
         self.client = httpx.Client(
             timeout=timeout,
             cookies=self.cookies,
             follow_redirects=True,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=10),
         )
 
     def close(self) -> None:

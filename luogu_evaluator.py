@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from env_loader import load_dotenv
 
@@ -551,17 +551,33 @@ def enrich_problem_tags(
     problems: list[pyLuogu.ProblemSummary],
     *,
     max_fetch: int | None = None,
+    progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> int:
     """
     为缺失 tags 的题目按需补全标签。
     优先使用 practice.problems 自带标签；只有为空时才走 problem_detail 兜底。
     返回本次成功补全的题目数量。
+
+    progress_callback(fetched, enriched, total_missing) 在每道题处理完后调用，
+    用于向前端实时反馈标签抓取进度；传 None 则不回调。
     """
     enriched = 0
     fetched = 0
     cache: dict[str, list[int]] = {}
 
-    for problem in problems:
+    # 先一次性统计需要补全的题目总数，方便前端显示 "X/Y" 进度
+    missing_indices = [
+        i for i, p in enumerate(problems)
+        if not list(getattr(p, "tags", []) or [])
+    ]
+    total_missing = len(missing_indices)
+    if progress_callback is not None:
+        try:
+            progress_callback(0, 0, total_missing)
+        except Exception:
+            pass
+
+    for idx, problem in enumerate(problems):
         existing_tags = list(getattr(problem, "tags", []) or [])
         if existing_tags:
             continue
@@ -583,6 +599,12 @@ def enrich_problem_tags(
                 enriched += 1
         except Exception:
             continue
+
+        if progress_callback is not None:
+            try:
+                progress_callback(fetched, enriched, total_missing)
+            except Exception:
+                pass
 
     return enriched
 
@@ -729,7 +751,273 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         ]
     )
 
+    # 知识树图谱（HTML 块，python-markdown 会原样保留到最终 HTML）
+    # 关键：包一层 page-break + 大标题，让它独占一页、视觉上不会被表格吞掉
+    # 注：python-markdown 默认不解析 <div> 内的 markdown 语法，所以直接用 <h2>
+    lines.append("")
+    lines.append('<div style="page-break-before:always;margin-top:24px;">')
+    lines.append('<h2 style="font-size:1.45rem;font-weight:700;color:#065F46;border-bottom:3px solid #10B981;padding-bottom:8px;margin:18px 0 12px 0;">🌳 知识树图谱（按算法标签 · 掌握度可视化）</h2>')
+    lines.append("")
+    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。颜色越深 = AC 数越多 = 掌握越好；灰白 = 完全未接触。把鼠标悬停在胶囊上可查看该知识点的 AC 题目数与掌握等级。</p>')
+    lines.append(build_knowledge_tree_html(syllabus_eval))
+    lines.append('</div>')
+
     return "\n".join(lines)
+
+
+# 知识树中每个掌握度等级对应的视觉样式
+# (font_size_px, font_weight, text_color, border_color, bg_color)
+# 设计：颜色按"绿色单色梯度"由浅到深，字号从 11px → 18px，
+# 掌握越好 → 颜色越深 + 字号越大；最差档 11px 仍清晰可见。
+_LEVEL_VIS = {
+    "精通": (18, 700, "#FFFFFF", "#14532D", "#15803D"),  # 深绿底白字
+    "熟练": (16, 700, "#FFFFFF", "#15803D", "#22C55E"),  # 中绿底白字
+    "入门": (14, 600, "#14532D", "#86EFAC", "#BBF7D0"),  # 浅绿底深绿字
+    "初窥": (12, 500, "#1E40AF", "#93C5FD", "#DBEAFE"),  # 浅蓝底
+    "空白": (11, 400, "#9CA3AF", "#E5E7EB", "#F3F4F6"),  # 灰底（仍可读）
+}
+
+
+# 知识点 → 分类的关键词映射（树形分组用）
+# 顺序敏感：先匹配先赢，所以"图论"要在"数据结构"之前以避免"树"被错配
+_CATEGORY_KEYWORDS = (
+    ("基础实现", ["模拟", "枚举", "排序", "高精度", "进制", "字符串基础", "递推", "分治", "构造"]),
+    ("搜索/DFS", ["搜索", "dfs", "bfs", "回溯", "剪枝", "递归", "双向搜索", "启发式"]),
+    ("动态规划", ["dp", "动态规划", "背包", "区间dp", "树形dp", "状压", "数位dp", "记忆化", "概率dp"]),
+    ("贪心/二分", ["贪心", "二分", "倍增", "三分", "中位数"]),
+    ("图论", ["图", "最短路", "dijkstra", "floyd", "spfa", "tarjan", "lca", "并查集", "网络流", "二分图", "匹配", "拓扑", "差分约束", "最小生成树", "mst", "基环树", "欧拉"]),
+    ("数据结构", ["线段树", "树状数组", "堆", "单调栈", "单调队列", "平衡树", "st表", "treap", "splay", "红黑树", "字典树", "trie", "树链剖分", "树剖", "树分治", "cdq", "kdtree", "树套树", "跳表", "左偏树"]),
+    ("字符串", ["kmp", "字符串", "hash", "sam", "后缀", "manacher", "ac自动机", "回文", "z函数", "最小表示"]),
+    ("数学/数论", ["数学", "数论", "组合", "计数", "概率", "期望", "博弈", "矩阵", "高斯消元", "线性基", "生成函数", "多项式", "fft", "ntt", "中国剩余", "原根"]),
+    ("计算几何", ["几何", "凸包", "旋转卡壳", "半平面交", "辛普森", "扫描线", "pick"]),
+    ("其他", []),  # 兜底
+)
+
+
+def _classify_topic(topic: str) -> str:
+    """把一个知识点名归类到上面的 9 个分类中。"""
+    t = str(topic or "").lower()
+    for cat, kws in _CATEGORY_KEYWORDS:
+        for kw in kws:
+            if kw and kw.lower() in t:
+                return cat
+    return "其他"
+
+
+def _level_for_ac(ac_count: int) -> str:
+    if ac_count >= 20:
+        return "精通"
+    if ac_count >= 10:
+        return "熟练"
+    if ac_count >= 3:
+        return "入门"
+    if ac_count >= 1:
+        return "初窥"
+    return "空白"
+
+
+def build_knowledge_tree_html(syllabus_eval: dict) -> str:
+    """
+    渲染"知识树"HTML（真正的树形，非卡片网格）：
+
+    结构
+    ----
+    [图例]
+    ┌─ 4 个独立的"子树"（CSP-J / CSP-S / 省选 / NOI），每个子树：
+    │  ├─ 根节点  🏷 级别名 + 覆盖度
+    │  └─ 一组"分类"节点（基础实现 / 搜索/DFS / 动态规划 / …）
+    │      └─ 叶子节点 = 知识点（按 _CATEGORY_KEYWORDS 分类）
+
+    视觉
+    ----
+    - 树的层级缩进线用 CSS ::before / ::after 伪元素绘制
+    - 掌握度越高 → 颜色越深（绿色单色梯度）+ 字号越大
+      11px(空白) → 12px(初窥) → 14px(入门) → 16px(熟练) → 18px(精通)
+    - 最小档（空白）字号 11px 仍可读；空白项用浅灰区分
+    - 鼠标悬停看 AC 数与等级
+    """
+    group_keys = (
+        ("csp_j", "CSP-J 入门", "🌱"),
+        ("csp_s", "CSP-S 提高", "🌿"),
+        ("provincial", "省选级", "🌳"),
+        ("noi", "NOI 级", "🏆"),
+    )
+
+    # ---------- 图例 ----------
+    # 用"示例胶囊"展示每档的真实字号 + 颜色，让用户一眼看到梯度
+    # （文字固定深色避免白字在白底消失）
+    legend_items = "".join(
+        f'<span class="kt-legend-item">'
+        f'<span class="kt-leaf kt-l{name}" style="font-size:{fs}px;">'
+        f'<span class="kt-leaf-name">{name}</span>'
+        f'<em style="display:none;">0</em>'
+        f'</span></span>'
+        for name, (fs, fw, fg, bd, bg) in _LEVEL_VIS.items()
+    )
+    legend = (
+        '<div class="kt-legend">'
+        '<span style="font-weight:600;color:#1F2937;">图例：</span>'
+        + legend_items
+        + '<span style="color:#6B7280;">'
+        '（颜色越深 + 字号越大 = AC 数越多 = 掌握越好；灰 = 未接触）'
+        '</span></div>'
+    )
+
+    # ---------- 4 个子树 ----------
+    blocks: list[str] = []
+    for key, title, icon in group_keys:
+        group = syllabus_eval.get(key, {}) or {}
+        details = group.get("details", []) or []
+        stats = group.get("stats", {}) or {}
+        coverage = group.get("coverage", 0)
+        total = int(stats.get("total", 0))
+        blank = int(stats.get("空白", 0))
+        lit = total - blank
+
+        # 按分类聚合；保持分类的"出现顺序"（出现过的优先，未出现过的隐藏）
+        cat_to_topics: dict[str, list[tuple[str, int, str]]] = {}
+        cat_order: list[str] = []
+        for item in details:
+            topic = str(item.get("topic", "")).strip()
+            if not topic:
+                continue
+            ac = int(item.get("ac_count", 0) or 0)
+            level = _level_for_ac(ac)
+            cat = _classify_topic(topic)
+            if cat not in cat_to_topics:
+                cat_to_topics[cat] = []
+                cat_order.append(cat)
+            cat_to_topics[cat].append((topic, ac, level))
+
+        # 按掌握度降序排（AC 多的在上面），便于一眼看出强弱
+        for cat in cat_to_topics:
+            cat_to_topics[cat].sort(key=lambda t: -t[1])
+
+        # 组装该子树的 HTML
+        if not cat_order:
+            cat_html = (
+                '<div style="color:#9CA3AF;font-size:12px;padding:4px 0 4px 8px;">'
+                '（该级别暂无知识点数据）</div>'
+            )
+        else:
+            cat_lis: list[str] = []
+            for cat in cat_order:
+                items = cat_to_topics[cat]
+                # 分类小帽 + 叶子列表
+                leaf_spans: list[str] = []
+                for topic, ac, level in items:
+                    fs, fw, fg, bd, bg = _LEVEL_VIS[level]
+                    leaf_spans.append(
+                        f'<li>'
+                        f'<span class="kt-leaf kt-l{level}" '
+                        f'title="{topic} · AC {ac} · {level}">'
+                        f'<span class="kt-leaf-name">{topic}</span>'
+                        f'<em>{ac}</em>'
+                        f'</span>'
+                        f'</li>'
+                    )
+                # 该分类下 5 档中最高的等级（用于决定分组颜色边框）
+                lvls = {it[2] for it in items}
+                cat_color = "#10B981"  # 默认绿
+                if "精通" in lvls or "熟练" in lvls:
+                    cat_color = "#15803D"  # 深绿
+                elif "入门" in lvls:
+                    cat_color = "#22C55E"  # 中绿
+                elif "初窥" in lvls:
+                    cat_color = "#3B82F6"  # 蓝
+
+                cat_lis.append(
+                    f'<li class="kt-cat-row">'
+                    f'<span class="kt-cat" style="border-left-color:{cat_color};">'
+                    f'{cat} <span style="color:#9CA3AF;font-weight:500;font-size:11px;">'
+                    f'· {len(items)}</span></span>'
+                    f'<ul class="kt-leaves">'
+                    + "".join(leaf_spans)
+                    + "</ul></li>"
+                )
+            cat_html = '<ul class="kt-tree">' + "".join(cat_lis) + "</ul>"
+
+        # 子树根
+        root_html = (
+            f'<div class="kt-root">'
+            f'<span>{icon} {title}</span>'
+            f'<span class="kt-meta">已点亮 <b>{lit}</b> / {total}'
+            f'（{coverage}%）</span>'
+            f'</div>'
+        )
+
+        blocks.append(
+            f'<div class="kt-block">{root_html}{cat_html}</div>'
+        )
+
+    # ---------- CSS（嵌在 div 内，仅影响本节） ----------
+    # 树线、字号梯度、颜色都集中在此；不污染其他模块
+    style_block = """
+<style>
+.kt-block { margin: 0 0 16px 0; }
+.kt-root {
+  font-weight: 700; font-size: 16px; color: #065F46;
+  border-bottom: 1.5px solid #10B981;
+  padding: 4px 0 6px 0; margin: 6px 0 8px 0;
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px;
+}
+.kt-root .kt-meta { font-size: 12px; color: #6B7280; font-weight: 500; }
+.kt-root .kt-meta b { color: #059669; font-weight: 700; }
+.kt-cat-row { margin: 0; padding: 0; }
+.kt-cat {
+  display: inline-block; font-weight: 700; font-size: 13px; color: #374151;
+  background: #F9FAFB; border-left: 3px solid #10B981;
+  padding: 2px 8px; border-radius: 0 6px 6px 0;
+  margin: 4px 0 2px 0;
+}
+.kt-tree, .kt-leaves {
+  list-style: none; padding-left: 18px; margin: 2px 0 6px 0;
+}
+.kt-tree > li, .kt-leaves > li {
+  position: relative; padding: 3px 0 3px 4px; margin: 0;
+}
+.kt-tree > li::before, .kt-leaves > li::before {
+  content: ''; position: absolute; left: -8px; top: 0; bottom: 0;
+  width: 1.5px; background: #C7CDD6;
+}
+.kt-tree > li::after, .kt-leaves > li::after {
+  content: ''; position: absolute; left: -8px; top: 14px;
+  width: 9px; height: 1.5px; background: #C7CDD6;
+}
+.kt-leaves > li:first-child::before { top: 14px; }
+.kt-leaves > li:last-child::before { bottom: auto; height: 14px; }
+.kt-leaf {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 2px 9px; border-radius: 9999px; border: 1.5px solid;
+  font-weight: 600; line-height: 1.3; cursor: default;
+  white-space: nowrap;
+}
+.kt-leaf em {
+  font-style: normal; font-weight: 500; opacity: 0.7; font-size: 0.82em;
+  margin-left: 2px;
+}
+.kt-leaf-name { white-space: nowrap; }
+.kt-l精通 { font-size: 18px; color: #FFFFFF; border-color: #14532D; background: #15803D; font-weight: 700; }
+.kt-l熟练 { font-size: 16px; color: #FFFFFF; border-color: #15803D; background: #22C55E; font-weight: 700; }
+.kt-l入门 { font-size: 14px; color: #14532D; border-color: #86EFAC; background: #BBF7D0; font-weight: 600; }
+.kt-l初窥 { font-size: 12px; color: #1E40AF; border-color: #93C5FD; background: #DBEAFE; font-weight: 500; }
+.kt-l空白 { font-size: 11px; color: #6B7280; border-color: #E5E7EB; background: #F3F4F6; font-weight: 400; }
+.kt-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 14px 0;
+  font-size: 12px; color: #374151; align-items: center; }
+.kt-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.kt-legend-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 9999px;
+  border: 1px solid; }
+</style>
+""".strip()
+
+    return (
+        '<div class="kt-section" style="margin:8px 0 18px 0;">'
+        + legend
+        + style_block
+        + "".join(blocks)
+        + "</div>"
+    )
 
 
 def normalize_report_markdown(report_md: str, export_data: dict) -> str:
@@ -743,6 +1031,11 @@ def normalize_report_markdown(report_md: str, export_data: dict) -> str:
     )
     normalized = re.sub(
         r"(?ms)^\s{0,3}#{2,6}\s*知识点覆盖表（按算法标签统计）\s*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
+        "",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?ms)^\s{0,3}#{2,6}\s*知识树[^\n]*\n+.*?(?=^\s{0,3}#{2,6}\s|\Z)",
         "",
         normalized,
     )
@@ -1571,7 +1864,12 @@ def generate_ai_report(
  - 整个报告尽可能以 Markdown 表格、区块等图表化、直观的形式呈现，少用长篇大论的文字。
 
  1. **【选手概览与性格画像】**：
-    基于提交行为数据，提炼选手的性格画像（坚韧度、完美主义、冒险精神、自律性、调试耐心、作息规律）。用黄色星级（如 ⭐⭐⭐⭐☆）评分，并附上数据支撑和拟人化评价。只要上文已经给出了提交时间分布、活跃天数、重交间隔等行为数据，就严禁写“提交记录缺失”“作息规律无法评估”“行为数据不足”等表述。
+    基于提交行为数据，提炼选手的性格画像。**必须**用 Markdown 表格输出，表格列固定为：`| 性格维度 | 星级评分 | 拟人化评价 | 数据证据 |`。
+    **必须包含 6 行**（顺序固定，不允许合并或省略任意一行）：
+    1) 坚韧度  2) 完美主义  3) 冒险精神  4) 自律性  5) 调试耐心  6) 作息规律
+    严禁把多行合并成一格（例如把"自律性"和"作息规律"合并为"自律性与规律性"），也严禁用列表/段落代替表格。
+    星级使用 ⭐⭐⭐⭐⭐/⭐⭐⭐⭐☆/⭐⭐⭐☆☆/⭐⭐☆☆☆/⭐☆☆☆☆☆ 五档（与雷达图六个维度的口径一一对应）。
+    每行数据证据栏必须引用具体数字（如提交时段、卡题次数、AC率、重交间隔等），不要写"数据不足"。
 
  2. **【提交行为深度分析】**：
     基于提供的提交行为数据，以表格和重点解读的形式，深入分析用户的提交习惯。必须包含以下子模块：
@@ -1591,7 +1889,7 @@ def generate_ai_report(
      - **当前对应等级水平**：明确指出该选手目前处于 CSP-J / CSP-S / 省选 / NOI 哪个阶段。
      - **知识点强弱项**：严格对照考纲中的知识点名词，列出其掌握得最好的 3 个考点，以及最薄弱的 3 个考点（使用 🟢🟡🔴 标注）。
      - **训练盲区**：指出他在当前等级中"完全没有涉及/刷题数据中缺失"的必考知识点。
-     - **知识点覆盖表**：输出 CSP-J / CSP-S / 省选级 / NOI级 的知识点覆盖率统计表格，并明确说明这是按算法标签统计，不等于做过该级别题目。
+     - **知识点覆盖与树状图**：不要再写知识点覆盖统计表或知识树（这些由程序自动生成，放在"数据校准与真实统计"小节）。你只需要在本节用 1-2 段话点评"哪些大分支（4 大等级）覆盖得好、哪些几乎为零，并给 1-2 条具体训练建议"即可。
      - **题目级别经历表**：单独说明做过多少道 CSP-S / 省选 / NOI 级别题，按来源标签与难度双证据解释，不要与知识点覆盖混为一谈。
 
   6. **【风险诊断与训练闭环表】**：

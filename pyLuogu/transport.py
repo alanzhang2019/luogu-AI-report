@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import time
 from typing import Any, Literal
 
@@ -21,6 +22,11 @@ from .request_helpers import (
     handle_luogu_json_payload,
 )
 from .types import LuoguCookies, RequestParams
+
+
+def _jittered_backoff(attempt: int) -> float:
+    """指数退避 + jitter：1, 2, 4, 8, 10s 上限，每次加 0-0.5s 抖动。"""
+    return min(2 ** attempt, 10) + random.uniform(0, 0.5)
 
 
 class LuoguTransportBase:
@@ -170,7 +176,7 @@ class SyncLuoguTransportMixin(LuoguTransportBase):
                 response = self.client.send(request)
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
+                time.sleep(_jittered_backoff(attempt))
                 continue
             except httpx.HTTPError as e:
                 logger.error(f"Request error: {e}")
@@ -219,12 +225,12 @@ class SyncLuoguTransportMixin(LuoguTransportBase):
                     return csrf_token
 
                 logger.warning("CSRF token not found, retrying...")
-                time.sleep(1)
+                time.sleep(_jittered_backoff(attempt))
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
+                time.sleep(_jittered_backoff(attempt))
             except httpx.HTTPError as e:
-                logger.error(f"HTTP error: {e}")
+                logger.error("HTTP error: {e}")
                 raise RequestError("HTTP error") from e
 
         logger.error(f"Failed to fetch CSRF token after {self.max_retries} attempts")
@@ -243,7 +249,7 @@ class SyncLuoguTransportMixin(LuoguTransportBase):
                 return response.content
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                time.sleep(1)
+                time.sleep(_jittered_backoff(attempt))
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error: {e}")
                 raise RequestError("HTTP error") from e
@@ -280,7 +286,7 @@ class AsyncLuoguTransportMixin(LuoguTransportBase):
                 response = await self.client.send(request)
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(_jittered_backoff(attempt))
                 continue
             except httpx.HTTPError as e:
                 logger.error(f"Request error: {e}")
@@ -330,10 +336,10 @@ class AsyncLuoguTransportMixin(LuoguTransportBase):
                     return csrf_token
 
                 logger.warning("CSRF token not found, retrying...")
-                await asyncio.sleep(1)
+                await asyncio.sleep(_jittered_backoff(attempt))
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(_jittered_backoff(attempt))
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error: {e}")
                 raise RequestError(f"HTTP error: {e}") from e
@@ -355,7 +361,7 @@ class AsyncLuoguTransportMixin(LuoguTransportBase):
                 return response.content
             except httpx.TimeoutException as e:
                 logger.warning(f"Attempt {attempt + 1}: Timeout error - {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(_jittered_backoff(attempt))
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error: {e}")
                 raise RequestError("HTTP error") from e

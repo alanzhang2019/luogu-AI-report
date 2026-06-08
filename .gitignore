@@ -155,3 +155,6 @@ tasks.db
 tasks.db-*
 .source_cache/
 .debug/
+
+# 构建产物
+luogu-ai-coach.zip
