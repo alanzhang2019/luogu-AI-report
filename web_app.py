@@ -4177,7 +4177,151 @@ def student_me(luogu_uid: str):
         progress=progress or {},
         has_parent_sub=has_parent_sub,
         token=luogu_uid,
+        award_summary=_admin_students.get_student_award_summary(int(student["id"])) or {},
+        csp_award_types=_admin_students.CSP_AWARD_TYPES,
+        csp_award_levels=_admin_students.CSP_AWARD_LEVELS,
     )
+
+
+# ---- v3.5.3 学员 GESP/CSP/NOIP/NOI 自录入 ----
+
+@app.route("/me/<luogu_uid>/record-gesp", methods=["POST"])
+def student_me_record_gesp(luogu_uid: str):
+    """学员自录 GESP 真考成绩（4 字段：level / score / award_year / certificate_no）
+
+    流程：找 competitions 中匹配的 gesp 赛事（按 level + year）→ UPSERT
+    """
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+
+    level_raw = (request.form.get("level") or "").strip()
+    score_raw = (request.form.get("score") or "").strip()
+    year_raw = (request.form.get("award_year") or "").strip()
+    cert = (request.form.get("certificate_no") or "").strip()
+
+    # 校验
+    if not level_raw.isdigit() or not (1 <= int(level_raw) <= 8):
+        flash("GESP 等级必须在 1-8")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    if not score_raw.isdigit() or not (0 <= int(score_raw) <= 100):
+        flash("分数必须在 0-100")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    this_year = date.today().year
+    if not year_raw.isdigit() or not (2015 <= int(year_raw) <= this_year + 1):
+        flash(f"获奖年份必须在 2015-{this_year + 1}")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    level = int(level_raw)
+    score = int(score_raw)
+    year = int(year_raw)
+
+    # 找 competitions 表里的 GESP 赛事（按 level + year 推断 code）
+    # 简化：code 形如 GESP-{year}-L{level}-{month}
+    # v3.5.3 直接找 code LIKE '%L7-8%' 的赛事（覆盖该 level）
+    from task_store import _get_conn
+    conn = _get_conn()
+    try:
+        # 找最近的 GESP 赛事（4 次/年：3/6/9/12 月）
+        # 按 data_year + exam_date 推断月份
+        exam_id = None
+        if level >= 7:
+            code_pattern = "L7-8"
+        else:
+            code_pattern = f"L1-6"  # 1-6 级共用一个赛事
+        row = conn.execute(
+            "SELECT id FROM competitions WHERE type='gesp' AND code LIKE ? "
+            "AND data_year = ? ORDER BY exam_date DESC LIMIT 1",
+            (f"%{code_pattern}%", year),
+        ).fetchone()
+        if row:
+            exam_id = int(row["id"])
+        else:
+            # 找不到 → fallback 找最近的 gesp 赛事
+            row = conn.execute(
+                "SELECT id FROM competitions WHERE type='gesp' ORDER BY exam_date DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                exam_id = int(row["id"])
+            else:
+                flash("系统暂无 GESP 赛事数据，请先跑 import_competitions.py")
+                return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    finally:
+        conn.close()
+
+    try:
+        _admin_students.add_gesp_exam(
+            student_id=int(student["id"]),
+            exam_id=exam_id,
+            registered_level=level,
+            actual_score=score,
+            certificate_no=cert or None,
+            recorded_by="self",
+            award_year=year,
+        )
+        flash(f"✅ GESP {level} 级 {year} 年 {score} 分 已录入")
+    except Exception as e:  # noqa: BLE001
+        flash(f"⚠️ GESP 录入失败：{e}")
+    return redirect(url_for("student_me", luogu_uid=luogu_uid))
+
+
+@app.route("/me/<luogu_uid>/record-csp", methods=["POST"])
+def student_me_record_csp(luogu_uid: str):
+    """学员自录 CSP/NOIP/NOI 奖项（5 字段：competition_type/award_level/award_year/score/province）"""
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+
+    ctype = (request.form.get("competition_type") or "").strip()
+    level = (request.form.get("award_level") or "").strip()
+    year_raw = (request.form.get("award_year") or "").strip()
+    score_raw = (request.form.get("actual_score") or "").strip()
+    province = (request.form.get("province") or "").strip()
+
+    valid_types = {t[0] for t in _admin_students.CSP_AWARD_TYPES}
+    valid_levels = {l[0] for l in _admin_students.CSP_AWARD_LEVELS}
+    if ctype not in valid_types:
+        flash("比赛类型不合法")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    if level not in valid_levels:
+        flash("奖项等级不合法")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    this_year = date.today().year
+    if not year_raw.isdigit() or not (2015 <= int(year_raw) <= this_year + 1):
+        flash(f"获奖年份必须在 2015-{this_year + 1}")
+        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    score = int(score_raw) if score_raw.isdigit() else None
+
+    try:
+        _admin_students.add_csp_award(
+            student_id=int(student["id"]),
+            competition_type=ctype,
+            award_level=level,
+            award_year=int(year_raw),
+            actual_score=score,
+            province=province or None,
+            recorded_by="self",
+        )
+        # 取可读 label
+        type_label = next((t[1] for t in _admin_students.CSP_AWARD_TYPES if t[0] == ctype), ctype)
+        level_label = next((l[1] for l in _admin_students.CSP_AWARD_LEVELS if l[0] == level), level)
+        flash(f"✅ {type_label} {level_label} {year_raw} 已录入")
+    except Exception as e:  # noqa: BLE001
+        flash(f"⚠️ CSP 录入失败：{e}")
+    return redirect(url_for("student_me", luogu_uid=luogu_uid))
+
+
+@app.route("/me/<luogu_uid>/delete-csp/<int:award_id>", methods=["POST"])
+def student_me_delete_csp(luogu_uid: str, award_id: int):
+    """学员删除自录的 CSP 奖项（仅本人可删）"""
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+    ok = _admin_students.delete_csp_award(int(award_id), int(student["id"]))
+    if ok:
+        flash("✅ 已删除")
+    else:
+        flash("⚠️ 删除失败（无权限或不存在）")
+    return redirect(url_for("student_me", luogu_uid=luogu_uid))
 
 
 # ---- v3.5.2 模板 ----
@@ -4365,6 +4509,106 @@ STUDENT_ME_HTML = """
         </div>
         {% endif %}
 
+        <!-- v3.5.3 学员 GESP/CSP/NOIP/NOI 自录入区 -->
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📥 自录历史奖项</h2>
+            <p class="text-xs text-gray-500 mb-4">家长/学员可自录入 GESP 真考 + CSP/NOIP/NOI 奖项，自动计算段位 + 免初赛</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- GESP 真考录入 -->
+                <form method="POST" action="/me/{{ token }}/record-gesp" class="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <h3 class="text-sm font-bold text-green-800 mb-2">🎯 GESP 真考（CCF 1-8 级）</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-600">等级 (1-8)</label>
+                            <select name="level" required class="w-full border rounded px-2 py-1 text-sm">
+                                <option value="">选</option>
+                                {% for n in range(1, 9) %}
+                                <option value="{{ n }}">{{ n }} 级</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">分数 (0-100)</label>
+                            <input type="number" name="score" min="0" max="100" required class="w-full border rounded px-2 py-1 text-sm" placeholder="如 85">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">年份</label>
+                            <input type="number" name="award_year" min="2015" max="2030" required class="w-full border rounded px-2 py-1 text-sm" value="{{ 2024 }}">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">证书编号（可选）</label>
+                            <input type="text" name="certificate_no" class="w-full border rounded px-2 py-1 text-sm" placeholder="GESP-...">
+                        </div>
+                    </div>
+                    <button type="submit" class="mt-2 w-full bg-green-600 text-white text-xs font-bold py-1.5 rounded hover:bg-green-700">📥 录入 GESP 真考</button>
+                </form>
+
+                <!-- CSP/NOIP/NOI 录入 -->
+                <form method="POST" action="/me/{{ token }}/record-csp" class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <h3 class="text-sm font-bold text-blue-800 mb-2">🏅 CSP / NOIP / NOI</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="col-span-2">
+                            <label class="text-xs text-gray-600">比赛类型</label>
+                            <select name="competition_type" required class="w-full border rounded px-2 py-1 text-sm">
+                                <option value="">选</option>
+                                {% for code, label in csp_award_types %}
+                                <option value="{{ code }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">奖项</label>
+                            <select name="award_level" required class="w-full border rounded px-2 py-1 text-sm">
+                                <option value="">选</option>
+                                {% for code, label in csp_award_levels %}
+                                <option value="{{ code }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">年份</label>
+                            <input type="number" name="award_year" min="2015" max="2030" required class="w-full border rounded px-2 py-1 text-sm" value="{{ 2024 }}">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">分数（可选）</label>
+                            <input type="number" name="actual_score" min="0" max="600" class="w-full border rounded px-2 py-1 text-sm" placeholder="如 235">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-600">省份（省赛）</label>
+                            <input type="text" name="province" class="w-full border rounded px-2 py-1 text-sm" placeholder="如 浙江">
+                        </div>
+                    </div>
+                    <button type="submit" class="mt-2 w-full bg-blue-600 text-white text-xs font-bold py-1.5 rounded hover:bg-blue-700">📥 录入 CSP/NOIP/NOI 奖项</button>
+                </form>
+            </div>
+
+            <!-- 已录入列表 -->
+            {% if award_summary and award_summary.total_awards and award_summary.total_awards > 0 %}
+            <div class="mt-4 border-t border-gray-200 pt-3">
+                <h3 class="text-sm font-bold text-gray-700 mb-2">📋 已录入奖项（{{ award_summary.total_awards }} 条）</h3>
+                <div class="space-y-1.5 max-h-48 overflow-y-auto">
+                    {% for a in award_summary.raw %}
+                    <div class="flex items-center justify-between bg-gray-50 border border-gray-200 rounded px-3 py-1.5 text-xs">
+                        <div>
+                            {% set tlabel = csp_award_types|selectattr(0, 'equalto', a.competition_type)|first %}
+                            {% set llabel = csp_award_levels|selectattr(0, 'equalto', a.award_level)|first %}
+                            <span class="font-semibold text-gray-800">{{ tlabel[1] if tlabel else a.competition_type }}</span>
+                            <span class="ml-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{{ llabel[1] if llabel else a.award_level }}</span>
+                            <span class="ml-2 text-gray-500">{{ a.award_year }} 年</span>
+                            {% if a.actual_score %}<span class="ml-2 text-gray-500">分 {{ a.actual_score }}</span>{% endif %}
+                            {% if a.province %}<span class="ml-2 text-gray-500">{{ a.province }}</span>{% endif %}
+                        </div>
+                        <form method="POST" action="/me/{{ token }}/delete-csp/{{ a.id }}" class="inline">
+                            <button type="submit" onclick="return confirm('确认删除此奖项？')" class="text-red-500 hover:text-red-700 text-xs">🗑</button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
         <div class="{% if has_parent_sub %}bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200{% else %}bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200{% endif %} rounded-2xl shadow p-5 mb-4">
             <h2 class="text-lg font-bold text-gray-800 mb-2">
                 {% if has_parent_sub %}
@@ -4469,7 +4713,10 @@ def parent_panel_index(token: str):
     # v3.5.1: 出生日期按 grade 推断（CSP 12 岁门槛所需）
     # demo 学员 grade 缺省 2024 → 推断 2014-05-01（CSP 2026 刚好满足）
     from docs.gesp_estimator import is_csp_age_eligible
-    inferred_birth = "2014-05-01"  # v3.5.1 demo 兜底；正式需 admin 录入
+    # v3.5.3: 优先用学员真实 birth_date，没有再兜底
+    student_dict = dict(student)
+    real_birth = student_dict.get("birth_date")
+    inferred_birth = real_birth or "2014-05-01"  # v3.5.3 demo 兜底；正式需 admin 录入
     age_j2026 = is_csp_age_eligible(inferred_birth, 2026)
     age_j2027 = is_csp_age_eligible(inferred_birth, 2027)
     # 政策水印
@@ -4480,9 +4727,22 @@ def parent_panel_index(token: str):
         policy_last_updated = "—"
     # v3.5.2: 政策匹配学校库（家长版核心模块）
     from task_store import match_school_for_student
-    student_dict = dict(student)
     # grade 字段原始值（PRIMARY_3/JUNIOR_2 等）已在 student 中
     policy_match = match_school_for_student(student_dict)
+    # v3.5.3: 学员画像（年龄/省份/学段/GESP 视角 + 奖项 summary）
+    profile = _admin_students.compute_student_profile(int(g["student_id"]))
+    # age 算成"完成周岁"，避免 .5 显示
+    from datetime import date as _date
+    if profile.get("age") is not None:
+        profile["age_label"] = f"{profile['age']} 岁"
+    else:
+        profile["age_label"] = "未填"
+    profile["stage_label"] = {
+        "primary": "小学",
+        "junior": "初中",
+        "senior": "高中",
+    }.get(profile.get("stage"), "高中")  # v3.5.4: NOI 不面向大学生，删除"大学"分支
+    rec_stage = profile.get("stage_recommendation") or {}
     return render_template_string(
         PARENT_PANEL_HTML,
         guardian=g,
@@ -4496,6 +4756,10 @@ def parent_panel_index(token: str):
         age_j2027=age_j2027,
         policy_last_updated=policy_last_updated,
         policy_match=policy_match,
+        # v3.5.3 学员画像
+        profile=profile,
+        rec_stage=rec_stage,
+        award_summary=profile.get("award_summary") or {},
     )
 
 
@@ -4815,42 +5079,62 @@ PARENT_PANEL_HTML = """
 
     <div class="max-w-3xl mx-auto p-4 -mt-4">
 
-        <!-- CSP 12 岁年龄卡（v3.5.1 新增） -->
-        <div class="bg-white rounded-2xl card-shadow p-5 mb-4 border-l-4 {% if age_j2026.eligible %}border-green-500{% else %}border-amber-500{% endif %}">
-            <div class="flex items-start justify-between">
+        <!-- v3.5.3 学员画像卡（年龄/城市/学段 + GESP 路径建议 · 替代 v3.5.1 CSP 12 岁卡） -->
+        <div class="bg-white rounded-2xl card-shadow p-5 mb-4 border-l-4 {% if rec_stage.csp_visible %}border-emerald-500{% else %}border-blue-500{% endif %}">
+            <div class="flex items-start justify-between mb-3">
                 <div>
-                    <h2 class="text-base font-bold text-gray-800 mb-1">
-                        🗓️ CSP 报名年龄门槛
-                        <span class="text-xs text-gray-500 font-normal">（CCF 官方：当年 9/1 前满 12 周岁）</span>
-                    </h2>
-                    <div class="flex gap-4 mt-2">
-                        <div>
-                            <div class="text-xs text-gray-500">CSP-J 2026</div>
-                            {% if age_j2026.eligible %}
-                            <div class="text-lg font-bold text-green-600">✅ 满足</div>
-                            <div class="text-xs text-gray-500">cutoff {{ age_j2026.cutoff_date }}</div>
-                            {% else %}
-                            <div class="text-lg font-bold text-amber-600">⚠️ 不满足</div>
-                            <div class="text-xs text-gray-500">{{ age_j2026.reason }}</div>
-                            {% endif %}
-                        </div>
-                        <div class="border-l pl-4">
-                            <div class="text-xs text-gray-500">CSP-J 2027</div>
-                            {% if age_j2027.eligible %}
-                            <div class="text-lg font-bold text-green-600">✅ 满足</div>
-                            {% else %}
-                            <div class="text-lg font-bold text-amber-600">⚠️ 不满足</div>
-                            <div class="text-xs text-gray-500">差 {{ ((age_j2027.reason.split('差 ')[1].split(' 天')[0])|int) if '差 ' in age_j2027.reason else '?' }} 天</div>
-                            {% endif %}
-                        </div>
+                    <h2 class="text-base font-bold text-gray-800 mb-1">👤 学员画像</h2>
+                    <p class="text-xs text-gray-500">
+                        {% if profile.real_name %}<strong>{{ profile.real_name }}</strong>{% else %}UID-{{ student.luogu_uid }}{% endif %}
+                        · {{ profile.age_label }}
+                        · {{ profile.province or '未填' }} {{ student.city or '' }}
+                        · <span class="px-1.5 py-0.5 {% if profile.stage == 'primary' %}bg-blue-100 text-blue-700{% elif profile.stage == 'junior' %}bg-emerald-100 text-emerald-700{% else %}bg-purple-100 text-purple-700{% endif %} rounded">{{ profile.stage_label }}</span>
+                    </p>
+                </div>
+                <span class="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">v3.5.3</span>
+            </div>
+
+            <!-- 学段 GESP 视角 / 路径建议 -->
+            <div class="bg-{% if rec_stage.csp_visible %}emerald{% else %}blue{% endif %}-50 border border-{% if rec_stage.csp_visible %}emerald{% else %}blue{% endif %}-200 rounded-lg p-3 mb-3">
+                <div class="text-sm font-bold text-{% if rec_stage.csp_visible %}emerald{% else %}blue{% endif %}-800 mb-1">
+                    🎯 {{ rec_stage.perspective or 'GESP 路径' }}
+                </div>
+                <p class="text-xs text-gray-700 leading-relaxed">{{ rec_stage.summary or '—' }}</p>
+                {% if rec_stage.next_exam %}
+                <div class="mt-2 text-xs text-{% if rec_stage.csp_visible %}emerald{% else %}blue{% endif %}-700">
+                    📅 <strong>下一步：</strong>{{ rec_stage.next_exam }}
+                </div>
+                {% endif %}
+                {% if rec_stage.pitfalls %}
+                <ul class="mt-2 space-y-1">
+                    {% for p in rec_stage.pitfalls %}
+                    <li class="text-xs text-amber-700">⚠️ {{ p }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+
+            <!-- 已有奖项 summary -->
+            <div class="grid grid-cols-3 gap-2 text-center">
+                <div class="bg-gray-50 rounded p-2">
+                    <div class="text-xs text-gray-500">已录入奖项</div>
+                    <div class="text-base font-bold text-gray-800">{{ award_summary.total_awards or 0 }}</div>
+                </div>
+                <div class="bg-gray-50 rounded p-2">
+                    <div class="text-xs text-gray-500">最高奖项</div>
+                    <div class="text-xs font-bold text-amber-700 mt-1">{{ award_summary.best_label or '无' }}</div>
+                </div>
+                <div class="bg-gray-50 rounded p-2">
+                    <div class="text-xs text-gray-500">CSP 年龄</div>
+                    <div class="text-xs font-bold mt-1">
+                        {% if age_j2026.eligible %}<span class="text-green-600">26 满足</span>{% else %}<span class="text-amber-600">26 待满</span>{% endif %}
+                        ·
+                        {% if age_j2027.eligible %}<span class="text-green-600">27 满足</span>{% else %}<span class="text-amber-600">27 待满</span>{% endif %}
                     </div>
                 </div>
-                <div class="text-right">
-                    <div class="text-xs text-gray-400">demo 出生日期</div>
-                    <div class="text-sm font-mono">2014-05-01</div>
-                    <div class="text-xs text-amber-500 mt-1">⚠️ 兜底值</div>
-                </div>
             </div>
+
+            <p class="text-xs text-gray-400 mt-2">📌 家长可在「<a href="/me/{{ student.luogu_uid }}" class="text-blue-600 hover:underline">学员自助 /me/{{ student.luogu_uid }}</a>」中补录 GESP 真考 + CSP/NOIP/NOI 奖项</p>
         </div>
 
         <!-- v3.5.2 政策匹配学校库（家长版核心 · 地域+学段→升学路径） -->

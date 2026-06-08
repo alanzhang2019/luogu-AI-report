@@ -503,9 +503,249 @@ def format_behavior_summary(behavior_data: dict) -> str:
     lines.append(f"- **1分钟内快速重交占比**: {debug.get('quick_resubmit_under_60s_rate', 0) * 100:.1f}%")
     lines.append("")
 
-    lines.append("### 死磕题目 TOP")
+    lines.append("### 姝荤棰樼洰 TOP")
     stuck = behavior_data.get("stuck_problems", [])
     for i, item in enumerate(stuck[:5], 1):
-        lines.append(f"{i}. **{item['pid']}** {item['title']} — {item['submit_count']} 次提交 ({item['final_status']})")
+        lines.append(f"{i}. **{item['pid']}** {item['title']} 鈥?{item['submit_count']} 娆℃彁浜?({item['final_status']})")
     lines.append("")
     return "\n".join(lines)
+
+
+# ============================================================
+# v3.5.2 调试耐心 v2 · 分错误类型 + 分难度判定（避免"短重交=不耐心"误判）
+# ============================================================
+# 洛谷 status 码：
+#   3 / 4 : Compile Error (CE)        → 简单错误 · 短重交 = 效率高
+#   5 / 6 / 7 : Runtime Error (RE)     → 简单错误（数组越界/除0）
+#   10 : Presentation Error (PE)       → 简单错误
+#   8 : Time Limit Exceeded (TLE)     → 复杂错误（算法复杂度）
+#   9 : Wrong Answer (WA)             → 复杂错误（逻辑/边界）
+#   14 : Output Limit Exceeded (OLE)  → 复杂错误
+#   12 : Accepted (AC)
+# 题目难度（洛谷）：
+#   0-2 : 入门
+#   3-4 : 普及
+#   5-6 : 提高
+#   7+  : 省选/NOI
+SIMPLE_ERROR_STATUSES = {3, 4, 5, 6, 7, 10}      # CE + RE + PE
+COMPLEX_ERROR_STATUSES = {8, 9, 14}                # TLE + WA + OLE
+
+
+def _classify_error(status: int) -> str:
+    if status == 12:
+        return "AC"
+    if status in SIMPLE_ERROR_STATUSES:
+        return "simple"   # 简单错误（一眼就能改）
+    if status in COMPLEX_ERROR_STATUSES:
+        return "complex" # 复杂错误（要思考）
+    return "other"
+
+
+def _classify_difficulty(difficulty: int) -> str:
+    if difficulty <= 2:
+        return "entry"      # 入门
+    if difficulty <= 4:
+        return "popularize" # 普及
+    if difficulty <= 6:
+        return "improve"    # 提高
+    return "advanced"       # 省选/NOI
+
+
+def calc_debug_patience_v2(
+    records: list[dict[str, Any]],
+    problems_meta: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """
+    v3.5.2 调试耐心 v2 · 分错误类型 + 分难度的鲁棒判定
+
+    解决问题：v1 把"短重交=不耐心"，但选手可能改的是 CE 等简单错误。
+    v2 按错误类型分桶，避免误判。
+
+    Parameters
+    ----------
+    records : list[dict]
+        洛谷 record API 的提交记录。每条含:
+          - status: int (12=AC, 3/4=CE, 8=TLE, 9=WA, ...)
+          - submitTime: int (unix seconds)
+          - problem.pid: str (题号 P1001)
+    problems_meta : dict, optional
+        题号→难度(0-7+) 的映射；缺失时按 entry 处理。
+
+    Returns
+    -------
+    dict:
+      - score: int (0-100) 综合调试耐心分
+      - score_1to5: int (1-5) 5 档评级
+      - error_breakdown: {simple: 12, complex: 5, ac: 30, other: 1}
+      - simple_quick_resubmit_rate: float 简单错误 1 分钟内重交率
+      - complex_quick_resubmit_rate: float 复杂错误 1 分钟内重交率
+      - insight: str 文字解读（"短重交主要是 CE = 效率高" 等）
+    """
+    if not records:
+        return {
+            "score": 50,
+            "score_1to5": 3,
+            "error_breakdown": {},
+            "simple_quick_resubmit_rate": 0.0,
+            "complex_quick_resubmit_rate": 0.0,
+            "insight": "无提交记录",
+        }
+
+    if problems_meta is None:
+        problems_meta = {}
+
+    # ---- 1. 按 pid 聚合 + 排序 ----
+    pid_records: dict[str, list[dict]] = defaultdict(list)
+    for r in records:
+        pid = r.get("problem", {}).get("pid", "")
+        if pid:
+            pid_records[pid].append(r)
+    for pid in pid_records:
+        pid_records[pid].sort(key=lambda x: x.get("submitTime", 0))
+
+    # ---- 2. 计算每对"重交"的错误类型 + 重交间隔 + 难度 ----
+    simple_intervals: list[int] = []
+    complex_intervals: list[int] = []
+    error_breakdown: Counter = Counter()
+    difficulty_breakdown: Counter = Counter()
+
+    for pid, submits in pid_records.items():
+        difficulty = problems_meta.get(pid, 0)
+        diff_class = _classify_difficulty(difficulty)
+        for i in range(1, len(submits)):
+            prev = submits[i - 1]
+            curr = submits[i]
+            prev_status = prev.get("status", 0)
+            # 跳过 AC 后（已经过题）
+            if prev_status == 12:
+                continue
+            # 计算间隔（秒）
+            interval = curr.get("submitTime", 0) - prev.get("submitTime", 0)
+            if interval <= 0 or interval > 3600:
+                continue
+            err_class = _classify_error(prev_status)
+            error_breakdown[err_class] += 1
+            difficulty_breakdown[diff_class] += 1
+            if err_class == "simple":
+                simple_intervals.append(interval)
+            elif err_class == "complex":
+                complex_intervals.append(interval)
+
+    total_errors = sum(error_breakdown.values()) or 1
+    simple_ratio = error_breakdown.get("simple", 0) / total_errors
+    complex_ratio = error_breakdown.get("complex", 0) / total_errors
+
+    def _quick_rate(intervals: list[int]) -> float:
+        return sum(1 for x in intervals if x < 60) / len(intervals) if intervals else 0.0
+
+    simple_quick = _quick_rate(simple_intervals)
+    complex_quick = _quick_rate(complex_intervals)
+
+    # ---- 3. 综合打分（v2 鲁棒逻辑）----
+    # 核心思想：
+    #   简单错误（CE/PE/RE）短重交 = 效率高（不扣分甚至加分）
+    #   复杂错误（WA/TLE）短重交 + 高难度 = 不耐心（扣分）
+    #   复杂错误（WA/TLE）短重交 + 入门难度 = 正常（不扣分）
+    base = 50
+    # 3.1 简单错误的快速重交 = 效率信号（+25 高 / +15 中）
+    if simple_intervals and simple_quick > 0.6:
+        base += 25
+    elif simple_intervals and simple_quick > 0.4:
+        base += 15
+    elif simple_intervals and simple_quick > 0.2:
+        base += 5
+
+    # 3.2 复杂错误的快速重交（按难度区分）
+    if complex_intervals:
+        # 复杂错误 1 分钟内重交率
+        if complex_quick > 0.4:
+            # 看难度：如果高难度题目占多数 → 真不耐心
+            advanced_ratio = (difficulty_breakdown.get("improve", 0) + difficulty_breakdown.get("advanced", 0)) / total_errors
+            if advanced_ratio > 0.5:
+                base -= 30  # 高难度还短重交 = 真不耐心
+            elif advanced_ratio > 0.2:
+                base -= 18
+            else:
+                base -= 8   # 入门/普及短重交 = 正常
+        elif complex_quick < 0.15:
+            base += 12  # 复杂错误重交慢 = 真在思考
+
+    # 3.3 AC 率（复杂错误最终能过的比率）= 抗压信号
+    ac_count = error_breakdown.get("AC", 0)
+    if complex_intervals and ac_count > 0:
+        ac_after_complex_ratio = ac_count / (ac_count + error_breakdown.get("complex", 0))
+        if ac_after_complex_ratio > 0.3:
+            base += 5  # 复杂错误最终 AC 率高 = 抗压强
+
+    score = int(max(0, min(100, base)))
+    score_1to5 = max(1, min(5, round(score / 20)))
+
+    # ---- 4. Insight 文本 ----
+    if error_breakdown.get("complex", 0) == 0:
+        insight = "无复杂错误（WA/TLE）样本，主要调试的是 CE/RE 简单错误，不能用短重交判定不耐心。"
+    elif simple_ratio > 0.6 and simple_quick > 0.3:
+        insight = f"短重交主要是简单错误（CE/RE 占比 {simple_ratio*100:.0f}%），属于'一眼能改'的高效调试。"
+    elif complex_quick > 0.4 and (difficulty_breakdown.get("improve", 0) + difficulty_breakdown.get("advanced", 0)) > error_breakdown.get("complex", 0) * 0.5:
+        insight = f"在提高/省选难度下，复杂错误（WA/TLE）1 分钟内重交 {complex_quick*100:.0f}%，确实存在'碰运气'调试。"
+    else:
+        insight = f"简单错误占 {simple_ratio*100:.0f}%，复杂错误快速重交 {complex_quick*100:.0f}%，整体调试习惯{'较好' if score >= 65 else '一般' if score >= 50 else '需改进'}。"
+
+    return {
+        "score": score,
+        "score_1to5": score_1to5,
+        "error_breakdown": {
+            "simple": error_breakdown.get("simple", 0),
+            "complex": error_breakdown.get("complex", 0),
+            "ac_after_error": ac_count,
+            "other": error_breakdown.get("other", 0),
+        },
+        "difficulty_breakdown": dict(difficulty_breakdown),
+        "simple_quick_resubmit_rate": round(simple_quick, 3),
+        "complex_quick_resubmit_rate": round(complex_quick, 3),
+        "simple_ratio": round(simple_ratio, 3),
+        "complex_ratio": round(complex_ratio, 3),
+        "insight": insight,
+    }
+
+
+def merge_debug_patience_v1_v2(
+    v1_debug: dict[str, Any] | None,
+    v2_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    合并 v1 (老版) 和 v2 (新版) 的调试耐心结果
+    v2 优先：当 v2 有效时（error_breakdown 不为空），使用 v2 的 score
+    当 v2 无样本时（全是 AC），回退到 v1 评分避免误判
+    """
+    v1 = v1_debug or {}
+    v2 = v2_result or {}
+
+    v2_has_samples = v2.get("error_breakdown", {}).get("complex", 0) > 0 or v2.get("error_breakdown", {}).get("simple", 0) > 0
+
+    if v2_has_samples:
+        return {
+            "primary_score": v2.get("score", 50),
+            "primary_score_1to5": v2.get("score_1to5", 3),
+            "primary_source": "v2",
+            "v1_median_resubmit_seconds": v1.get("median_resubmit_interval_seconds"),
+            "v1_quick_resubmit_under_60s_rate": v1.get("quick_resubmit_under_60s_rate", 0),
+            "v2_simple_quick_resubmit_rate": v2.get("simple_quick_resubmit_rate", 0),
+            "v2_complex_quick_resubmit_rate": v2.get("complex_quick_resubmit_rate", 0),
+            "v2_error_breakdown": v2.get("error_breakdown", {}),
+            "v2_difficulty_breakdown": v2.get("difficulty_breakdown", {}),
+            "v2_insight": v2.get("insight", ""),
+        }
+
+    # v2 无样本（全是 AC）→ 保留 v1 评分
+    return {
+        "primary_score": None,
+        "primary_score_1to5": None,
+        "primary_source": "v1",
+        "v1_median_resubmit_seconds": v1.get("median_resubmit_interval_seconds"),
+        "v1_quick_resubmit_under_60s_rate": v1.get("quick_resubmit_under_60s_rate", 0),
+        "v2_simple_quick_resubmit_rate": 0.0,
+        "v2_complex_quick_resubmit_rate": 0.0,
+        "v2_error_breakdown": {},
+        "v2_difficulty_breakdown": {},
+        "v2_insight": "无 WA/TLE 样本，保持 v1 评分",
+    }

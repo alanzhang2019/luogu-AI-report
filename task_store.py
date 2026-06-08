@@ -200,6 +200,27 @@ def init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_gesp_student_level ON gesp_exams(student_id, registered_level)")
 
+    # ---- 4.6.1 v3.5.3 学员 CSP/NOIP/NOI 历史奖项自录入（CSP初赛 + 复赛 + 获奖年份）----
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS csp_awards (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id        INTEGER NOT NULL REFERENCES students(id),
+            competition_type  TEXT NOT NULL,        -- 'csp_j_pre' / 'csp_j_final' / 'csp_s_pre' / 'csp_s_final'
+                                                -- 'noip_1' / 'noi_bronze' / 'noi_silver' / 'noi_gold'
+            award_level       TEXT NOT NULL,        -- 'excellent' / 'first' / 'second' / 'third' / 'bronze' / 'silver' / 'gold'
+            award_year        INTEGER NOT NULL,     -- 获奖年份（2020-2030）
+            actual_score      INTEGER,              -- 实际分（可选）
+            province          TEXT,                 -- 省份（省赛才有，全国赛可空）
+            certificate_no    TEXT,                 -- 证书编号
+            notes             TEXT,
+            recorded_by       TEXT,                 -- 'self'（学员自录）/ 'coach' / 'admin'
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(student_id, competition_type, award_year, award_level)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_csp_awards_student ON csp_awards(student_id, award_year)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_csp_awards_type ON csp_awards(competition_type)")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS policy_events (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -358,6 +379,10 @@ def init_db():
         "ALTER TABLE students ADD COLUMN gender TEXT DEFAULT ''",
         "ALTER TABLE students ADD COLUMN birth_date DATE",
         "ALTER TABLE students ADD COLUMN registered_via TEXT DEFAULT 'admin'",
+        # v3.5.3 学员 GESP 真考记录加获奖年份（4 次/年）
+        "ALTER TABLE gesp_exams ADD COLUMN award_year INTEGER",
+        # v3.5.3 学员注册时落省份（家长版报告用）
+        "ALTER TABLE students ADD COLUMN province TEXT DEFAULT ''",
     )
     for ddl in alter_ddls:
         try:
@@ -760,6 +785,7 @@ if __name__ == "__main__":
         "weekly_reports",
         "student_goals",
         "activation_codes",
+        "csp_awards",
     }
     EXPECTED_TASKS_COLS = {
         # 核心 + v1 → v2
