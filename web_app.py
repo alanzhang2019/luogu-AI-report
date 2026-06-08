@@ -337,7 +337,21 @@ def describe_generation_error(exc: Exception, stage: str) -> str:
         return stage_prefix + f"AI 接口连接失败：{exc}。可直接点“返回重试”，系统会自动回填参数；同时已加入自动重试，短时网络抖动会自行恢复。"
     if "missing credentials" in message_lower and stage == "生成 AI 报告":
         return stage_prefix + "未配置 OpenAI API Key：请在页面填写 OpenAI API Key，或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY，并重启服务使其生效。"
-    return stage_prefix + str(exc)
+    base_detail = f"{type(exc).__name__}: {exc!r}"
+    try:
+        sc = getattr(exc, "status_code", None)
+        if sc is not None:
+            base_detail += f" [status_code={sc}]"
+        body = getattr(exc, "body", None)
+        if body is not None:
+            base_detail += f" [body={str(body)[:300]}]"
+        code = getattr(exc, "code", None)
+        if code is not None:
+            base_detail += f" [code={code}]"
+    except Exception:
+        pass
+    print(f"[ERROR][{stage}] {base_detail}", flush=True)
+    return stage_prefix + f"{base_detail}"
 
 
 def resolve_openai_api_key(form: dict) -> tuple[str, str]:

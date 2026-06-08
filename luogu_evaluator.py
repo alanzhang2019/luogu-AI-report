@@ -732,15 +732,54 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     ):
         group = syllabus_eval.get(key, {}) or {}
         stats = group.get("stats", {}) or {}
+        detail_list = group.get("details", []) or []
         total_topics = int(stats.get("total", 0))
         covered = total_topics - int(stats.get("空白", 0))
         coverage = group.get("coverage", 0)
-        green = int(stats.get("精通", 0))
-        yellow = int(stats.get("熟练", 0))
-        orange = int(stats.get("入门", 0))
-        blue = int(stats.get("初窥", 0))
-        red = int(stats.get("空白", 0))
-        details = f"🟢{green}项 🟡{yellow}项 🟠{orange}项 🔵{blue}项 🔴{red}项"
+        # 关键修复：用户反馈"详细情况"列展示的是精通/熟练/空白等"掌握度"标签，与该列本意（展示该级别下
+        # 各难度子档的分布）不符。改为按题目难度（1-7）聚合，与图例 5 档配色保持一致：
+        #   入门=红 / 普及=橙+金 / 提高=绿 / 省选=浅蓝+紫 / NOI=深蓝
+        # "空白"指 difficulty=0 或缺数据，仍用红色作警示（用户要求"恢复为红色"）
+        # tuple 顺序: (topic, ac, level, difficulty)
+        d1 = d2 = d3 = d4 = d5 = d6 = d7 = d_blank = 0
+        for item in detail_list:
+            diff = int(item[3]) if len(item) > 3 and item[3] is not None else 0
+            if diff == 1:
+                d1 += 1
+            elif diff == 2:
+                d2 += 1
+            elif diff == 3:
+                d3 += 1
+            elif diff == 4:
+                d4 += 1
+            elif diff == 5:
+                d5 += 1
+            elif diff == 6:
+                d6 += 1
+            elif diff == 7:
+                d7 += 1
+            else:
+                d_blank += 1
+        n_popular = d2 + d3   # 普及=橙(2) + 金(3) 聚合
+        n_provincial = d5 + d6  # 省选=浅蓝(5) + 紫(6) 聚合
+
+        def _chip(color: str, n: int, lbl: str, *, fg: str = "#fff", bd: str = "") -> str:
+            border_style = f"border:1px solid {bd};" if bd else ""
+            return (
+                f'<span style="display:inline-block;padding:1px 8px;'
+                f'border-radius:6px;background:{color};color:{fg};'
+                f'{border_style}'
+                f'font-size:11px;font-weight:600;margin-right:4px;">'
+                f'{lbl} {n}项</span>'
+            )
+        details = (
+            _chip("#F5222D", d1, "入门")
+            + _chip("#FA8C16", n_popular, "普及")
+            + _chip("#52C41A", d4, "提高")
+            + _chip("#1890FF", n_provincial, "省选")
+            + _chip("#2F54EB", d7, "NOI")
+            + _chip("#F5222D", d_blank, "空白")
+        )
         lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
 
     lines.extend(
@@ -758,23 +797,55 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     lines.append('<div style="page-break-before:always;margin-top:24px;">')
     lines.append('<h2 style="font-size:1.45rem;font-weight:700;color:#065F46;border-bottom:3px solid #10B981;padding-bottom:8px;margin:18px 0 12px 0;">🌳 知识树图谱（按算法标签 · 掌握度可视化）</h2>')
     lines.append("")
-    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。颜色越深 = AC 数越多 = 掌握越好；灰白 = 完全未接触。把鼠标悬停在胶囊上可查看该知识点的 AC 题目数与掌握等级。</p>')
+    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。果子大小 = 掌握度；颜色 = 题目难度（入门红/普及橙/提高绿/省选蓝/NOI深蓝）。<b>白色果子 = 完全未接触（空白）</b>，浅灰 = 刚入门（初窥）。把鼠标悬停在果子上可查看 AC 题目数与掌握等级。</p>')
     lines.append(build_knowledge_tree_html(syllabus_eval))
     lines.append('</div>')
 
     return "\n".join(lines)
 
 
-# 掌握度 → 果子的视觉样式（SVG 渲染用）
-# 关键设计：r 越大 = 掌握越好；颜色越深（绿色单色梯度）= 掌握越好
-# 最小档 r=6 仍清晰可辨；最大 r=18
-_FRUIT_VIS = {
-    "精通": dict(r=18, fill="#15803D", fg="#FFFFFF", fs=12, fw=700, bd="#14532D"),
-    "熟练": dict(r=15, fill="#22C55E", fg="#FFFFFF", fs=11, fw=700, bd="#15803D"),
-    "入门": dict(r=12, fill="#86EFAC", fg="#14532D", fs=11, fw=600, bd="#4ADE80"),
-    "初窥": dict(r=9,  fill="#93C5FD", fg="#1E40AF", fs=10, fw=500, bd="#60A5FA"),
-    "空白": dict(r=6,  fill="#D1D5DB", fg="#6B7280", fs=9,  fw=400, bd="#9CA3AF"),
+# 果子视觉映射：双轴
+#   颜色 → 题目难度（1-7 五档：入门/普及/提高/省选/NOI）
+#   大小 → 掌握度（精通 > 熟练 > 入门 > 初窥 > 空白）
+
+# 难度（1-7，0=无数据）→ 颜色档
+# 颜色与报告里"详细情况"列的 5 个色点保持一致（绿/金/橙/蓝/红）
+# 洛谷官方 7 档难度色（与报告"难度分布"表 + "知识点覆盖统计表" 5 个色点完全一致）
+# 颜色谱：入门(红) → 普及-(橙) → 普及/提高-(金) → 提高+/提高(绿) → 提高+/省选-(浅蓝) → 省选/NOI-(紫) → NOI/NOI+/CTSC(深蓝)
+# 5 档图例聚合：1→入门(红)、2-3→普及(橙+金统一成金)、4→提高(绿)、5-6→省选(浅蓝+紫统一成蓝)、7→NOI(深蓝)
+_DIFF_TIER: dict[int, dict] = {
+    0: dict(name="未知", fill="#9CA3AF", fg="#FFFFFF", bd="#6B7280"),
+    1: dict(name="入门", fill="#F5222D", fg="#FFFFFF", bd="#A8071A"),  # 红
+    2: dict(name="普及", fill="#FA541C", fg="#FFFFFF", bd="#AD3811"),  # 橙
+    3: dict(name="普及", fill="#FAAD14", fg="#FFFFFF", bd="#AD8B14"),  # 金
+    4: dict(name="提高", fill="#52C41A", fg="#FFFFFF", bd="#389E0D"),  # 绿
+    5: dict(name="省选", fill="#1890FF", fg="#FFFFFF", bd="#096DD9"),  # 浅蓝
+    6: dict(name="省选", fill="#722ED1", fg="#FFFFFF", bd="#531DAB"),  # 紫
+    7: dict(name="NOI",  fill="#2F54EB", fg="#FFFFFF", bd="#1D39C4"),  # 深蓝
 }
+
+# 掌握度 → 果子半径（r 越大 = AC 越多 = 掌握越好）
+# 最小 r=6 仍清晰可辨；最大 r=18
+_MASTERY_VIS: dict[str, dict] = {
+    "精通": dict(r=18, fs=12, fw=700),
+    "熟练": dict(r=15, fs=11, fw=700),
+    "入门": dict(r=12, fs=11, fw=600),
+    "初窥": dict(r=9,  fs=10, fw=500),
+    "空白": dict(r=7,  fs=9,  fw=400),
+}
+
+# 掌握度 → 果子颜色（fill/fg/bd）
+# 需求：果子颜色按"题目难度"图例（入门红/普及橙/提高绿/省选蓝/NOI深蓝）；
+# 但"空白"（完全没 AC）不染成红色（很多入门题默认就是这个），改用纯白
+# 初窥用一个低饱和的浅灰，区别于空白
+_MASTERY_COLOR: dict[str, dict] = {
+    "空白": dict(fill="#FFFFFF", fg="#9CA3AF", bd="#D1D5DB"),  # 白底+灰边+灰字
+    "初窥": dict(fill="#E5E7EB", fg="#6B7280", bd="#9CA3AF"),  # 浅灰
+}
+# 题目难度 → 颜色（与图例 5 档严格一致）
+# 关键修复：之前当题目难度=1（入门）时会把"空白"也染成红色，违反图例。
+# 现在新增"掌握度优先"分支：若 level=="空白" 或 level=="初窥"，用 _MASTERY_COLOR；
+# 否则用难度色 _DIFF_TIER。
 
 
 # 知识点 → 分类的关键词映射（树形分组用）
@@ -820,7 +891,7 @@ def _build_one_tree_svg(
     title: str,
     cat_topics: list,
     *,
-    width: int = 520,
+    width: int = 680,
 ) -> str:
     """把一个竞赛级别画成一棵"真正的树"（SVG：树干 + 树枝 + 果子）。
 
@@ -838,16 +909,18 @@ def _build_one_tree_svg(
 
     设计
     ----
-    - 棕色树干在左侧，向上长
-    - 树干上的小白牌：级别名
+    - 中央树干（SVG 正中，棕色三层叠加 + 顶部 5 簇绿叶）
+    - 主分支从中央向左右两侧**扇形展开**（奇偶交替），避免全在一侧像耙子
+    - 长度因子：上层分支短、下层分支长，整体呈下宽上窄的圆锥轮廓
     - 树根处一条棕色虚线 + 草尖，模拟"地面"
-    - 每条主分支 = 一个算法分类，曲线（Q 二次贝塞尔）从树干右弯出去
+    - 每条主分支 = 一个算法分类，Q 二次贝塞尔曲线，弯曲更明显
     - 分支上点缀几片小绿叶（装饰用）
-    - 分支右端挂一排"果子" = 知识点
+    - 分支末端挂一排"果子" = 知识点
         - 半径 r 越大 → 掌握越好（6px 空白 → 18px 精通）
         - 颜色越深（灰 → 浅蓝 → 浅绿 → 中绿 → 深绿）→ 掌握越好
         - 果子中心写 AC 数（半径够大才写，避免溢出）
-        - 果子下方写知识点名（>5 字截断）
+        - 果子下方写知识点名（>4 字拆两行）
+    - 分类小帽（深色药丸）挂在分支根处上沿，靠树干一侧
     - 树干不透明度最低；果子最显眼
     """
     if not cat_topics:
@@ -857,25 +930,30 @@ def _build_one_tree_svg(
         )
 
     # 布局常量
-    HEADER_H = 14          # 顶部留白（标题由外层 wrapper 提供）
-    BRANCH_H = 84          # 每条主分支占的高度（含两行标签 + 间距）
+    HEADER_H = 30          # 顶部留白（给树冠+最顶部分类帽留余地，避免文字被裁）
+    BRANCH_H = 88          # 每条主分支占的高度（含两行标签 + 间距）
     BOTTOM_PAD = 28
     MAX_FRUITS = 6         # 每条分支最多挂几个果子（超出的写"+N"）
-    FRUIT_W = 62           # 果子之间的水平间距
+    FRUIT_W = 56           # 果子之间的水平间距
+    SIDE_MARGIN = 24       # 边距
 
     n_branches = len(cat_topics)
     height = HEADER_H + n_branches * BRANCH_H + BOTTOM_PAD
 
-    # 树干几何
-    trunk_x = 32
+    # 树干几何：居中
+    trunk_x = width // 2
     ground_y = HEADER_H + 6
     trunk_top = ground_y + 4
     trunk_bottom = height - 12
+    half_w = width // 2 - SIDE_MARGIN  # 一侧可用的最大水平距离
 
     svg: list[str] = []
+    # 用百分比宽度，避免 PDF 渲染时被裁切
     svg.append(
-        f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'<svg viewBox="0 0 {width} {height}" width="100%" height="auto" '
+        f'preserveAspectRatio="xMidYMid meet" '
         f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="display:block;max-width:100%;margin:0 auto;" '
         f'font-family="-apple-system, BlinkMacSystemFont, \'PingFang SC\', '
         f'\'Microsoft YaHei\', sans-serif">'
     )
@@ -942,13 +1020,15 @@ def _build_one_tree_svg(
     # 主分支 = 分类；按 cat_topics 顺序（已排好）从下往上画
     branch_zone = trunk_bottom - trunk_top - 14
     for i, (cat, topics) in enumerate(cat_topics):
-        # 分支 y：均匀分布（i=0 在最下，越往上 i 越大）
+        # 分支 y：均匀分布（i=0 在最上，越往下 i 越大）
         by = trunk_top + 7 + (i + 0.5) * (branch_zone / n_branches)
-        # 轻微上下错落，让树看起来"自然"
-        if i % 2 == 0:
-            by += 1
+        # 方向：奇偶交替（i=0 → 右，i=1 → 左，i=2 → 右，…）
+        going_right = (i % 2 == 0)
+        # 长度因子：i=0（最上）最短，i=n-1（最下）最长；形成下宽上窄的圆锥
+        if n_branches > 1:
+            length_factor = 0.62 + 0.38 * i / (n_branches - 1)
         else:
-            by -= 1
+            length_factor = 1.0
 
         # 限长 + 按 AC 降序
         topics_sorted = sorted(topics, key=lambda t: -t[1])[:MAX_FRUITS]
@@ -957,25 +1037,49 @@ def _build_one_tree_svg(
         if n_fruits == 0:
             continue
 
-        # 果子 x 位置（分支上等距排列，超宽自动压缩）
-        first_fruit_x = trunk_x + 42
-        last_fruit_x = first_fruit_x + (n_fruits - 1) * FRUIT_W
-        if last_fruit_x > width - 30:
-            avail = width - 30 - first_fruit_x
-            fw = max(40, avail / max(1, n_fruits - 1)) if n_fruits > 1 else FRUIT_W
-            last_fruit_x = first_fruit_x + (n_fruits - 1) * fw
-        else:
-            fw = FRUIT_W
-        branch_end_x = last_fruit_x + 12
+        # 计算本侧最大可用水平距离（按 length_factor 缩放）
+        max_extent = half_w * length_factor
 
-        # 主分支曲线（Q 二次贝塞尔）
-        ctrl_x = (trunk_x + branch_end_x) / 2
-        ctrl_y = by - 16
-        branch_path = (
-            f'M {trunk_x + 8} {by} '
-            f'Q {ctrl_x} {ctrl_y} {branch_end_x - 5} {by - 1}'
-        )
-        # 阴影 + 主色
+        # 果子间距（如果太长则压缩，最小 38px）
+        if n_fruits > 1:
+            ideal_span = (n_fruits - 1) * FRUIT_W
+            if ideal_span > max_extent - 30:
+                fw = max(38, (max_extent - 30) / (n_fruits - 1))
+            else:
+                fw = FRUIT_W
+        else:
+            fw = 0
+
+        if going_right:
+            # 分支起点/终点
+            branch_start_x = trunk_x + 7
+            first_fruit_x = trunk_x + 22
+            last_fruit_x = first_fruit_x + (n_fruits - 1) * fw
+            branch_end_x = last_fruit_x + 12
+            ctrl_x = (branch_start_x + branch_end_x) / 2
+            ctrl_y = by - 22
+            branch_path = (
+                f'M {branch_start_x} {by} '
+                f'Q {ctrl_x} {ctrl_y} {branch_end_x} {by - 1}'
+            )
+            # 分类 chip 锚点（在分支"内侧"，即靠近树干的左侧）
+            chip_x = trunk_x + 14
+        else:
+            # 镜像：分支从树干左侧出发
+            branch_start_x = trunk_x - 7
+            first_fruit_x = trunk_x - 22
+            last_fruit_x = first_fruit_x - (n_fruits - 1) * fw
+            branch_end_x = last_fruit_x - 12
+            ctrl_x = (branch_start_x + branch_end_x) / 2
+            ctrl_y = by - 22
+            branch_path = (
+                f'M {branch_start_x} {by} '
+                f'Q {ctrl_x} {ctrl_y} {branch_end_x} {by - 1}'
+            )
+            # 分类 chip 锚点（在分支"内侧"，即靠近树干的右侧）
+            chip_x = trunk_x - 14
+
+        # 主分支曲线（阴影 + 主色，双层叠加）
         svg.append(
             f'<path d="{branch_path}" stroke="#5C3A1E" stroke-width="6" '
             f'fill="none" stroke-linecap="round"/>'
@@ -985,75 +1089,110 @@ def _build_one_tree_svg(
             f'fill="none" stroke-linecap="round" opacity="0.7"/>'
         )
 
-        # 分支上的几片小叶子（装饰，给点绿意）
-        for lx_frac, lrot in [(0.32, -32), (0.55, 28), (0.78, -24)]:
-            lx = trunk_x + 18 + (branch_end_x - trunk_x - 18) * lx_frac
-            if lx < first_fruit_x - 6 and lx < branch_end_x - 8:
-                ly = by - (5 if lrot > 0 else 7)
-                svg.append(
-                    f'<ellipse cx="{lx}" cy="{ly}" rx="4" ry="2" '
-                    f'fill="#4ADE80" opacity="0.75" '
-                    f'transform="rotate({lrot} {lx} {ly})"/>'
-                )
+        # 分支上的几片小叶子（装饰，给点绿意；只画在分支前段，不挤到果子下面）
+        for lx_frac, lrot in [(0.32, -28), (0.55, 24)]:
+            lx = branch_start_x + (branch_end_x - branch_start_x) * lx_frac
+            ly = by - (5 if lrot > 0 else 7)
+            if going_right:
+                if lx < first_fruit_x - 6 and lx < branch_end_x - 8:
+                    svg.append(
+                        f'<ellipse cx="{lx}" cy="{ly}" rx="4" ry="2" '
+                        f'fill="#4ADE80" opacity="0.75" '
+                        f'transform="rotate({lrot} {lx} {ly})"/>'
+                    )
+            else:
+                if lx > first_fruit_x + 6 and lx > branch_end_x + 8:
+                    svg.append(
+                        f'<ellipse cx="{lx}" cy="{ly}" rx="4" ry="2" '
+                        f'fill="#4ADE80" opacity="0.75" '
+                        f'transform="rotate({-lrot} {lx} {ly})"/>'
+                    )
 
-        # 分类小帽（深灰底白字，挂在分支根处）
+        # 分类小帽（深色药丸 + 白字，挂在分支根处上沿）
+        # 关键修复：之前 y=by-24 会让 chip 底（y=by-8）和最大果子（r=18, 顶 y=by-20）
+        # 垂直方向 12px 重叠，导致 chip 文字被果子盖住。把 chip 整体上移到 by-34，
+        # 让 chip 底（y=by-18）刚好不超过最大果子顶（y=by-20），不再被遮挡。
         chip_w = max(40, len(cat) * 9 + 16)
+        if going_right:
+            chip_left = chip_x
+        else:
+            chip_left = chip_x - chip_w
         svg.append(
-            f'<rect x="{trunk_x + 14}" y="{by - 24}" width="{chip_w}" '
-            f'height="16" rx="3" fill="#1F2937" opacity="0.9"/>'
+            f'<rect x="{chip_left}" y="{by - 34}" width="{chip_w}" '
+            f'height="16" rx="8" fill="#1F2937" opacity="0.92"/>'
         )
         svg.append(
-            f'<text x="{trunk_x + 22}" y="{by - 12}" font-size="10" '
-            f'font-weight="700" fill="#FFFFFF">{cat}</text>'
+            f'<text x="{chip_left + chip_w / 2:.1f}" y="{by - 22}" '
+            f'font-size="10" font-weight="700" fill="#FFFFFF" '
+            f'text-anchor="middle">{cat}</text>'
         )
 
         # 果子们
-        for j, (topic, ac, level) in enumerate(topics_sorted):
-            fx = first_fruit_x + j * fw
+        for j, (topic, ac, level, difficulty) in enumerate(topics_sorted):
+            if going_right:
+                fx = first_fruit_x + j * fw
+            else:
+                fx = first_fruit_x - j * fw
             fy = by - 2
-            st = _FRUIT_VIS[level]
+            # 颜色规则：掌握度为"空白/初窥"时用浅色（避免被低难度=1 染成红色）；
+            # 其余情况用题目难度色（与图例 5 档一致）。
+            mt = _MASTERY_VIS.get(level, _MASTERY_VIS["空白"])
+            r = mt["r"]
+            if level in _MASTERY_COLOR:
+                mc = _MASTERY_COLOR[level]
+                fill = mc["fill"]
+                fg = mc["fg"]
+                bd = mc["bd"]
+                diff_label = level
+            else:
+                dt = _DIFF_TIER.get(difficulty, _DIFF_TIER[0])
+                fill = dt["fill"]
+                fg = dt["fg"]
+                bd = dt["bd"]
+                diff_label = dt["name"]
             # 完整信息（hover/assistive 显示）
-            full_info = f"{topic} · AC {ac} · {level}"
+            full_info = (
+                f"{topic} · AC {ac} · {level} · 难度[{diff_label}]"
+            )
             # 果柄（短竖线，从果子底部到分支）
             svg.append(
-                f'<line x1="{fx}" y1="{fy + st["r"]}" '
-                f'x2="{fx}" y2="{fy + st["r"] + 4}" '
+                f'<line x1="{fx}" y1="{fy + r}" '
+                f'x2="{fx}" y2="{fy + r + 4}" '
                 f'stroke="#5C3A1E" stroke-width="1.5"/>'
             )
             # 果子本体（带 <title> 鼠标悬停看完整信息）
             svg.append(
-                f'<circle cx="{fx}" cy="{fy}" r="{st["r"]}" '
-                f'fill="{st["fill"]}" stroke="{st["bd"]}" '
+                f'<circle cx="{fx}" cy="{fy}" r="{r}" '
+                f'fill="{fill}" stroke="{bd}" '
                 f'stroke-width="1.4">'
                 f'<title>{full_info}</title>'
                 f'</circle>'
             )
             # 高光（左上）
             svg.append(
-                f'<ellipse cx="{fx - st["r"] * 0.32:.2f}" '
-                f'cy="{fy - st["r"] * 0.4:.2f}" '
-                f'rx="{st["r"] * 0.35:.2f}" '
-                f'ry="{st["r"] * 0.22:.2f}" '
+                f'<ellipse cx="{fx - r * 0.32:.2f}" '
+                f'cy="{fy - r * 0.4:.2f}" '
+                f'rx="{r * 0.35:.2f}" '
+                f'ry="{r * 0.22:.2f}" '
                 f'fill="#FFFFFF" opacity="0.5"/>'
             )
             # 果子内写 AC 数（半径 >= 11 才写，避免溢出）
-            if st["r"] >= 11:
+            if r >= 11:
                 svg.append(
-                    f'<text x="{fx}" y="{fy + 4}" font-size="{st["fs"]}" '
-                    f'font-weight="700" fill="{st["fg"]}" '
+                    f'<text x="{fx}" y="{fy + 4}" font-size="{mt["fs"]}" '
+                    f'font-weight="{mt["fw"]}" fill="{fg}" '
                     f'text-anchor="middle">{ac}</text>'
                 )
             # 果子下写知识点名
-            # 规则：<=4 字直接显示；5~7 字第一行 3-4 字，第二行 3 字；>=8 字则 4+4
+            # 规则：<=4 字直接显示；5+ 字拆两行
             topic_chars = list(topic)
             n = len(topic_chars)
             if n <= 4:
                 lines = ["".join(topic_chars)]
             else:
-                # 拆两行
                 mid = (n + 1) // 2
                 lines = ["".join(topic_chars[:mid]), "".join(topic_chars[mid:])]
-            label_y_start = fy + st["r"] + 12
+            label_y_start = fy + r + 12
             for li, line in enumerate(lines):
                 svg.append(
                     f'<text x="{fx}" y="{label_y_start + li * 10}" '
@@ -1061,11 +1200,18 @@ def _build_one_tree_svg(
                     f'text-anchor="middle">{line}</text>'
                 )
 
-        # 被截掉的 "+N"
+        # 被截掉的 "+N"（分别锚定到分支末端外侧）
         if hidden > 0:
+            if going_right:
+                overflow_x = branch_end_x + 4
+                anchor = "start"
+            else:
+                overflow_x = branch_end_x - 4
+                anchor = "end"
             svg.append(
-                f'<text x="{branch_end_x + 6}" y="{by + 3}" font-size="10" '
-                f'fill="#9CA3AF" font-style="italic">+{hidden}</text>'
+                f'<text x="{overflow_x}" y="{by + 3}" font-size="10" '
+                f'fill="#9CA3AF" font-style="italic" '
+                f'text-anchor="{anchor}">+{hidden}</text>'
             )
 
     svg.append('</svg>')
@@ -1090,18 +1236,30 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         ("noi", "NOI 级", "🏆"),
     )
 
-    # ---------- 图例：用真实果子样式展示梯度 ----------
-    legend_fruits: list[str] = []
+    # ---------- 图例 1：大小=掌握度 ----------
+    # 关键修复：之前的图例所有点都是灰色，跟实际果子颜色对不上（实际空白=白、初窥=浅灰）。
+    # 改用每个档位自己的颜色，画出来才跟真果子一致。
+    legend_size: list[str] = []
     for name in ("精通", "熟练", "入门", "初窥", "空白"):
-        st = _FRUIT_VIS[name]
-        r = st["r"]
-        legend_fruits.append(
+        mt = _MASTERY_VIS[name]
+        r = mt["r"]
+        # 用真实配色：精通/熟练/入门按难度=4 绿色（用同款色），初窥/空白用浅色
+        if name in _MASTERY_COLOR:
+            col = _MASTERY_COLOR[name]
+            dot_fill = col["fill"]
+            dot_stroke = col["bd"]
+        else:
+            # 精通/熟练/入门 的视觉示例用 4=提高 绿色
+            dt = _DIFF_TIER[4]
+            dot_fill = dt["fill"]
+            dot_stroke = dt["bd"]
+        legend_size.append(
             f'<span style="display:inline-flex;align-items:center;'
-            f'gap:5px;margin-right:14px;">'
+            f'gap:5px;margin-right:12px;">'
             f'<svg width="{r * 2 + 4}" height="{r * 2 + 4}" '
             f'viewBox="-{r + 2} -{r + 2} {r * 2 + 4} {r * 2 + 4}" '
             f'xmlns="http://www.w3.org/2000/svg">'
-            f'<circle r="{r}" fill="{st["fill"]}" stroke="{st["bd"]}" '
+            f'<circle r="{r}" fill="{dot_fill}" stroke="{dot_stroke}" '
             f'stroke-width="1.2"/>'
             f'<ellipse cx="{-r * 0.32:.2f}" cy="{-r * 0.4:.2f}" '
             f'rx="{r * 0.35:.2f}" ry="{r * 0.22:.2f}" '
@@ -1110,17 +1268,48 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
             f'<span style="font-size:11px;color:#1F2937;">{name}</span>'
             f'</span>'
         )
+
+    # ---------- 图例 2：颜色=难度 ----------
+    legend_color: list[str] = []
+    for diff_id, name, ckey in (
+        (1, "入门", "入门"),
+        (2, "普及", "普及"),
+        (4, "提高", "提高"),
+        (5, "省选", "省选"),
+        (7, "NOI",  "NOI"),
+    ):
+        dt = _DIFF_TIER[diff_id]
+        r = 8
+        legend_color.append(
+            f'<span style="display:inline-flex;align-items:center;'
+            f'gap:5px;margin-right:12px;">'
+            f'<svg width="{r * 2 + 4}" height="{r * 2 + 4}" '
+            f'viewBox="-{r + 2} -{r + 2} {r * 2 + 4} {r * 2 + 4}" '
+            f'xmlns="http://www.w3.org/2000/svg">'
+            f'<circle r="{r}" fill="{dt["fill"]}" stroke="{dt["bd"]}" '
+            f'stroke-width="1.2"/>'
+            f'</svg>'
+            f'<span style="font-size:11px;color:#1F2937;">{ckey}</span>'
+            f'</span>'
+        )
+
     legend = (
         '<div style="background:#F9FAFB;border:1px solid #E5E7EB;'
         'border-radius:6px;padding:10px 14px;margin:0 0 14px 0;'
-        'font-size:11px;color:#374151;display:flex;'
-        'flex-wrap:wrap;align-items:center;gap:6px;">'
-        '<span style="font-weight:700;color:#1F2937;margin-right:4px;">'
-        '果子大小 = 掌握度</span>'
-        + ''.join(legend_fruits)
-        + '<span style="color:#6B7280;margin-left:6px;">'
-        '| 颜色越深 → 掌握越好；灰 = 未接触；树状结构 = 分类层级'
-        '</span></div>'
+        'font-size:11px;color:#374151;">'
+        '<div style="display:flex;flex-wrap:wrap;align-items:center;'
+        'gap:6px;margin-bottom:6px;">'
+        '<span style="font-weight:700;color:#1F2937;margin-right:6px;">'
+        '📐 果子大小 = 掌握度</span>'
+        + ''.join(legend_size)
+        + '</div>'
+        '<div style="display:flex;flex-wrap:wrap;align-items:center;'
+        'gap:6px;">'
+        '<span style="font-weight:700;color:#1F2937;margin-right:6px;">'
+        '🎨 果子颜色 = 题目难度</span>'
+        + ''.join(legend_color)
+        + '</div>'
+        '</div>'
     )
 
     # ---------- 4 棵树 ----------
@@ -1135,7 +1324,8 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         lit = total - blank
 
         # 按分类聚合
-        cat_to_topics: dict[str, list[tuple[str, int, str]]] = {}
+        # tuple 顺序: (topic, ac, level, difficulty)
+        cat_to_topics: dict[str, list[tuple[str, int, str, int]]] = {}
         cat_order: list[str] = []
         for item in details:
             topic = str(item.get("topic", "")).strip()
@@ -1143,11 +1333,12 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
                 continue
             ac = int(item.get("ac_count", 0) or 0)
             level = _level_for_ac(ac)
+            difficulty = int(item.get("difficulty", 0) or 0)
             cat = _classify_topic(topic)
             if cat not in cat_to_topics:
                 cat_to_topics[cat] = []
                 cat_order.append(cat)
-            cat_to_topics[cat].append((topic, ac, level))
+            cat_to_topics[cat].append((topic, ac, level, difficulty))
 
         # 排序：分类按"该分类最高 AC 数"降序（强的分类画在树上更高位置）
         def _cat_score(cat: str) -> int:
@@ -2282,7 +2473,27 @@ def main():
             detail_fetch_stats = summarize_detail_fetch_stats(passed_items, failed_items, detail_fetch_state)
 
             summary = _summarize(all_passed_problems, tag_by_id=tag_by_id)
-            syllabus_evaluation = evaluate_all_topics(summary.get("top_algorithm_tags", []) or summary.get("top_tags", []))
+            # 构建 tag → 题目难度列表（用于估算每个知识点的平均难度）
+            tag_difficulty_map: dict[str, list[int]] = {}
+            for prob in all_passed_problems:
+                d = getattr(prob, "difficulty", None)
+                if d is None or d <= 0:
+                    continue
+                try:
+                    di = int(d)
+                except (TypeError, ValueError):
+                    continue
+                if di <= 0:
+                    continue
+                for tag in (getattr(prob, "tags", None) or []):
+                    tag_name = str(tag).strip()
+                    if not tag_name:
+                        continue
+                    tag_difficulty_map.setdefault(tag_name, []).append(di)
+            syllabus_evaluation = evaluate_all_topics(
+                summary.get("top_algorithm_tags", []) or summary.get("top_tags", []),
+                tag_difficulty_map=tag_difficulty_map,
+            )
             six_dim_scores = compute_six_dimension_scores(
                 {"solved_count": len(all_passed_problems), "summary": summary},
                 behavior_analysis if "error" not in behavior_analysis else {},

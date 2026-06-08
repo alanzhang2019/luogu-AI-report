@@ -377,6 +377,51 @@ def _count_topic_ac(top_tags: list[dict], topic_keywords: list[str]) -> int:
     return total
 
 
+def _compute_topic_difficulty(
+    top_tags: list[dict],
+    topic_keywords: list[str],
+    tag_difficulty_map: dict[str, list[int]] | None = None,
+) -> int:
+    """统计某知识点对应的平均难度（1-7，0 表示无数据）。
+
+    算法：
+    1. 优先用 tag_difficulty_map（外部传入的真实题目难度聚合），
+       找出所有匹配本知识点的标签，取所有题目的平均 difficulty。
+    2. 退回：从 top_tags 里的 difficulty 字段取均值（如果有）。
+    3. 都没有 → 0。
+    """
+    matched_diffs: list[int] = []
+
+    # 方式 1：用外部传入的 tag → 难度列表
+    if tag_difficulty_map:
+        for tag_name, diffs in tag_difficulty_map.items():
+            if _match_topic(tag_name, topic_keywords):
+                matched_diffs.extend(int(d) for d in diffs if d and d > 0)
+
+    # 方式 2：从 top_tags 自身取 difficulty 字段（容错）
+    if not matched_diffs:
+        for item in top_tags:
+            tag_name = str(item.get("name") or "")
+            if not _match_topic(tag_name, topic_keywords):
+                continue
+            d = item.get("difficulty")
+            if d is None:
+                continue
+            try:
+                di = int(d)
+                if di > 0:
+                    matched_diffs.append(di)
+            except (TypeError, ValueError):
+                continue
+
+    if not matched_diffs:
+        return 0
+    # 四舍五入到最近的整数（1-7）
+    avg = sum(matched_diffs) / len(matched_diffs)
+    rounded = int(round(avg))
+    return max(1, min(7, rounded))
+
+
 def evaluate_topic_level(ac_count: int) -> str:
     """根据 AC 题数评定掌握等级"""
     if ac_count >= 20:
@@ -391,9 +436,20 @@ def evaluate_topic_level(ac_count: int) -> str:
         return "🔴 空白"
 
 
-def evaluate_all_topics(top_tags: list[dict]) -> dict[str, Any]:
+def evaluate_all_topics(
+    top_tags: list[dict],
+    tag_difficulty_map: dict[str, list[int]] | None = None,
+) -> dict[str, Any]:
     """
     对所有知识点进行评估，返回分级统计结果
+
+    Parameters
+    ----------
+    top_tags : list[dict]
+        标签聚合数据 [{name, count, ...}, ...]
+    tag_difficulty_map : dict[str, list[int]], optional
+        外部传入的 tag → 题目难度列表（1-7），用于计算每个知识点的平均难度。
+        没有则 difficulty=0。
     """
     def _evaluate_group(topics: dict[str, list[str]]) -> dict[str, Any]:
         results = []
@@ -401,11 +457,13 @@ def evaluate_all_topics(top_tags: list[dict]) -> dict[str, Any]:
         total_ac = 0
         for topic_name, keywords in topics.items():
             ac = _count_topic_ac(top_tags, keywords)
+            diff = _compute_topic_difficulty(top_tags, keywords, tag_difficulty_map)
             level = evaluate_topic_level(ac)
             results.append({
                 "topic": topic_name,
                 "ac_count": ac,
                 "level": level,
+                "difficulty": diff,
             })
             if "精通" in level:
                 green += 1

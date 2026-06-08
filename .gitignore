@@ -158,3 +158,17 @@ tasks.db-*
 
 # 构建产物
 luogu-ai-coach.zip
+
+# 调试/排障临时产物（本地残留，不入库）
+_dbg_*
+_*.sh
+_*.py
+_*.html
+_*.pdf
+_*.png
+_tree_*/
+debug-*.md
+# 本地中文文档残留
+*错配齐*
+*是而非AI*
+deploy-pkg.zip
