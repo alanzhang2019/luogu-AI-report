@@ -49,6 +49,7 @@ TASK_COLUMNS: dict[str, str] = {
     "tag_fetch_success":     "INTEGER DEFAULT 0",
     "tag_fetch_total":       "INTEGER DEFAULT 0",
     "retry_form_json":       "TEXT DEFAULT ''",
+    "student_id":            "INTEGER REFERENCES students(id)",  # v3.5.2+：关联学员档案
     "created_at":            "TEXT DEFAULT ''",
 }
 
@@ -390,6 +391,13 @@ def init_db():
         except sqlite3.OperationalError:
             # 字段已存在，跳过（v1/v2 老库升级时安全）
             pass
+
+    # ---- 4. 兜底：自动补齐 TASK_COLUMNS 里新增但历史建表没写出来的列 ----
+    #   解决 tag_fetch_success / tag_fetch_total 等列被新代码引用但老库没有的问题
+    added = _ensure_columns(conn)
+    if added:
+        print(f"[task_store] auto-added columns: {added}")
+
     conn.commit()
     conn.close()
 
