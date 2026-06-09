@@ -1118,6 +1118,17 @@ def _generate_ai_report_artifacts(
             message=f"AI 报告已生成（{api_key_source}），正在生成图表与 HTML/PDF...",
         )
 
+    # 关键：AI 原始输出不含『知识树图谱』『掌握度判定标准』等结构化小节，
+    # 统一在这里走一遍 normalize_report_markdown，由代码注入最新结构，
+    # 避免依赖 prompt 命中 / 旧报告残留。
+    if report_md and export_data is not None:
+        try:
+            report_md = normalize_report_markdown(report_md, export_data)
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(report_md)
+        except Exception as _norm_err:
+            log_message("WARN", f"normalize_report_markdown failed in main flow: {_norm_err}")
+
     current_stage = "生成图表与 HTML/PDF"
     chart_paths = generate_chart_images(export_data, str(assets_dir))
     build_html_and_pdf(report_md, export_data, str(html_path), str(pdf_path), chart_paths)
