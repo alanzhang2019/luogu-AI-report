@@ -720,7 +720,7 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         [
             "",
             "### 知识点覆盖统计表（按算法标签）",
-            '<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>详细情况</th></tr></thead><tbody>',
+            '<table><thead><tr><th>级别</th><th>已覆盖/总数</th><th>覆盖率</th><th>掌握度分布</th></tr></thead><tbody>',
         ]
     )
 
@@ -736,33 +736,28 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         total_topics = int(stats.get("total", 0))
         covered = total_topics - int(stats.get("空白", 0))
         coverage = group.get("coverage", 0)
-        # 关键修复：用户反馈"详细情况"列展示的是精通/熟练/空白等"掌握度"标签，与该列本意（展示该级别下
-        # 各难度子档的分布）不符。改为按题目难度（1-7）聚合，与图例 5 档配色保持一致：
-        #   入门=红 / 普及=橙+金 / 提高=绿 / 省选=浅蓝+紫 / NOI=深蓝
-        # "空白"指 difficulty=0 或缺数据，仍用红色作警示（用户要求"恢复为红色"）
-        # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
-        d1 = d2 = d3 = d4 = d5 = d6 = d7 = d_blank = 0
+        # "掌握度分布"列：本意是展示这一级别分组下，**所有**知识点 topic
+        # 按掌握度（精通/熟练/入门/初窥/空白）的分布，颜色用绿色深浅，与知识树果子一致。
+        # 注意：与"已覆盖/总数"列的对应关系是——
+        #   精通 + 熟练 + 入门 + 初窥 = "已覆盖"（AC ≥ 1）
+        #   空白 = "未覆盖"（AC = 0）
+        #   总数 = 上述 5 档合计
+        m1 = m2 = m3 = m4 = m5 = 0
         for item in detail_list:
-            # item 是 dict（syllabus_matcher 写入），key 为 topic/ac_count/level/difficulty
-            diff = int(item.get("difficulty") or 0) if isinstance(item, dict) else 0
-            if diff == 1:
-                d1 += 1
-            elif diff == 2:
-                d2 += 1
-            elif diff == 3:
-                d3 += 1
-            elif diff == 4:
-                d4 += 1
-            elif diff == 5:
-                d5 += 1
-            elif diff == 6:
-                d6 += 1
-            elif diff == 7:
-                d7 += 1
+            if not isinstance(item, dict):
+                continue
+            ac = int(item.get("ac_count", 0) or 0)
+            level = _level_for_ac(ac)
+            if level == "精通":
+                m1 += 1
+            elif level == "熟练":
+                m2 += 1
+            elif level == "入门":
+                m3 += 1
+            elif level == "初窥":
+                m4 += 1
             else:
-                d_blank += 1
-        n_popular = d2 + d3   # 普及=橙(2) + 金(3) 聚合
-        n_provincial = d5 + d6  # 省选=浅蓝(5) + 紫(6) 聚合
+                m5 += 1
 
         def _chip(color: str, n: int, lbl: str, *, fg: str = "#fff", bd: str = "") -> str:
             border_style = f"border:1px solid {bd};" if bd else ""
@@ -774,12 +769,11 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
                 f'{lbl} {n}项</span>'
             )
         details = (
-            _chip("#F5222D", d1, "入门")
-            + _chip("#FA8C16", n_popular, "普及")
-            + _chip("#52C41A", d4, "提高")
-            + _chip("#1890FF", n_provincial, "省选")
-            + _chip("#2F54EB", d7, "NOI")
-            + _chip("#FFFFFF", d_blank, "空白", fg="#9CA3AF", bd="#D1D5DB")
+            _chip("#14532D", m1, "精通")
+            + _chip("#166534", m2, "熟练")
+            + _chip("#16A34A", m3, "入门")
+            + _chip("#86EFAC", m4, "初窥", fg="#064E3B", bd="#4ADE80")
+            + _chip("#FFFFFF", m5, "空白", fg="#6B7280", bd="#9CA3AF")
         )
         lines.append(f"<tr><td><strong>{label.split('（')[0].replace('级','')}</strong></td><td>{covered}/{total_topics}</td><td>{coverage}%</td><td>{details}</td></tr>")
 
@@ -787,8 +781,45 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
         [
             "</tbody></table>",
             "",
-            "- 口径说明：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。",
+            "- 口径说明：",
+            "  - 行 = 级别（入门/提高/省选/NOI），列 = 已覆盖/总数、覆盖率、**掌握度分布**。",
+            "  - **掌握度分布**展示该级别下所有知识点 topic 按掌握度 5 档（精通/熟练/入门/初窥/空白）的分布，颜色用绿色深浅：精通近黑→熟练深绿→入门标准绿→初窥浅绿→空白白。",
+            "  - 与前一列的对应：精通 + 熟练 + 入门 + 初窥 = “已覆盖”（AC ≥ 1）；空白 = “未覆盖”（AC = 0）；5 档合计 = “总数”。",
+            "- 备注：本表只根据题目的算法标签评估知识点覆盖，表示“接触过”，不等于“熟练掌握”。",
         ]
+    )
+
+    # ------------------------------------------------------------------
+    # 掌握度判定标准小节（独立 H2）
+    # 重要：必须用 H2 而非 H3。normalize_report_markdown 会用
+    # "^## 知识点覆盖统计表（按算法标签）..." 整块吞掉 AI 重复生成的统计表，
+    # "掌握度判定标准"作为同级 H2 不会被吞，会原样保留。
+    # ------------------------------------------------------------------
+    def _legend_chip(c: dict, name: str) -> str:
+        """无数字的纯色块图例（用于判定标准表的"颜色图例"列）。"""
+        border = f"border:1px solid {c.get('bd','')};" if c.get('bd') else ""
+        return (
+            f'<span style="display:inline-block;padding:2px 12px;'
+            f'border-radius:6px;background:{c["fill"]};color:{c["fg"]};'
+            f'{border}font-size:12px;font-weight:600;">{name}</span>'
+        )
+
+    lines.append("")
+    lines.append("## 掌握度判定标准（5 档）")
+    lines.append(
+        '<table><thead><tr>'
+        '<th>掌握度</th><th>判定标准（AC 题目数）</th><th>颜色图例</th>'
+        '</tr></thead><tbody>'
+    )
+    for name, rule in _MASTERY_RULES:
+        chip = _legend_chip(_MASTERY_COLOR[name], name)
+        lines.append(
+            f'<tr><td><strong>{name}</strong></td><td>{rule}</td><td>{chip}</td></tr>'
+        )
+    lines.append("</tbody></table>")
+    lines.append(
+        "- 口径说明：5 档阈值是『知识点覆盖统计表』中『掌握度分布』列的统一判定标准；"
+        "AC = 实际通过的题目数（去重）；『空白』档使用灰色警示色，提示该知识点未接触。"
     )
 
     # 知识树图谱（HTML 块，python-markdown 会原样保留到最终 HTML）
@@ -798,32 +829,45 @@ def build_trusted_data_summary_md(export_data: dict) -> str:
     lines.append('<div style="page-break-before:always;margin-top:24px;">')
     lines.append('<h2 style="font-size:1.45rem;font-weight:700;color:#065F46;border-bottom:3px solid #10B981;padding-bottom:8px;margin:18px 0 12px 0;">🌳 知识树图谱（按算法标签 · 掌握度可视化）</h2>')
     lines.append("")
-    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。果子大小 = 掌握度；颜色 = 题目难度（入门红/普及橙/提高绿/省选蓝/NOI深蓝）。<b>白色果子 = 完全未接触（空白）</b>，浅灰 = 刚入门（初窥）。把鼠标悬停在果子上可查看 AC 题目数与掌握等级。</p>')
+    lines.append('<p style="color:#6B7280;font-size:14px;margin:6px 0 14px 0;">下图按 4 个竞赛级别（CSP-J / CSP-S / 省选 / NOI）展示所有考纲知识点的掌握度。果子**大小 + 颜色**都按"掌握度"用绿色深浅表示（精通近黑 / 熟练深绿 / 入门绿 / 初窥浅绿 / 空白白）。把鼠标悬停在果子上可查看 AC 题目数、掌握等级与关联题目的难度。</p>')
     lines.append(build_knowledge_tree_html(syllabus_eval))
     lines.append('</div>')
 
     return "\n".join(lines)
 
 
-# 果子视觉映射：双轴
-#   颜色 → 题目难度（1-7 五档：入门/普及/提高/省选/NOI）
-#   大小 → 掌握度（精通 > 熟练 > 入门 > 初窥 > 空白）
+# 果子视觉映射：单轴 + 渐变
+#   颜色（绿色深浅）→ 掌握度 5 档：精通近黑 / 熟练深绿 / 入门绿 / 初窥浅绿 / 空白白
+#   大小 → 掌握度（冗余维度，便于色弱辨识）
+# 难度信息（1-7）从果子的视觉上完全撤除，只在 hover 提示文字里展示。
 
 # 难度（1-7，0=无数据）→ 颜色档
-# 颜色与报告里"详细情况"列的 5 个色点保持一致（绿/金/橙/蓝/红）
-# 洛谷官方 7 档难度色（与报告"难度分布"表 + "知识点覆盖统计表" 5 个色点完全一致）
-# 颜色谱：入门(红) → 普及-(橙) → 普及/提高-(金) → 提高+/提高(绿) → 提高+/省选-(浅蓝) → 省选/NOI-(紫) → NOI/NOI+/CTSC(深蓝)
-# 5 档图例聚合：1→入门(红)、2-3→普及(橙+金统一成金)、4→提高(绿)、5-6→省选(浅蓝+紫统一成蓝)、7→NOI(深蓝)
+# 用途仅剩：(1) 报告里"题目难度分布"直方图，(2) 知识树果子 hover 提示文字。
+# **果子本身的填色不再使用 _DIFF_TIER**，改用 _MASTERY_COLOR（掌握度绿深浅），
+# 所以这里只保留 hover 提示用的"name"字段。
+# 洛谷官方 7 档难度名：暂无评定、入门、普及-、普及/提高-、普及+/提高、提高+/省选-、省选/NOI-、NOI/NOI+/CTSC
 _DIFF_TIER: dict[int, dict] = {
     0: dict(name="未知", fill="#9CA3AF", fg="#FFFFFF", bd="#6B7280"),
-    1: dict(name="入门", fill="#F5222D", fg="#FFFFFF", bd="#A8071A"),  # 红
-    2: dict(name="普及", fill="#FA541C", fg="#FFFFFF", bd="#AD3811"),  # 橙
-    3: dict(name="普及", fill="#FAAD14", fg="#FFFFFF", bd="#AD8B14"),  # 金
-    4: dict(name="提高", fill="#52C41A", fg="#FFFFFF", bd="#389E0D"),  # 绿
-    5: dict(name="省选", fill="#1890FF", fg="#FFFFFF", bd="#096DD9"),  # 浅蓝
-    6: dict(name="省选", fill="#722ED1", fg="#FFFFFF", bd="#531DAB"),  # 紫
-    7: dict(name="NOI",  fill="#2F54EB", fg="#FFFFFF", bd="#1D39C4"),  # 深蓝
+    1: dict(name="入门", fill="#F5222D", fg="#FFFFFF", bd="#A8071A"),
+    2: dict(name="普及-", fill="#FA541C", fg="#FFFFFF", bd="#AD3811"),
+    3: dict(name="普及/提高-", fill="#FAAD14", fg="#FFFFFF", bd="#AD8B14"),
+    4: dict(name="提高+/提高", fill="#52C41A", fg="#FFFFFF", bd="#389E0D"),
+    5: dict(name="提高+/省选-", fill="#1890FF", fg="#FFFFFF", bd="#096DD9"),
+    6: dict(name="省选/NOI-", fill="#722ED1", fg="#FFFFFF", bd="#531DAB"),
+    7: dict(name="NOI/NOI+/CTSC", fill="#2F54EB", fg="#FFFFFF", bd="#1D39C4"),
 }
+
+# 掌握度 5 档 → AC 题目数判定阈值（单一来源）
+# 顺序敏感：判定时从高到低匹配（精通 → 空白），与 _MASTERY_VIS / _MASTERY_COLOR 对齐。
+# 报告中的"掌握度判定标准"小节直接读取本表渲染，_level_for_ac() 同步遵守。
+# 备注：AC = 实际通过的题目数（去重），与"知识点覆盖统计表"中的 AC 口径一致。
+_MASTERY_RULES: list[tuple[str, str]] = [
+    ("精通", "AC ≥ 20 道"),
+    ("熟练", "10 ≤ AC ≤ 19"),
+    ("入门", "3  ≤ AC ≤ 9"),
+    ("初窥", "1  ≤ AC ≤ 2"),
+    ("空白", "AC = 0（警示色：未接触该知识点）"),
+]
 
 # 掌握度 → 果子半径（r 越大 = AC 越多 = 掌握越好）
 # 最小 r=6 仍清晰可辨；最大 r=18
@@ -836,12 +880,20 @@ _MASTERY_VIS: dict[str, dict] = {
 }
 
 # 掌握度 → 果子颜色（fill/fg/bd）
-# 需求：果子颜色按"题目难度"图例（入门红/普及橙/提高绿/省选蓝/NOI深蓝）；
-# 但"空白"（完全没 AC）不染成红色（很多入门题默认就是这个），改用纯白
-# 初窥用一个低饱和的浅灰，区别于空白
+# 需求：果子颜色按"掌握度"用绿色深浅表示，5 档映射：
+#   精通 = 深绿近黑（Tailwind green-900）
+#   熟练 = 深绿      (Tailwind green-800)
+#   入门 = 标准绿    (Tailwind green-600)
+#   初窥 = 浅绿      (Tailwind green-300)
+#   空白 = 纯白      (深绿边框区分)
+# 关键决策：放弃之前的"难度色（红/橙/绿/蓝/深蓝）"映射，难度信息
+# 通过知识树分支分类、图例说明等其它维度展示，避免果子颜色维度重复。
 _MASTERY_COLOR: dict[str, dict] = {
-    "空白": dict(fill="#FFFFFF", fg="#9CA3AF", bd="#D1D5DB"),  # 白底+灰边+灰字
-    "初窥": dict(fill="#E5E7EB", fg="#6B7280", bd="#9CA3AF"),  # 浅灰
+    "精通": dict(fill="#14532D", fg="#FFFFFF", bd="#052E16"),  # 深绿近黑
+    "熟练": dict(fill="#166534", fg="#FFFFFF", bd="#14532D"),  # 深绿
+    "入门": dict(fill="#16A34A", fg="#FFFFFF", bd="#166534"),  # 标准绿
+    "初窥": dict(fill="#86EFAC", fg="#064E3B", bd="#4ADE80"),  # 浅绿
+    "空白": dict(fill="#FFFFFF", fg="#6B7280", bd="#9CA3AF"),  # 白底+灰边+灰字
 }
 # 题目难度 → 颜色（与图例 5 档严格一致）
 # 关键修复：之前当题目难度=1（入门）时会把"空白"也染成红色，违反图例。
@@ -876,6 +928,8 @@ def _classify_topic(topic: str) -> str:
 
 
 def _level_for_ac(ac_count: int) -> str:
+    # ⚠️ 阈值与 _MASTERY_RULES 强绑定，修改时务必同步更新二者
+    # （"掌握度判定标准"小节和"知识点覆盖统计表-掌握度分布"列都基于此）。
     if ac_count >= 20:
         return "精通"
     if ac_count >= 10:
@@ -1135,23 +1189,18 @@ def _build_one_tree_svg(
             else:
                 fx = first_fruit_x - j * fw
             fy = by - 2
-            # 颜色规则：掌握度为"空白/初窥"时用浅色（避免被低难度=1 染成红色）；
-            # 其余情况用题目难度色（与图例 5 档一致）。
+            # 颜色规则（最终统一）：**果子颜色按"掌握度"用绿色深浅表示**——
+            #   精通=深绿近黑 / 熟练=深绿 / 入门=标准绿 / 初窥=浅绿 / 空白=白
+            # 难度信息不再在果子颜色里展示（避免与掌握度维度重复），
+            # 改在 hover 提示（full_info）和图例的文字说明里展示。
             mt = _MASTERY_VIS.get(level, _MASTERY_VIS["空白"])
             r = mt["r"]
-            if level in _MASTERY_COLOR:
-                mc = _MASTERY_COLOR[level]
-                fill = mc["fill"]
-                fg = mc["fg"]
-                bd = mc["bd"]
-                diff_label = level
-            else:
-                dt = _DIFF_TIER.get(difficulty, _DIFF_TIER[0])
-                fill = dt["fill"]
-                fg = dt["fg"]
-                bd = dt["bd"]
-                diff_label = dt["name"]
-            # 完整信息（hover/assistive 显示）
+            mc = _MASTERY_COLOR.get(level, _MASTERY_COLOR["空白"])
+            fill = mc["fill"]
+            fg = mc["fg"]
+            bd = mc["bd"]
+            diff_label = _DIFF_TIER.get(difficulty, _DIFF_TIER[0])["name"]
+            # 完整信息（hover/assistive 显示）：保留难度
             full_info = (
                 f"{topic} · AC {ac} · {level} · 难度[{diff_label}]"
             )
@@ -1226,7 +1275,8 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         - 棕色树干
         - 分类作为主分支（带小绿叶装饰）
         - 知识点作为果子挂枝头
-        - 果子大小 + 颜色 = 掌握度
+        - 果子大小 + 颜色（绿深浅） = 掌握度
+        - 鼠标悬停：显示 AC 题目数 / 掌握等级 / 关联题目难度
 
     返回完整 HTML（含图例、说明、4 棵树）。"
     """
@@ -1238,22 +1288,14 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
     )
 
     # ---------- 图例 1：大小=掌握度 ----------
-    # 关键修复：之前的图例所有点都是灰色，跟实际果子颜色对不上（实际空白=白、初窥=浅灰）。
-    # 改用每个档位自己的颜色，画出来才跟真果子一致。
+    # 关键修复：图例每个点用掌握度自身的颜色（绿深浅），跟真果子一致。
     legend_size: list[str] = []
     for name in ("精通", "熟练", "入门", "初窥", "空白"):
         mt = _MASTERY_VIS[name]
         r = mt["r"]
-        # 用真实配色：精通/熟练/入门按难度=4 绿色（用同款色），初窥/空白用浅色
-        if name in _MASTERY_COLOR:
-            col = _MASTERY_COLOR[name]
-            dot_fill = col["fill"]
-            dot_stroke = col["bd"]
-        else:
-            # 精通/熟练/入门 的视觉示例用 4=提高 绿色
-            dt = _DIFF_TIER[4]
-            dot_fill = dt["fill"]
-            dot_stroke = dt["bd"]
+        col = _MASTERY_COLOR.get(name, _MASTERY_COLOR["空白"])
+        dot_fill = col["fill"]
+        dot_stroke = col["bd"]
         legend_size.append(
             f'<span style="display:inline-flex;align-items:center;'
             f'gap:5px;margin-right:12px;">'
@@ -1270,45 +1312,16 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
             f'</span>'
         )
 
-    # ---------- 图例 2：颜色=难度 ----------
-    legend_color: list[str] = []
-    for diff_id, name, ckey in (
-        (1, "入门", "入门"),
-        (2, "普及", "普及"),
-        (4, "提高", "提高"),
-        (5, "省选", "省选"),
-        (7, "NOI",  "NOI"),
-    ):
-        dt = _DIFF_TIER[diff_id]
-        r = 8
-        legend_color.append(
-            f'<span style="display:inline-flex;align-items:center;'
-            f'gap:5px;margin-right:12px;">'
-            f'<svg width="{r * 2 + 4}" height="{r * 2 + 4}" '
-            f'viewBox="-{r + 2} -{r + 2} {r * 2 + 4} {r * 2 + 4}" '
-            f'xmlns="http://www.w3.org/2000/svg">'
-            f'<circle r="{r}" fill="{dt["fill"]}" stroke="{dt["bd"]}" '
-            f'stroke-width="1.2"/>'
-            f'</svg>'
-            f'<span style="font-size:11px;color:#1F2937;">{ckey}</span>'
-            f'</span>'
-        )
-
     legend = (
         '<div style="background:#F9FAFB;border:1px solid #E5E7EB;'
         'border-radius:6px;padding:10px 14px;margin:0 0 14px 0;'
         'font-size:11px;color:#374151;">'
         '<div style="display:flex;flex-wrap:wrap;align-items:center;'
-        'gap:6px;margin-bottom:6px;">'
-        '<span style="font-weight:700;color:#1F2937;margin-right:6px;">'
-        '📐 果子大小 = 掌握度</span>'
-        + ''.join(legend_size)
-        + '</div>'
-        '<div style="display:flex;flex-wrap:wrap;align-items:center;'
         'gap:6px;">'
         '<span style="font-weight:700;color:#1F2937;margin-right:6px;">'
-        '🎨 果子颜色 = 题目难度</span>'
-        + ''.join(legend_color)
+        '� 果子大小 + 颜色 = 掌握度（绿色深浅：精通近黑→熟练深绿→入门标准绿→初窥浅绿→空白白）'
+        '</span>'
+        + ''.join(legend_size)
         + '</div>'
         '</div>'
     )

@@ -172,3 +172,7 @@ debug-*.md
 *错配齐*
 *是而非AI*
 deploy-pkg.zip
+
+# 镜像化部署产物
+webapp-*.tar
+webapp-image.tar
