@@ -5259,6 +5259,35 @@ def _shorten_comp_name(name: str) -> str:
     return name
 
 
+def _extract_ai_summary(report_md: str) -> str:
+    """v3.7 · 从 report.md 抽「AI 核心解读」首段（≤200 字）。
+
+    锚点：### （一）AI 核心解读 / ### 1. AI 核心解读 / ### AI 核心解读
+    返回纯文本（去 markdown / 去多余空白），超 200 字截断。
+    缺该节时返回 ""。
+    """
+    if not report_md:
+        return ""
+    import re as _re
+    # 锚点变体
+    m = _re.search(
+        r"^#{2,4}\s*[（(]?[一二三四五六七八九十\d]+[)）]?\s*AI\s*核心解读.*?$",
+        report_md, _re.M,
+    )
+    if not m:
+        return ""
+    body = report_md[m.end():]
+    # 抓下一个二级或三级标题之前
+    end_m = _re.search(r"^#{2,4}\s+\S+", body, _re.M)
+    section = body[: end_m.start() if end_m else len(body)]
+    # 去掉 markdown 标记 / 多余空白
+    text = _re.sub(r"\*\*?(.+?)\*\*?", r"\1", section)
+    text = _re.sub(r"`([^`]+)`", r"\1", text)
+    text = _re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    return text[:200]
+
+
 def _extract_ai_evaluation_from_report(report_md: str) -> dict:
     """从 report.md 抽取 AI 测评内容（v3.6 · 关键修复）
 
