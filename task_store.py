@@ -51,6 +51,11 @@ TASK_COLUMNS: dict[str, str] = {
     "retry_form_json":       "TEXT DEFAULT ''",
     "student_id":            "INTEGER REFERENCES students(id)",  # v3.5.2+：关联学员档案
     "created_at":            "TEXT DEFAULT ''",
+    # v3.5.2 · 家长订阅版二次生成：任务类型 + 关联 UID + 家长版产物 URL
+    "task_type":             "TEXT DEFAULT ''",
+    "luogu_uid":             "TEXT DEFAULT ''",
+    "ps_html":               "TEXT DEFAULT ''",
+    "ps_md":                 "TEXT DEFAULT ''",
 }
 
 

@@ -946,7 +946,7 @@ def _build_one_tree_svg(
     title: str,
     cat_topics: list,
     *,
-    width: int = 680,
+    width: int = 460,
 ) -> str:
     """把一个竞赛级别画成一棵"真正的树"（SVG：树干 + 树枝 + 果子）。
 
@@ -960,7 +960,8 @@ def _build_one_tree_svg(
         已按"掌握度从高到低"排好序的 [(cat, [(topic, ac, level), ...]), ...]
         排在最上面的是掌握度最高的分类。
     width : int
-        SVG 宽度（px）。树高根据分类数自适应。
+        SVG 宽度（px）。树高根据分类数自适应。v3.6 缩小到 460（之前 680），
+        配合 2×2 网格让 4 棵树一页并排展示。
 
     设计
     ----
@@ -984,13 +985,13 @@ def _build_one_tree_svg(
             'padding:30px 0;font-size:12px;">（该级别暂无知识点数据）</div>'
         )
 
-    # 布局常量
-    HEADER_H = 30          # 顶部留白（给树冠+最顶部分类帽留余地，避免文字被裁）
-    BRANCH_H = 88          # 每条主分支占的高度（含两行标签 + 间距）
-    BOTTOM_PAD = 28
+    # 布局常量（v3.6 紧凑化：BRANCH_H 88→56, FRUIT_W 56→38）
+    HEADER_H = 24          # 顶部留白（给树冠+最顶部分类帽留余地）
+    BRANCH_H = 56          # 每条主分支占的高度（紧凑 36%，让树更矮）
+    BOTTOM_PAD = 22
     MAX_FRUITS = 6         # 每条分支最多挂几个果子（超出的写"+N"）
-    FRUIT_W = 56           # 果子之间的水平间距
-    SIDE_MARGIN = 24       # 边距
+    FRUIT_W = 38           # 果子之间的水平间距（紧凑 32%）
+    SIDE_MARGIN = 18       # 边距（略减）
 
     n_branches = len(cat_topics)
     height = HEADER_H + n_branches * BRANCH_H + BOTTOM_PAD
@@ -1326,7 +1327,8 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         '</div>'
     )
 
-    # ---------- 4 棵树 ----------
+    # ---------- 4 棵树（v3.6 改为 2×2 网格 · 一页并排 2 棵）----------
+    # 每棵：醒目标题条（级别 + 图标 + 大字号 + 彩色背景 + 边框）
     tree_blocks: list[str] = []
     for idx, (key, title, icon) in enumerate(group_keys):
         group = syllabus_eval.get(key, {}) or {}
@@ -1369,26 +1371,34 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
             f' / {total}（{coverage}%）'
         )
 
-        # 第一棵树不强制分页；之后每 2 棵分页一次
-        # （4 棵树约 1300px 高，自然落到 2 张 A4 上）
-        page_break = ""
-        if idx == 2:
-            page_break = "page-break-before:always;"
+        # v3.6 醒目标题：级别色编码（按竞赛级别从浅到深）
+        # CSP-J 浅绿 / CSP-S 中绿 / 省选 深绿 / NOI 金色
+        level_colors = {
+            "CSP-J 入门": ("#10B981", "#D1FAE5", "#065F46"),   # 浅绿
+            "CSP-S 提高": ("#059669", "#A7F3D0", "#064E3B"),   # 中绿
+            "省选级":     ("#047857", "#6EE7B7", "#022C22"),    # 深绿
+            "NOI 级":     ("#D97706", "#FDE68A", "#78350F"),    # 金色
+        }
+        border_c, bg_c, text_c = level_colors.get(title, ("#10B981", "#F0FDF4", "#065F46"))
 
         tree_blocks.append(
-            f'<div class="kt-tree-block" style="{page_break}'
-            f'margin:0 0 8px 0;padding:0;">'
+            f'<div class="kt-tree-block" style="'
+            f'background:#FFFFFF;border:2px solid {border_c};'
+            f'border-radius:8px;padding:8px 10px;margin:0;">'
+            # 醒目标题条：级别 emoji + 名称 + 统计
             f'<div style="display:flex;justify-content:space-between;'
-            f'align-items:baseline;border-bottom:2px solid #10B981;'
-            f'padding:0 0 5px 0;margin:0 0 4px 0;">'
-            f'<span style="font-size:14px;font-weight:700;'
-            f'color:#065F46;">{icon} {title} · 知识树</span>'
-            f'<span style="font-size:11px;color:#6B7280;">{meta}</span>'
+            f'align-items:center;background:{bg_c};border-left:5px solid {border_c};'
+            f'padding:6px 10px;margin:0 0 6px 0;border-radius:4px;">'
+            f'<span style="font-size:16px;font-weight:800;color:{text_c};'
+            f'letter-spacing:0.5px;">{icon} {title} · 知识树</span>'
+            f'<span style="font-size:11px;color:{text_c};font-weight:600;">{meta}</span>'
             f'</div>'
             f'{svg}'
             f'</div>'
         )
 
+    # v3.6 2×2 网格：前 2 棵一行，后 2 棵一行（每行 2 棵并排）
+    # 在小屏自动降为 1 列
     return (
         '<div class="kt-section" style="margin:8px 0 18px 0;">'
         '<h2 style="font-size:18px;font-weight:700;color:#065F46;'
@@ -1397,20 +1407,59 @@ def build_knowledge_tree_html(syllabus_eval: dict) -> str:
         '🌳 知识树图谱（按竞赛级别 · 果子大小/颜色 = 掌握度）</h2>'
         '<p style="font-size:12px;color:#4B5563;margin:0 0 10px 0;'
         'line-height:1.6;">下图为按 4 个竞赛级别（CSP-J / CSP-S / 省选 / '
-        'NOI）分别画出的 4 棵"知识树"。每棵树上，<b>主干</b>代表该级别，'
-        '<b>分支</b>代表算法分类（基础实现 / 搜索 · DFS / 动态规划 / '
-        '贪心 · 二分 / 图论 / 数据结构 / 字符串 / 数学 · 数论 / '
-        '计算几何 / 其他），<b>果子</b>就是该分类下的具体知识点。'
+        'NOI）分别画出的 4 棵"知识树"（<b>2×2 并排</b>，每棵带级别色编码）。'
+        '每棵树上，<b>主干</b>代表该级别，<b>分支</b>代表算法分类（基础实现 / '
+        '搜索 · DFS / 动态规划 / 贪心 · 二分 / 图论 / 数据结构 / 字符串 / '
+        '数学 · 数论 / 计算几何 / 其他），<b>果子</b>就是该分类下的具体知识点。'
         '<b>果子越大、颜色越深</b> = 该知识点 AC 数越多 = 掌握越好；'
         '灰色小果子 = 该知识点尚未接触（AC=0）。</p>'
         + legend
+        # 2×2 网格：grid-template-columns:repeat(2, 1fr)，gap:8px
+        + '<div style="display:grid;grid-template-columns:repeat(2, 1fr);'
+        'gap:10px;align-items:start;'
+        '@media (max-width:768px){grid-template-columns:1fr;}'
+        '">'
         + ''.join(tree_blocks)
+        + '</div>'
         + '</div>'
     )
 
 
+# 重建场景：先抹掉已注入的可信块，再走 normalize_report_markdown 重新注入。
+# strip 范围：从 H2「数据校准与真实统计」开始，一直吞到 H2「掌握度判定标准」之前
+# （H2 掌握度判定标准 / 知识树图谱 也是 inject 的一部分，但下一次 inject 会自动重建）
+_TRUSTED_BLOCK_RE = re.compile(
+    r"(?ms)^##\s*数据校准与真实统计\s*\n.*?(?=^##\s*掌握度判定标准|\Z)"
+)
+
+
+def remove_injected_trusted_block(report_md: str) -> str:
+    """重建场景辅助：抹掉已注入的可信块，剩余 AI 内容交给 normalize_report_markdown
+    重新注入最新代码生成的版本。
+
+    Prompt 已禁止 AI 写这些标题，所以抹掉 inject 不会误伤 AI 内容。
+    """
+    if "## 数据校准与真实统计" not in report_md:
+        return report_md
+    return _TRUSTED_BLOCK_RE.sub("", report_md, count=1)
+
+
 def normalize_report_markdown(report_md: str, export_data: dict) -> str:
-    """对 AI 输出做最小必要的纠偏，锁定难度名称并修正明显错误表述。"""
+    """对 AI 输出做最小必要的纠偏，锁定难度名称并修正明显错误表述。
+
+    调用次数语义：
+    - 第一次（输入 = AI 原始输出）：做 strip 清洗 + 注入可信块
+    - 第二次（输入 = 已注入过可信块的 report.md）：**整段直接返回**，避免把"已注入的
+      知识点覆盖统计表/知识树"被 strip 误吞（这是上一版"幂等修复"的副作用）
+    - 重建场景：调用方应先 `remove_injected_trusted_block()` 再走本函数
+    """
+    # 幂等：已注入过可信块 → 跳过 strip + 跳过 inject，原样返回
+    if (
+        "## 数据校准与真实统计" in report_md
+        and "知识树图谱（按算法标签" in report_md
+    ):
+        return report_md
+
     normalized = report_md
 
     normalized = re.sub(
@@ -2378,6 +2427,107 @@ def generate_ai_report(
     )
     content = response.choices[0].message.content or ""
     return normalize_report_markdown(content, export_data)
+
+
+def generate_parent_subscribe(
+    report_md: str,
+    export_data: dict,
+    api_key: str,
+    base_url: str | None,
+    model_name: str,
+) -> str:
+    """v3.5.2 · 家长订阅版（真 AI 二次生成，非视图层）
+
+    以同一份学员的洛谷 AI 报告（report.md）为上下文，让 AI 重新写一份
+    "家长视角"的深度分析报告：
+      1. 学习进度评估（家长能听懂的语言）
+      2. 学习规划建议（短/中/长期）
+      3. OI 决策支持（升学科普、强基窗口、风险提示）
+      4. 家校沟通清单（教练沟通的具体问题）
+      5. 重点观察项（家长接下来 1 个月的关注点）
+
+    5 个维度跟家长订阅版 UI 卡片一一对应，但内容是 AI 真正生成的，
+    而不是模板里硬编码的占位文本。
+    """
+    from openai import OpenAI
+    import datetime
+
+    if not str(api_key or "").strip():
+        raise ValueError("未配置 OpenAI API Key")
+
+    # 截取最近 N 字符的 report.md 作为上下文（避免超长 prompt）
+    # 4 级标题、表格、清单都有助于 AI 抓住要点
+    context_md = report_md or ""
+    if len(context_md) > 24_000:
+        # 优先保留前 8K（开头结论）+ 关键章节（搜索特定 H2）+ 后 8K
+        head = context_md[:8_000]
+        tail = context_md[-8_000:]
+        # 抽出所有 H2 段落
+        import re as _re
+        h2_blocks = _re.findall(
+            r"(?ms)^## .+?(?=^## |\Z)", context_md[8_000:-8_000]
+        )
+        middle = "\n\n".join(h2_blocks[:6])  # 最多 6 段
+        context_md = head + "\n\n...[中间省略]...\n\n" + middle + "\n\n" + tail
+
+    # 选手基础信息（不带 PII）
+    student = export_data.get("student_info", {}) or {}
+    gesp = export_data.get("gesp_history", {}) or {}
+    solved = export_data.get("solved_count", 0)
+    failed = export_data.get("failed_count", 0)
+
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    system_prompt = (
+        "你是一位资深的 OI（信息学奥林匹克）家庭顾问，擅长把孩子的 OI 学习状况"
+        "翻译成家长能理解的语言，给出**具体可执行**的学习规划与决策建议。\n"
+        "你的读者是**家长**（可能没有编程背景），写作风格要：\n"
+        "  - 避免堆砌术语，必要时用一句白话解释\n"
+        "  - 给出**具体动作**（如『每周刷 10 道贪心』），不要『加强训练』这种空话\n"
+        "  - 涉及未来时间点用『距您家孩子还有 N 年』\n"
+        "  - 决策建议必须给 2-3 个分支，**不要假设一定要走 OI**\n"
+        "输出格式：Markdown，必须严格按以下 5 个 H2 章节输出，缺一不可：\n"
+        "## 1. 学习进度评估（家长版）\n"
+        "## 2. 学习规划建议（短/中/长期）\n"
+        "## 3. OI 决策支持（升学/政策窗口）\n"
+        "## 4. 家校沟通清单（建议问教练的 5-7 个问题）\n"
+        "## 5. 重点观察项（接下来 1 个月家长关注什么）\n"
+        "**严禁**输出这 5 个章节之外的任何 H1/H2 标题。\n"
+        "在文末用一行 `> AI 估算 · 仅供参考 · 数据生成于 <时间>` 注明水印。"
+    )
+
+    user_prompt = (
+        f"【选手基础信息】\n"
+        f"- 城市/年级：{student.get('city', '未填')} / {student.get('grade', '未填')}\n"
+        f"- 累计通过题目：{solved}，未通过：{failed}\n"
+        f"- GESP 历史：{gesp if gesp else '无'}\n"
+        f"\n【同一份洛谷 AI 报告（节选，作为上下文）】\n"
+        f"```markdown\n{context_md}\n```\n"
+        f"\n【生成时间】{current_time}\n"
+        f"\n请按 system 提示的 5 个章节生成 Markdown 报告。"
+    )
+
+    client_kwargs = {"api_key": api_key, "timeout": 1800.0}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.6,
+        max_tokens=4000,
+    )
+    content = (response.choices[0].message.content or "").strip()
+    if not content:
+        raise ValueError("AI 返回空内容")
+    # 家长版**不**走 normalize_report_markdown（避免被注入数据校准/知识树）
+    # 它的定位就是"AI 纯文本 + 家长友好语言"
+    return content
+
 
 def extract_problems_from_practice(practice_data, key: str):
     problems = []
