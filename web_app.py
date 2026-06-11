@@ -7150,6 +7150,30 @@ STUDENT_ME_HTML = """
             </details>
         </div>
 
+        <!-- v3.7 PDF 下载（暂未开放 · 灰显 · 引导用海报分享） -->
+        <div class="bg-white rounded-2xl shadow p-5 mb-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">📄 下载报告 PDF（v3.7 暂未开放）</h2>
+            <div class="space-y-2">
+                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
+                    <div class="text-sm text-gray-500">🔒 完整版 · report.pdf</div>
+                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
+                </div>
+                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
+                    <div class="text-sm text-gray-500">🔒 选手版 · me.pdf</div>
+                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
+                </div>
+                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
+                    <div class="text-sm text-gray-500">🔒 家长版 · parent.pdf</div>
+                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
+                </div>
+                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
+                    <div class="text-sm text-gray-500">🔒 教练版 · coach.pdf</div>
+                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-3">💡 v3.7 PDF 暂未开放 · 请用海报分享给家长群/朋友圈</p>
+        </div>
+
         <div class="{% if has_parent_sub %}bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200{% else %}bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200{% endif %} rounded-2xl shadow p-5 mb-4">
             <h2 class="text-lg font-bold text-gray-800 mb-2">
                 {% if has_parent_sub %}

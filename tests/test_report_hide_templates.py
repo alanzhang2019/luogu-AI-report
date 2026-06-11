@@ -50,3 +50,10 @@ class TestReportPreviewTemplate(unittest.TestCase):
         for k in ["440", "基础算法", "P11229", "贪心+构造",
                   "补 DP 专项", "ref=abc123", "看完整", "生成你的报告"]:
             self.assertIn(k, html, f"missing: {k}")
+
+
+class TestStudentMePdfGray(unittest.TestCase):
+    def test_contains_pdf_disabled_hint(self):
+        from web_app import STUDENT_ME_HTML
+        for k in ["PDF 暂未开放", "请用海报分享", "🔒"]:
+            self.assertIn(k, STUDENT_ME_HTML, f"missing: {k}")
