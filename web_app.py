@@ -6162,7 +6162,7 @@ STUDENT_ME_LITE_HTML = r"""
             <p class="text-sm opacity-90">洛谷 UID <strong>{{ token }}</strong> · 仅展示 AI 报告中的错题与个人成就</p>
             <p class="text-xs opacity-75 mt-1">
                 💡 学员尚未完成注册，如需 GESP 段位 / 自录奖项 / 家长订阅等功能，
-                <a href="/register" class="underline font-bold">前往注册 →</a>
+                <a href="/generate-form" class="underline font-bold">🚀 去生成学习报告（含注册）→</a>
             </p>
         </div>
     </div>
@@ -8649,8 +8649,8 @@ REGISTER_INVALID_HTML = """
     <div class="app-card max-w-md w-full text-center">
         <div class="text-5xl mb-3">⚠️</div>
         <h1 class="app-title">{{ message }}</h1>
-        <p class="app-subtitle">请先完成注册</p>
-        <a href="/register" class="app-btn app-btn-primary mt-4">去注册</a>
+        <p class="app-subtitle">一次性填写 · 注册 + 生成报告</p>
+        <a href="/generate-form" class="app-btn app-btn-primary mt-4">🚀 去生成学习报告（含注册）</a>
         <p class="mt-3 text-xs text-gray-500">
             <a href="/" class="app-link">← 返回首页</a>
         </p>
