@@ -55,3 +55,44 @@ class TestRecordHidePdf(unittest.TestCase):
             self.assertEqual(n, 1)
         finally:
             conn.close()
+
+
+from web_app import _check_file_visibility
+
+
+class TestCheckFileVisibility(unittest.TestCase):
+    def test_pdf_hidden_returns_false(self):
+        _init_report_hides_table()
+        tid = "test_task_vis_001"
+        _record_hide_pdf(tid)
+        visible, reason = _check_file_visibility(f"reports/{tid}/report.pdf")
+        self.assertFalse(visible)
+        self.assertIn("PDF", reason)
+
+    def test_html_visible_when_only_pdf_hidden(self):
+        _init_report_hides_table()
+        tid = "test_task_vis_002"
+        _record_hide_pdf(tid)
+        visible, reason = _check_file_visibility(f"reports/{tid}/report.html")
+        self.assertTrue(visible)
+        self.assertEqual(reason, "")
+
+    def test_md_always_visible(self):
+        visible, reason = _check_file_visibility("reports/any/report.md")
+        self.assertTrue(visible)
+        self.assertEqual(reason, "")
+
+    def test_unknown_path_visible(self):
+        visible, reason = _check_file_visibility("static/logo.png")
+        self.assertTrue(visible)
+
+    def test_db_failure_fail_open(self):
+        # 删表后调用应返回 True (fail-open)
+        conn = _get_conn()
+        try:
+            conn.execute("DROP TABLE IF EXISTS report_hides")
+            conn.commit()
+        finally:
+            conn.close()
+        visible, reason = _check_file_visibility("reports/any/report.pdf")
+        self.assertTrue(visible)  # fail-open

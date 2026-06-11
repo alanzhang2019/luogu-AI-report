@@ -173,6 +173,51 @@ def _record_hide_pdf(task_id: str) -> None:
         print(f"[v3.7] _record_hide_pdf warning: {_e}")
 
 
+def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
+    """v3.7 · 检查 reports/<task_id>/* 文件是否对外可见。
+
+    返回 (visible, reason)：
+      - True, ""          → 可见
+      - False, "PDF 暂未开放..." → 隐藏
+    规则：
+      - 非 reports/ 路径 → 全部 True
+      - *.md 公开        → 全部 True
+      - *.pdf 受 hide_pdf 控制
+      - *.html 受 hide_html 控制（默认 0）
+    DB 异常 → fail-open 返回 True。
+    """
+    if not rel_path or not rel_path.startswith("reports/"):
+        return True, ""
+    lower = rel_path.lower()
+    if lower.endswith(".md"):
+        return True, ""
+    parts = rel_path.split("/")
+    if len(parts) < 3:
+        return True, ""
+    task_id = parts[1]
+    try:
+        _init_report_hides_table()
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT hide_pdf, hide_html FROM report_hides WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return True, ""
+        row = dict(row)
+        if lower.endswith(".pdf") and row.get("hide_pdf", 0):
+            return False, "PDF 暂未开放 · 请扫码海报查看在线版报告"
+        if lower.endswith(".html") and row.get("hide_html", 0):
+            return False, "HTML 暂未开放"
+        return True, ""
+    except Exception as _e:
+        print(f"[v3.7] _check_file_visibility fail-open: {_e}")
+        return True, ""
+
+
 app = Flask(__name__)
 app.secret_key = (
     os.environ.get("ADMIN_SESSION_SECRET")
