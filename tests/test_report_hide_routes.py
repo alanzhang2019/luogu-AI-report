@@ -61,3 +61,31 @@ class TestShareCardQRUrl(unittest.TestCase):
                 args, kwargs = mock_render.call_args
                 qr_url = args[1] if len(args) > 1 else kwargs.get("qr_url", "")
                 self.assertIn("/r/e279a542", qr_url)
+
+
+class TestRefCookie(unittest.TestCase):
+    def setUp(self):
+        self.c = app.test_client()
+
+    def test_ref_query_writes_cookie(self):
+        r = self.c.get("/?ref=abc123", follow_redirects=False)
+        self.assertIn("ref_uid", r.headers.get("Set-Cookie", ""))
+        import re as _re
+        m = _re.search(r"ref_uid=([^;]+)", r.headers.get("Set-Cookie", ""))
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "abc123")
+
+    def test_ref_truncated_to_32(self):
+        long_ref = "a" * 100
+        r = self.c.get(f"/?ref={long_ref}", follow_redirects=False)
+        import re as _re
+        m = _re.search(r"ref_uid=([^;]+)", r.headers.get("Set-Cookie", ""))
+        self.assertIsNotNone(m)
+        self.assertEqual(len(m.group(1)), 32)
+
+    def test_ref_sanitized(self):
+        r = self.c.get("/?ref=evil<script>", follow_redirects=False)
+        import re as _re
+        m = _re.search(r"ref_uid=([^;]+)", r.headers.get("Set-Cookie", ""))
+        self.assertIsNotNone(m)
+        self.assertNotIn("<", m.group(1))

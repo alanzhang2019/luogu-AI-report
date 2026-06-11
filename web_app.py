@@ -9,9 +9,9 @@ from datetime import datetime, date
 from urllib.parse import urlsplit, urlunsplit
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response
 except ImportError:
-    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response
+    from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, send_file, session, flash, Response, make_response
     session = {}
 
 from env_loader import load_dotenv
@@ -1601,7 +1601,19 @@ def run_generation(task_id: str, form: dict):
 
 @app.route("/")
 def index():
-    return render_index()
+    # v3.7 · ref 归因 cookie（30 天）
+    raw_ref = request.args.get("ref")
+    sanitized_ref = _sanitize_ref(raw_ref) if raw_ref else ""
+
+    response = make_response(render_index())
+    if sanitized_ref:
+        response.set_cookie(
+            "ref_uid", sanitized_ref,
+            max_age=30 * 24 * 3600,
+            httponly=True,
+            samesite="Lax",
+        )
+    return response
 
 
 @app.route("/validate-cookies", methods=["POST"])
