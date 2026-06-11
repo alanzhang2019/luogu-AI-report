@@ -1,0 +1,8 @@
+整套部署体系从"踩坑拼凑"升级成了"工业级脚本"。 以后再部署一次只要 3 步：
+
+1. 本地改代码
+2. git commit && git push
+3. .\deploy.ps1 ← 一行搞定
+（powershell执行）
+cd "C:\Users\zpy20\Desktop\项目\luoguAI\luogu-AI-report"
+.\deploy.ps1

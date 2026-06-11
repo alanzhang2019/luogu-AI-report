@@ -832,6 +832,7 @@ INDEX_HTML = """
         .school-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:rgba(255,255,255,.72);backdrop-filter:blur(6px);box-shadow:0 1px 0 rgba(0,0,0,.04),0 4px 12px rgba(2,77,51,.06);font-size:13px;font-weight:600;color:var(--ink-1);border:1px solid rgba(15,118,110,.12);transition:transform .25s ease,box-shadow .25s ease;}
         .school-chip:hover{transform:translateY(-2px);box-shadow:0 2px 0 rgba(0,0,0,.05),0 8px 20px rgba(2,77,51,.14);background:rgba(255,255,255,.95);}
         .school-emoji{font-size:15px;line-height:1;filter:saturate(1.1);}
+        .school-img{width:24px;height:24px;object-fit:contain;flex-shrink:0;filter:drop-shadow(0 1px 1px rgba(0,0,0,.05));}
         .school-name{font-family:'Noto Sans SC',ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em;}
         .ticker-schools:hover .ticker-track{animation-play-state:paused;}
         @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
@@ -1014,59 +1015,64 @@ INDEX_HTML = """
     <!-- 强基 39 校 · 滚动展示（校徽 + 校名） -->
     <section class="ticker rise d5" aria-label="强基计划 39 所高校">
         <div class="ticker-track ticker-schools">
-            {# v3.7 · 强基 39 校：高考强基计划覆盖的全部 39 所 985 高校 #}
+            {# v3.7 · 强基 39 校：真实校徽 PNG + 校名（v3.8 替换 emoji）
+               缺失校徽自动用 emoji 兜底（前端 onerror）#}
             {% set qiangji_schools = [
-                ('北京大学', '🔵', '北京'),
-                ('清华大学', '🟣', '北京'),
-                ('中国人民大学', '🔴', '北京'),
-                ('北京航空航天大学', '🔵', '北京'),
-                ('北京理工大学', '🟢', '北京'),
-                ('中国农业大学', '🟡', '北京'),
-                ('北京师范大学', '🔵', '北京'),
-                ('中央民族大学', '⚪', '北京'),
-                ('南开大学', '🟣', '天津'),
-                ('天津大学', '🔵', '天津'),
-                ('大连理工大学', '🟢', '辽宁'),
-                ('东北大学', '🟡', '辽宁'),
-                ('吉林大学', '🔴', '吉林'),
-                ('哈尔滨工业大学', '🔵', '黑龙江'),
-                ('复旦大学', '🔴', '上海'),
-                ('同济大学', '🔵', '上海'),
-                ('上海交通大学', '🔵', '上海'),
-                ('华东师范大学', '🟢', '上海'),
-                ('南京大学', '🟣', '江苏'),
-                ('东南大学', '🟡', '江苏'),
-                ('浙江大学', '🔴', '浙江'),
-                ('中国科学技术大学', '🔴', '安徽'),
-                ('厦门大学', '🟡', '福建'),
-                ('山东大学', '🔵', '山东'),
-                ('中国海洋大学', '🔵', '山东'),
-                ('武汉大学', '🟣', '湖北'),
-                ('华中科技大学', '🟢', '湖北'),
-                ('中南大学', '🟡', '湖南'),
-                ('湖南大学', '🔴', '湖南'),
-                ('国防科技大学', '🟢', '湖南'),
-                ('中山大学', '🔵', '广东'),
-                ('华南理工大学', '🔴', '广东'),
-                ('四川大学', '🟡', '四川'),
-                ('重庆大学', '🔵', '重庆'),
-                ('电子科技大学', '🔵', '四川'),
-                ('西安交通大学', '🔴', '陕西'),
-                ('西北工业大学', '🔵', '陕西'),
-                ('西北农林科技大学', '🟢', '陕西'),
-                ('兰州大学', '🔵', '甘肃'),
+                ('pku',   '北京大学',         '🔵', '北京'),
+                ('thu',   '清华大学',         '🟣', '北京'),
+                ('ruc',   '中国人民大学',     '🔴', '北京'),
+                ('buaa',  '北京航空航天大学', '🔵', '北京'),
+                ('bit',   '北京理工大学',     '🟢', '北京'),
+                ('cau',   '中国农业大学',     '🟡', '北京'),
+                ('bnu',   '北京师范大学',     '🔵', '北京'),
+                ('muc',   '中央民族大学',     '⚪', '北京'),
+                ('nankai','南开大学',         '🟣', '天津'),
+                ('tju',   '天津大学',         '🔵', '天津'),
+                ('dlut',  '大连理工大学',     '🟢', '辽宁'),
+                ('neu',   '东北大学',         '🟡', '辽宁'),
+                ('jlu',   '吉林大学',         '🔴', '吉林'),
+                ('hit',   '哈尔滨工业大学',   '🔵', '黑龙江'),
+                ('fdu',   '复旦大学',         '🔴', '上海'),
+                ('tongji','同济大学',         '🔵', '上海'),
+                ('sjtu',  '上海交通大学',     '🔵', '上海'),
+                ('ecnu',  '华东师范大学',     '🟢', '上海'),
+                ('nju',   '南京大学',         '🟣', '江苏'),
+                ('seu',   '东南大学',         '🟡', '江苏'),
+                ('zju',   '浙江大学',         '🔴', '浙江'),
+                ('ustc',  '中国科学技术大学', '🔴', '安徽'),
+                ('xmu',   '厦门大学',         '🟡', '福建'),
+                ('sdu',   '山东大学',         '🔵', '山东'),
+                ('ouc',   '中国海洋大学',     '🔵', '山东'),
+                ('whu',   '武汉大学',         '🟣', '湖北'),
+                ('hust',  '华中科技大学',     '🟢', '湖北'),
+                ('csu',   '中南大学',         '🟡', '湖南'),
+                ('hnu',   '湖南大学',         '🔴', '湖南'),
+                ('nudt',  '国防科技大学',     '🟢', '湖南'),
+                ('sysu',  '中山大学',         '🔵', '广东'),
+                ('scut',  '华南理工大学',     '🔴', '广东'),
+                ('scu',   '四川大学',         '🟡', '四川'),
+                ('cqu',   '重庆大学',         '🔵', '重庆'),
+                ('uestc', '电子科技大学',     '🔵', '四川'),
+                ('xjtu',  '西安交通大学',     '🔴', '陕西'),
+                ('nwpu',  '西北工业大学',     '🔵', '陕西'),
+                ('nwafu', '西北农林科技大学', '🟢', '陕西'),
+                ('lzu',   '兰州大学',         '🔵', '甘肃'),
             ] %}
             {% for s in qiangji_schools %}
-            <span class="school-chip" title="{{ s[0] }} · {{ s[2] }}">
-                <span class="school-emoji">{{ s[1] }}</span>
-                <span class="school-name">{{ s[0] }}</span>
+            <span class="school-chip" title="{{ s[1] }} · {{ s[3] }}">
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+                <span class="school-emoji" style="display:none">{{ s[2] }}</span>
+                <span class="school-name">{{ s[1] }}</span>
             </span>
             {% endfor %}
             {# 复制一份用于无缝循环滚动 #}
             {% for s in qiangji_schools %}
-            <span class="school-chip" title="{{ s[0] }} · {{ s[2] }}" aria-hidden="true">
-                <span class="school-emoji">{{ s[1] }}</span>
-                <span class="school-name">{{ s[0] }}</span>
+            <span class="school-chip" title="{{ s[1] }} · {{ s[3] }}" aria-hidden="true">
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+                <span class="school-emoji" style="display:none">{{ s[2] }}</span>
+                <span class="school-name">{{ s[1] }}</span>
             </span>
             {% endfor %}
         </div>
