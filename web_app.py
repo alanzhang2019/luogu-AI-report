@@ -6108,6 +6108,150 @@ def share_card_png(luogu_uid: str):
     })
 
 
+# ---- v3.7 · 报告预览中转页（公开，陌生人扫码落地） ----
+
+def _extract_achievements_from_report(report_md: str) -> dict:
+    """v3.7 · 从 report.md 抽成就数据，供 /r/<uid> 模板渲染。
+
+    返回 dict：
+      - six_dim: dict[str,int]   6 维能力评分（基础算法/数据结构/图论/DP/字符串/数学）
+      - ai_score_thousand: int|None  AI 评测分（0-1000，None 表无）
+      - ai_score_label: str          等级文字
+      - mistakes: list[dict]         错题条目（idx/problem_id/title/source/summary）
+    """
+    import re as _re
+    out = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—",
+        "mistakes": [],
+    }
+    if not report_md:
+        return out
+
+    # 1) 6 维评分：匹配 `| **基础算法** | **72** | ...` 格式
+    six_dim_keys = ["基础算法", "数据结构", "图论", "动态规划", "字符串", "数学"]
+    for k in six_dim_keys:
+        m = _re.search(rf"\*\*\s*{_re.escape(k)}\s*\*\*\s*\|\s*\*\*\s*(\d+)\s*\*\*", report_md)
+        if m:
+            try:
+                out["six_dim"][k] = int(m.group(1))
+            except Exception:
+                pass
+
+    # 2) AI 评测分：用 6 维均值 × 10 估算（avg 0-100 → 0-1000）
+    if out["six_dim"]:
+        avg = sum(out["six_dim"].values()) / len(out["six_dim"])
+        score = int(round(avg * 10))
+        out["ai_score_thousand"] = max(0, min(1000, score))
+        if score >= 750:
+            out["ai_score_label"] = "🟢 优秀"
+        elif score >= 550:
+            out["ai_score_label"] = "🟡 良好"
+        elif score >= 350:
+            out["ai_score_label"] = "🟠 基础"
+        else:
+            out["ai_score_label"] = "🔴 待提升"
+
+    # 3) 错题本：从『死磕题目 TOP』表抽
+    # 形如 `| **P11229** | [CSP-J 2024] 小木棍 | 普及/提高- | **24次** | 未AC | <原因>`
+    pattern = _re.compile(
+        r"\|\s*\*\*\s*(P\d+)\s*\*\*\s*\|\s*(?:\[[^\]]+\]\s*)?([^\|]+?)\s*\|\s*"
+        r"(?:[^\|]+?)\s*\|\s*\*\*\s*\d+\s*次\s*\*\*\s*\|\s*"
+        r"(?:未AC|AC|WA)\s*\|\s*([^|\n]+?)(?:\s*\||\s*$)",
+        _re.M,
+    )
+    idx = 0
+    for m in pattern.finditer(report_md):
+        idx += 1
+        problem_id = m.group(1).strip()
+        title_full = m.group(2).strip()
+        # 去掉 [CSP-J 2024] 前缀作为 source
+        sm = _re.match(r"\[([^\]]+)\]\s*(.+)", title_full)
+        if sm:
+            source = sm.group(1).strip()
+            title = sm.group(2).strip()
+        else:
+            source = ""
+            title = title_full
+        summary = m.group(3).strip()
+        out["mistakes"].append({
+            "idx": idx,
+            "problem_id": problem_id,
+            "title": title,
+            "source": source,
+            "summary": summary,
+        })
+        if idx >= 5:
+            break
+
+    return out
+
+
+def _sanitize_ref(raw: str | None) -> str:
+    """v3.7 · 规范化 ref 参数：仅保留 [A-Za-z0-9_-]，≤32 字符。"""
+    if not raw:
+        return ""
+    import re as _re
+    s = _re.sub(r"[^A-Za-z0-9_-]", "_", str(raw).strip())
+    return s[:32]
+
+
+@app.route("/r/<luogu_uid>", methods=["GET"])
+def report_preview(luogu_uid: str):
+    """v3.7 · 报告预览中转页（公开，陌生人扫码落地）"""
+    raw_ref = request.args.get("ref")
+    ref = _sanitize_ref(raw_ref)
+
+    latest = _find_latest_report_dir(luogu_uid)
+    empty_achievements = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—",
+        "mistakes": [],
+    }
+
+    if not latest or not (latest / "report.md").exists():
+        return render_template_string(
+            REPORT_PREVIEW_HTML,
+            luogu_uid=luogu_uid,
+            student_name=f"UID {luogu_uid}",
+            achievements=empty_achievements,
+            ai_summary="",
+            suggestions=[],
+            ref=ref,
+            has_report=False,
+        ), 200
+
+    try:
+        report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
+        achievements = _extract_achievements_from_report(report_md) or empty_achievements
+        ai_summary = _extract_ai_summary(report_md) or ""
+        suggestions = _extract_top_suggestions(report_md) or []
+    except Exception:
+        return render_template_string(
+            REPORT_PREVIEW_HTML,
+            luogu_uid=luogu_uid,
+            student_name=f"UID {luogu_uid}",
+            achievements=empty_achievements,
+            ai_summary="",
+            suggestions=[],
+            ref=ref,
+            has_report=False,
+        ), 200
+
+    return render_template_string(
+        REPORT_PREVIEW_HTML,
+        luogu_uid=luogu_uid,
+        student_name=f"UID {luogu_uid}",
+        achievements=achievements,
+        ai_summary=ai_summary,
+        suggestions=suggestions,
+        ref=ref,
+        has_report=True,
+    ), 200
+
+
 # ---- v3.5.2 · 家长订阅版（5 维度深度分析） ----
 
 def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
