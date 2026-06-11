@@ -3965,6 +3965,7 @@ def generate_form():
         GENERATE_FORM_HTML,
         form={},
         server_key_hint=_get_server_key_hint(),
+        gesp_default_year=date.today().year,
         validation_result=request.args.get("validation_result"),
     )
 
@@ -3977,6 +3978,7 @@ def validate_cookies_v352():
         GENERATE_FORM_HTML,
         form=form,
         server_key_hint=_get_server_key_hint(),
+        gesp_default_year=date.today().year,
         validation_result=validate_cookies(form),
     )
 
@@ -3995,6 +3997,7 @@ def generate_form_submit():
             GENERATE_FORM_HTML,
             form=form,
             server_key_hint=_get_server_key_hint(),
+            gesp_default_year=date.today().year,
             error=f"请填写必填项：{', '.join(missing)}",
         ), 400
 
@@ -4005,6 +4008,7 @@ def generate_form_submit():
             GENERATE_FORM_HTML,
             form=form,
             server_key_hint=_get_server_key_hint(),
+            gesp_default_year=date.today().year,
             error="UID 必须是 6-10 位数字",
         ), 400
 
@@ -4014,6 +4018,7 @@ def generate_form_submit():
             GENERATE_FORM_HTML,
             form=form,
             server_key_hint=_get_server_key_hint(),
+            gesp_default_year=date.today().year,
             error="请先同意《个人信息处理规则》（PIPL）",
         ), 400
 
@@ -4059,7 +4064,7 @@ def generate_form_submit():
             sid = int(new_sid)
             # 若有手机号，存到 guardians 表（v3.5.2 支持）
             phone = (form.get("phone") or "").strip()
-            if phone and re.match(r"^1[3-9]\d{9}$", phone):
+            if phone and _re.match(r"^1[3-9]\d{9}$", phone):
                 try:
                     from admin_guardians import upsert_guardian_by_phone
                     upsert_guardian_by_phone(sid, phone, display_name=form.get("real_name") or "学员")
@@ -4070,8 +4075,51 @@ def generate_form_submit():
             GENERATE_FORM_HTML,
             form=form,
             server_key_hint=_get_server_key_hint(),
+            gesp_default_year=date.today().year,
             error=f"注册失败：{e}",
         ), 500
+
+    # 1.5) v3.7 · 自录历史奖项（学员在表单内直填，提交时同步入库；新用户无需跳转 /me/<uid>）
+    _award_log: list[str] = []
+    try:
+        _gl = (form.get("gesp_level") or "").strip()
+        _gs = (form.get("gesp_score") or "").strip()
+        _gy = (form.get("gesp_year") or "").strip()
+        if _gl and _gs and _gy:
+            _admin_students.add_gesp_exam(
+                sid,
+                None,  # 触发 add_gesp_exam 按 year+level 自动查/建 competition
+                int(_gl),
+                int(_gs),
+                certificate_no=(form.get("gesp_certificate_no") or "").strip() or None,
+                award_year=int(_gy),
+                recorded_by="self_register",
+            )
+            _award_log.append(f"GESP L{_gl}/{_gy}={_gs}分")
+    except Exception as _e:
+        app.logger.warning(f"[self_register] GESP 录入失败: {_e}")
+
+    try:
+        _ct = (form.get("csp_competition_type") or "").strip()
+        _cl = (form.get("csp_award_level") or "").strip()
+        _cy = (form.get("csp_award_year") or "").strip()
+        if _ct and _cl and _cy:
+            _score_raw = (form.get("csp_score") or "").strip()
+            _admin_students.add_csp_award(
+                sid,
+                _ct,
+                _cl,
+                int(_cy),
+                actual_score=int(_score_raw) if _score_raw else None,
+                province=(form.get("csp_province") or "").strip() or None,
+                recorded_by="self_register",
+            )
+            _award_log.append(f"{_ct}/{_cl}/{_cy}")
+    except Exception as _e:
+        app.logger.warning(f"[self_register] CSP 录入失败: {_e}")
+
+    if _award_log:
+        app.logger.info(f"[self_register] uid={luogu_uid} 同步录入: {'; '.join(_award_log)}")
 
     # 2) 触发 v1 报告生成（复用现有 run_generation → 跳 /status/<task_id> 看进度）
     try:
@@ -4292,30 +4340,69 @@ GENERATE_FORM_HTML = """
             </div>
             <p class="text-xs text-gray-500 mt-2">ℹ️ 出生日期用于精确计算 CSP 报名年龄（9 月 1 日前满 12 岁）</p>
 
-            <!-- v3.6 整合：自录历史奖项入口（指向个人中心 #awards） -->
+            <!-- v3.7 · 自录历史奖项（表单内直接录入，提交时同步写入数据库，避免新用户被引导到「未注册」页） -->
             <div class="mt-4 pt-4 border-t border-gray-200">
+                <p class="text-xs font-bold text-gray-700 mb-2">📥 自录历史奖项（可选 · 留空 = 跳过）</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <!-- GESP 真考 · 入口卡片 -->
-                    <a href="/me/{{ form.get('uid','') }}#awards" class="block bg-green-50 border border-green-200 rounded-lg p-3 hover:bg-green-100 transition">
-                        <div class="flex items-center gap-2 mb-1">
+                    <!-- GESP 真考 · 表单内输入区 -->
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <span class="text-base">🎯</span>
                             <h4 class="text-sm font-bold text-green-800">GESP 真考（CCF 1-8 级）</h4>
                         </div>
-                        <p class="text-xs text-gray-600 leading-relaxed">录入等级、分数、年份、证书编号<br>自动计算 9 月免初赛 + 段位</p>
-                        <p class="text-xs text-green-700 font-semibold mt-2">→ 录入 GESP 真考</p>
-                    </a>
-                    <!-- CSP/NOIP/NOI · 入口卡片 -->
-                    <a href="/me/{{ form.get('uid','') }}#awards" class="block bg-blue-50 border border-blue-200 rounded-lg p-3 hover:bg-blue-100 transition">
-                        <div class="flex items-center gap-2 mb-1">
+                        <div class="grid grid-cols-3 gap-2">
+                            <select name="gesp_level" class="app-select text-xs">
+                                <option value="">级别</option>
+                                <option value="1">1 级</option>
+                                <option value="2">2 级</option>
+                                <option value="3">3 级</option>
+                                <option value="4">4 级</option>
+                                <option value="5">5 级</option>
+                                <option value="6">6 级</option>
+                                <option value="7">7 级</option>
+                                <option value="8">8 级</option>
+                            </select>
+                            <input type="number" name="gesp_score" min="0" max="100" placeholder="分数" class="app-input text-xs">
+                            <input type="number" name="gesp_year" min="2015" max="2030" placeholder="年份" class="app-input text-xs" value="{{ gesp_default_year }}">
+                        </div>
+                        <input type="text" name="gesp_certificate_no" placeholder="证书编号（可选）" class="app-input text-xs mt-2" value="{{ form.get('gesp_certificate_no','') }}">
+                    </div>
+                    <!-- CSP/NOIP/NOI · 表单内输入区 -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <span class="text-base">🏅</span>
                             <h4 class="text-sm font-bold text-blue-800">CSP / NOIP / NOI 奖项</h4>
                         </div>
-                        <p class="text-xs text-gray-600 leading-relaxed">录入比赛类型、奖项、年份、分数、省份<br>自动写入选手履历</p>
-                        <p class="text-xs text-blue-700 font-semibold mt-2">→ 录入 CSP/NOIP/NOI 奖项</p>
-                    </a>
+                        <select name="csp_competition_type" class="app-select text-xs">
+                            <option value="">比赛类型</option>
+                            <option value="csp_j_pre">CSP-J 初赛</option>
+                            <option value="csp_j_final">CSP-J 复赛</option>
+                            <option value="csp_s_pre">CSP-S 初赛</option>
+                            <option value="csp_s_final">CSP-S 复赛</option>
+                            <option value="noip_1">NOIP 一等（省赛）</option>
+                            <option value="noi_bronze">NOI 铜牌</option>
+                            <option value="noi_silver">NOI 银牌</option>
+                            <option value="noi_gold">NOI 金牌</option>
+                        </select>
+                        <select name="csp_award_level" class="app-select text-xs mt-2">
+                            <option value="">奖项等级</option>
+                            <option value="excellent">优秀</option>
+                            <option value="first">一等</option>
+                            <option value="second">二等</option>
+                            <option value="third">三等</option>
+                            <option value="bronze">铜牌</option>
+                            <option value="silver">银牌</option>
+                            <option value="gold">金牌</option>
+                        </select>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <input type="number" name="csp_award_year" min="2015" max="2030" placeholder="年份" class="app-input text-xs" value="{{ gesp_default_year }}">
+                            <input type="number" name="csp_score" min="0" max="600" placeholder="分数（可选）" class="app-input text-xs" value="{{ form.get('csp_score','') }}">
+                        </div>
+                        <input type="text" name="csp_province" placeholder="省份（可选）" class="app-input text-xs mt-2" value="{{ form.get('csp_province','') }}">
+                    </div>
                 </div>
                 <p class="text-[10px] text-gray-400 mt-2 text-center">
-                    💡 提交报告后，可在「个人中心 → 📥 自录历史奖项」直接录入；已注册学员会立即看到完整表单
+                    💡 提交报告后，这些成绩会随学员档案一起入库；已注册学员也可在「个人中心→📥 自录历史奖项」继续追加
                 </p>
             </div>
         </details>

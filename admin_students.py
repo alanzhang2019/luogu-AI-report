@@ -160,7 +160,7 @@ def delete_student(student_id: int) -> bool:
 
 def add_gesp_exam(
     student_id: int,
-    exam_id: int,
+    exam_id: int | None,  # v3.7 · None 时按 award_year+registered_level 自动查/建 competition
     registered_level: int,
     actual_score: int,
     *,
@@ -171,6 +171,10 @@ def add_gesp_exam(
 ) -> int:
     """录入 GESP 真考分数，自动计算 passed / can_skip_next / exempts_csp_j / exempts_csp_s
     并更新 students 表的 6 个 GESP 字段。
+
+    v3.7 升级：自录入学员（/generate-form 提交时）可传 exam_id=None，
+    自动按 award_year + registered_level 查找 competitions 表；
+    若对应年份/级别不存在则自动创建一条 GESP competition 占位记录。
     返回 gesp_exams.id。"""
     if not (1 <= int(registered_level) <= 8):
         raise ValueError("registered_level 必须在 1-8")
@@ -185,6 +189,33 @@ def add_gesp_exam(
 
     conn = _get_conn()
     try:
+        # v3.7 · 自录入场景：exam_id 缺省时自动按 year+level 匹配或创建 competition
+        if exam_id is None or int(exam_id) <= 0:
+            target_year = int(award_year) if award_year else int(date.today().year)
+            level = int(registered_level)
+            row = conn.execute(
+                "SELECT id FROM competitions WHERE type='gesp' AND level=? AND data_year=? LIMIT 1",
+                (level, target_year),
+            ).fetchone()
+            if row:
+                exam_id = int(row["id"])
+            else:
+                cur = conn.execute(
+                    """
+                    INSERT INTO competitions
+                        (code, name, type, level, exam_date, data_year, notes)
+                    VALUES (?, ?, 'gesp', ?, ?, ?, 'auto-created for self-registered student')
+                    """,
+                    (
+                        f"gesp_l{level}_{target_year}",
+                        f"GESP {level} 级 {target_year} 年考试（自录）",
+                        level,
+                        f"{target_year}-12-31",
+                        target_year,
+                    ),
+                )
+                exam_id = int(cur.lastrowid)
+
         # UPSERT：UNIQUE(student_id, exam_id) 冲突时替换
         cur = conn.execute(
             """
