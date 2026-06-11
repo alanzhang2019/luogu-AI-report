@@ -6100,7 +6100,7 @@ def share_card_png(luogu_uid: str):
     if not data:
         return "UID 未注册", 404
     base = request.host_url.rstrip("/")
-    qr_url = f"{base}/me/{luogu_uid}"
+    qr_url = f"{base}/r/{luogu_uid}"  # v3.7 · 指向新建的报告预览中转页
     png_bytes = _render_share_card_png(data, qr_url)
     return Response(png_bytes, mimetype="image/png", headers={
         "Content-Disposition": f'inline; filename="share-card-{luogu_uid}.png"',

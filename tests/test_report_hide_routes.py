@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+
 from web_app import app
 
 
@@ -45,3 +47,17 @@ class TestReportPreviewRoute(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         html = r.data.decode("utf-8", errors="replace")
         self.assertNotIn("<script>", html)
+
+
+class TestShareCardQRUrl(unittest.TestCase):
+    def test_qr_url_points_to_r_route(self):
+        c = app.test_client()
+        with patch("web_app._render_share_card_png", return_value=b"\x89PNG\r\n\x1a\n") as mock_render:
+            # 用任意已注册 uid；mock 掉数据源 + 渲染，只关心传入的 qr_url
+            with patch("web_app._build_share_card_data", return_value={"luogu_uid": "e279a542"}):
+                r = c.get("/me/e279a542/share-card.png")
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(mock_render.call_count, 1)
+                args, kwargs = mock_render.call_args
+                qr_url = args[1] if len(args) > 1 else kwargs.get("qr_url", "")
+                self.assertIn("/r/e279a542", qr_url)
