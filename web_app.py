@@ -827,6 +827,13 @@ INDEX_HTML = """
         .ticker::before{left:0;background:linear-gradient(90deg,var(--bg-0),transparent);}
         .ticker::after{right:0;background:linear-gradient(270deg,var(--bg-0),transparent);}
         .ticker-track{display:inline-flex;gap:42px;padding:10px 0;white-space:nowrap;animation:tick 48s linear infinite;}
+        /* v3.7 · 强基 39 校：emoji 校徽 + 校名，玻璃拟态卡片 */
+        .ticker-schools .ticker-track{display:inline-flex;gap:14px;padding:12px 18px;background:linear-gradient(90deg,rgba(255,255,255,.0) 0,rgba(255,255,255,.55) 8%,rgba(255,255,255,.55) 92%,rgba(255,255,255,0) 100%);white-space:nowrap;animation:tick 90s linear infinite;}
+        .school-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:rgba(255,255,255,.72);backdrop-filter:blur(6px);box-shadow:0 1px 0 rgba(0,0,0,.04),0 4px 12px rgba(2,77,51,.06);font-size:13px;font-weight:600;color:var(--ink-1);border:1px solid rgba(15,118,110,.12);transition:transform .25s ease,box-shadow .25s ease;}
+        .school-chip:hover{transform:translateY(-2px);box-shadow:0 2px 0 rgba(0,0,0,.05),0 8px 20px rgba(2,77,51,.14);background:rgba(255,255,255,.95);}
+        .school-emoji{font-size:15px;line-height:1;filter:saturate(1.1);}
+        .school-name{font-family:'Noto Sans SC',ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em;}
+        .ticker-schools:hover .ticker-track{animation-play-state:paused;}
         @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
         .tk-dot{color:var(--accent);}
         .tk-key{color:var(--amber);}
@@ -1004,26 +1011,64 @@ INDEX_HTML = """
         </div>
     </section>
 
-    <!-- 滚动代码日志带 -->
-    <section class="ticker rise d5" aria-hidden="true">
-        <div class="ticker-track">
-            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
-            <!-- 复制一份用于无缝循环 -->
-            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
+    <!-- 强基 39 校 · 滚动展示（校徽 + 校名） -->
+    <section class="ticker rise d5" aria-label="强基计划 39 所高校">
+        <div class="ticker-track ticker-schools">
+            {# v3.7 · 强基 39 校：高考强基计划覆盖的全部 39 所 985 高校 #}
+            {% set qiangji_schools = [
+                ('北京大学', '🔵', '北京'),
+                ('清华大学', '🟣', '北京'),
+                ('中国人民大学', '🔴', '北京'),
+                ('北京航空航天大学', '🔵', '北京'),
+                ('北京理工大学', '🟢', '北京'),
+                ('中国农业大学', '🟡', '北京'),
+                ('北京师范大学', '🔵', '北京'),
+                ('中央民族大学', '⚪', '北京'),
+                ('南开大学', '🟣', '天津'),
+                ('天津大学', '🔵', '天津'),
+                ('大连理工大学', '🟢', '辽宁'),
+                ('东北大学', '🟡', '辽宁'),
+                ('吉林大学', '🔴', '吉林'),
+                ('哈尔滨工业大学', '🔵', '黑龙江'),
+                ('复旦大学', '🔴', '上海'),
+                ('同济大学', '🔵', '上海'),
+                ('上海交通大学', '🔵', '上海'),
+                ('华东师范大学', '🟢', '上海'),
+                ('南京大学', '🟣', '江苏'),
+                ('东南大学', '🟡', '江苏'),
+                ('浙江大学', '🔴', '浙江'),
+                ('中国科学技术大学', '🔴', '安徽'),
+                ('厦门大学', '🟡', '福建'),
+                ('山东大学', '🔵', '山东'),
+                ('中国海洋大学', '🔵', '山东'),
+                ('武汉大学', '🟣', '湖北'),
+                ('华中科技大学', '🟢', '湖北'),
+                ('中南大学', '🟡', '湖南'),
+                ('湖南大学', '🔴', '湖南'),
+                ('国防科技大学', '🟢', '湖南'),
+                ('中山大学', '🔵', '广东'),
+                ('华南理工大学', '🔴', '广东'),
+                ('四川大学', '🟡', '四川'),
+                ('重庆大学', '🔵', '重庆'),
+                ('电子科技大学', '🔵', '四川'),
+                ('西安交通大学', '🔴', '陕西'),
+                ('西北工业大学', '🔵', '陕西'),
+                ('西北农林科技大学', '🟢', '陕西'),
+                ('兰州大学', '🔵', '甘肃'),
+            ] %}
+            {% for s in qiangji_schools %}
+            <span class="school-chip" title="{{ s[0] }} · {{ s[2] }}">
+                <span class="school-emoji">{{ s[1] }}</span>
+                <span class="school-name">{{ s[0] }}</span>
+            </span>
+            {% endfor %}
+            {# 复制一份用于无缝循环滚动 #}
+            {% for s in qiangji_schools %}
+            <span class="school-chip" title="{{ s[0] }} · {{ s[2] }}" aria-hidden="true">
+                <span class="school-emoji">{{ s[1] }}</span>
+                <span class="school-name">{{ s[0] }}</span>
+            </span>
+            {% endfor %}
         </div>
     </section>
 
