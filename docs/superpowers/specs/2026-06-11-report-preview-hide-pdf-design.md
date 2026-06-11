@@ -50,7 +50,7 @@
 | 11 | 🔧 改 | `LIST_REPORTS_HTML` 模板 | report.pdf pill 灰显 |
 | 12 | 🔧 改 | 报告导出流程 | 末尾调 `_record_hide_pdf(task_id)` |
 | 13 | 🔧 改 | 首页 `/` | 检测 `?ref=` → 写 cookie |
-| 14 | 🆕 测试 | `tests/test_report_hide.py` | 单元 + 路由级 |
+| 14 | 🆕 测试 | `tests/test_report_hide_*.py` | 4 个测试文件（见 §7.1）|
 
 ### 2.2 单元边界（隔离原则）
 
@@ -75,7 +75,7 @@
 | 变量 | 类型 | 必填 | 缺省行为 | 来源 |
 |---|---|---|---|---|
 | `luogu_uid` | str | ✓ | — | URL path |
-| `student_name` | str | ✗ | "UID {uid}" | `/me/<uid>` 同款 `real_name` 字段（未注册则空）|
+| `student_name` | str | ✗ | "UID {uid}" | **不展示真实姓名**（隐私优先）— 仅当报告 MD 头含 `# ... 选手 ...` 标题时提取 |
 | `achievements` | dict | ✓ | 空 dict | `_extract_achievements_from_report` |
 | `achievements.six_dim` | dict[str,int] | ✗ | `{}` | 同上（key ∈ 基础算法/数据结构/图论/动态规划/字符串/数学）|
 | `achievements.ai_score_thousand` | int\|None | ✗ | `None` | 同上 |
@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_report_hides_ref ON report_hides(ref_uid);
 
 - 仅保留 `[A-Za-z0-9_-]`，其他字符替换为 `_`
 - 最大 32 字符
-- 写入 cookie `ref_uid` 时，30 天过期，HttpOnly=false（首页 JS 需读）
+- 写入 cookie `ref_uid`：30 天过期，**HttpOnly=true**（Flask 后端 `request.cookies.get("ref_uid")` 读取，**无需 JS 读**，降低 XSS 风险）
 
 ---
 
@@ -189,8 +189,8 @@ GET /r/<luogu_uid>
 中转页 CTA 点击 → /?ref=<sanitized_uid>
   └─ 首页 index() 检测 ?ref=
        ├─ 规范化 ref（截断 32 字符 / 字符白名单）
-       └─ 写 cookie "ref_uid" (30 天, SameSite=Lax)
-  └─ 学员填表生成报告 → task.referral_from = ref_uid
+       └─ 写 cookie "ref_uid" (30 天, HttpOnly=true, SameSite=Lax)
+  └─ 学员填表生成报告 → task.referral_from = ref_uid（同时读 query 和 cookie）
   └─ （v3.7 仅记录，不发奖）
 ```
 

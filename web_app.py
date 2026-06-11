@@ -225,6 +225,73 @@ app.secret_key = (
     or "luogu-ai-report-admin-secret-change-me"
 )
 
+
+# v3.7.1 · 全站统一皮肤（与首页 INDEX_HTML 风格一致：emerald/teal 主色 + 渐变背景）
+# 所有页面在 <head> 内插入 {{ app_skin_head() }} 即可自动获得：
+#   - app-body  body 渐变 + 统一字体
+#   - app-card  标准卡片（白底 / 16px 圆角 / 阴影）
+#   - app-title / app-subtitle / app-tag  标题规范
+#   - app-btn-primary / app-btn-secondary / app-btn-amber  按钮规范
+#   - app-box-{yellow|blue|green|red}  状态条
+_APP_SKIN_CSS = r"""
+<style id="app-skin">
+.app-body{background:linear-gradient(135deg,#f0fdf4 0%,#ecfeff 100%);min-height:100vh;
+  font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Microsoft YaHei",sans-serif;
+  color:#1f2937;}
+.app-card{background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:32px;width:100%;}
+.app-title{font-size:26px;font-weight:800;color:#064e3b;margin:0 0 4px;letter-spacing:-0.5px;}
+.app-subtitle{color:#0f766e;margin:0 0 4px;font-size:14px;font-weight:600;}
+.app-tag{color:#6b7280;margin:0 0 18px;font-size:12px;}
+.app-muted{color:#9ca3af;font-size:12px;margin:0 0 18px;}
+.app-box{border-radius:10px;padding:12px 12px;border:1px solid #e5e7eb;}
+.app-box-yellow{background:#fffbeb;border-color:#fde68a;color:#92400e;}
+.app-box-blue{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
+.app-box-green{background:#ecfdf5;border-color:#a7f3d0;color:#065f46;}
+.app-box-red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
+.app-label{display:block;font-size:13px;font-weight:700;color:#374151;}
+.app-input{margin-top:6px;display:block;width:100%;border-radius:10px;border:1px solid #d1d5db;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);background:#fff;}
+.app-input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);}
+.app-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;border-radius:10px;padding:10px 14px;font-weight:800;transition:all .15s ease;cursor:pointer;border:0;}
+.app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
+.app-btn-primary:hover{background:linear-gradient(135deg,#047857 0%,#0f766e 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(5,150,105,.3);}
+.app-btn-secondary{background:#fff;color:#047857;border:1px solid #6ee7b7;}
+.app-btn-secondary:hover{background:#ecfdf5;}
+.app-btn-amber{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;}
+.app-btn-amber:hover{background:linear-gradient(135deg,#d97706 0%,#b45309 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.3);}
+.app-btn:disabled{opacity:.5;cursor:not-allowed;}
+.app-link{color:#047857;text-decoration:none;}
+.app-link:hover{text-decoration:underline;}
+/* 状态 pill：完成/失败/进行中 统一改为 emerald/amber/rose 系 */
+.app-pill{display:inline-block;padding:3px 10px;border-radius:9999px;font-size:12px;font-weight:600;}
+.app-pill-done{background:#d1fae5;color:#065f46;}
+.app-pill-error{background:#fee2e2;color:#991b1b;}
+.app-pill-running{background:#fef3c7;color:#92400e;}
+.app-pill-muted{background:#f3f4f6;color:#374151;}
+/* 进度条 */
+.app-progress{width:100%;background:#e5e7eb;border-radius:9999px;height:10px;overflow:hidden;}
+.app-progress > .app-progress-fill{height:100%;background:linear-gradient(90deg,#10b981,#0d9488);transition:width .4s ease;}
+/* 表格 */
+.app-table{width:100%;border-collapse:collapse;font-size:14px;}
+.app-table thead{background:#ecfdf5;color:#065f46;}
+.app-table th{padding:10px 14px;text-align:left;font-weight:700;border-bottom:1px solid #d1fae5;}
+.app-table td{padding:10px 14px;border-bottom:1px solid #f3f4f6;color:#374151;}
+.app-table tr:hover td{background:#f9fafb;}
+</style>
+"""
+
+
+def _app_skin_head() -> str:
+    """v3.7.1 · 全站统一皮肤（用于每个页面的 <head> 尾部插入）。
+
+    设计目标：所有页面与 INDEX_HTML 风格一致（emerald/teal 主色 + 浅绿渐变背景）。
+    """
+    return _APP_SKIN_CSS
+
+
+# 注册到 Jinja2 全局，所有 render_template_string 调用都能直接用 {{ app_skin_head() }}
+app.jinja_env.globals["app_skin_head"] = _app_skin_head
+
+
 # v3.7 · report_hides 表初始化（幂等）
 try:
     _init_report_hides_table()
@@ -253,20 +320,14 @@ COMMERCE_PAUSED_HTML = """
     <meta charset="UTF-8">
     <title>🚀 9 月传播期 · 商业化暂未开放 · 信竞 AI 报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
-             background:linear-gradient(135deg,#eef2ff 0%,#fdf4ff 50%,#fff7ed 100%);min-height:100vh;}
-        .pill{display:inline-block;padding:3px 10px;border-radius:9999px;font-size:12px;font-weight:600;}
-    </style>
+    {{ app_skin_head() }}
 </head>
-<body class="flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-2xl">
-        <div class="text-center mb-5">
-            <div class="pill bg-indigo-100 text-indigo-700 mb-2">v3.5.2 · 传播期模式</div>
-            <h1 class="text-3xl font-bold text-gray-800 mb-2">🌱 先把基础用户跑起来</h1>
-            <p class="text-sm text-gray-600">
-                商业化（家长订阅 / 冲刺营）将在 <strong>100+ 真实学员</strong>之后再揭幕。
-            </p>
+<body class="app-body flex items-center justify-center p-4">
+    <div class="app-card max-w-2xl w-full">
+        <div class="text-center mb-4">
+            <div class="app-pill app-pill-done mb-2">v3.5.2 · 传播期模式</div>
+            <h1 class="app-title">🌱 先把基础用户跑起来</h1>
+            <p class="app-subtitle">商业化（家长订阅 / 冲刺营）将在 <strong>100+ 真实学员</strong>之后再揭幕。</p>
         </div>
 
         <div class="space-y-3 mb-5">
@@ -617,214 +678,438 @@ INDEX_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>信竞 AI 报告 · 选手成长平台 · v3.5.2</title>
+    <title>信竞 AI 报告 · 选手成长平台 · v3.6</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .app-body{background:linear-gradient(135deg,#f0fdf4 0%,#ecfeff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Microsoft YaHei",sans-serif;}
-        .app-card{background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:32px;width:100%;}
-        .app-title{font-size:26px;font-weight:800;color:#064e3b;margin:0 0 4px;letter-spacing:-0.5px;}
-        .app-subtitle{color:#0f766e;margin:0 0 4px;font-size:14px;font-weight:600;}
-        .app-tag{color:#6b7280;margin:0 0 18px;font-size:12px;}
-        .app-muted{color:#9ca3af;font-size:12px;margin:0 0 18px;}
-        .app-box{border-radius:10px;padding:12px 12px;border:1px solid #e5e7eb;}
-        .app-box-yellow{background:#fffbeb;border-color:#fde68a;color:#92400e;}
-        .app-box-blue{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
-        .app-box-green{background:#ecfdf5;border-color:#a7f3d0;color:#065f46;}
-        .app-box-red{background:#fef2f2;border-color:#fecaca;color:#991b1b;}
-        .app-label{display:block;font-size:13px;font-weight:700;color:#374151;}
-        .app-input{margin-top:6px;display:block;width:100%;border-radius:10px;border:1px solid #d1d5db;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);}
-        .app-input:focus{outline:none;border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);}
-        .app-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;border-radius:10px;padding:10px 14px;font-weight:800;transition:all .15s ease;cursor:pointer;}
-        .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
-        .app-btn-primary:hover{background:linear-gradient(135deg,#047857 0%,#0f766e 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(5,150,105,.3);}
-        .app-btn-secondary{background:#fff;color:#047857;border:1px solid #6ee7b7;}
-        .app-btn-secondary:hover{background:#ecfdf5;}
-        .app-btn-amber{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;}
-        .app-btn-amber:hover{background:linear-gradient(135deg,#d97706 0%,#b45309 100%);transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.3);}
-        .app-btn:disabled{opacity:.5;cursor:not-allowed;}
-        .app-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-        .app-space{margin-bottom:14px;}
-        .app-small{font-size:12px;opacity:.9;}
-        .role-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;transition:all .2s ease;display:block;text-decoration:none;color:inherit;}
-        .role-card:hover{border-color:#10b981;transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,185,129,.15);}
-        .role-card-amber:hover{border-color:#f59e0b;box-shadow:0 8px 20px rgba(245,158,11,.15);}
-        .engine-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
-        .role-emoji{font-size:32px;line-height:1;margin-bottom:4px;display:block;}
-        /* Cookie guide mock (self-contained DevTools schematic) */
-        .cg-mock{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#1f2937;font-size:11px;}
-        .cg-titlebar{background:#e5e7eb;padding:5px 8px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #d1d5db;}
-        .cg-dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
-        .cg-r{background:#ef4444;} .cg-y{background:#eab308;} .cg-g{background:#22c55e;}
-        .cg-url{flex:1;background:#fff;border:1px solid #d1d5db;border-radius:3px;padding:2px 8px;font-size:10.5px;color:#4b5563;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-        .cg-tabs{display:flex;background:#f3f4f6;border-bottom:1px solid #d1d5db;font-size:10.5px;color:#6b7280;overflow-x:auto;}
-        .cg-tab{padding:5px 10px;border-right:1px solid #e5e7eb;white-space:nowrap;}
-        .cg-tab.cg-on{background:#fff;color:#2563eb;font-weight:700;border-bottom:2px solid #2563eb;}
-        .cg-body{display:flex;background:#fff;min-height:160px;}
-        .cg-tree{flex:0 0 44%;border-right:1px solid #e5e7eb;padding:6px 8px;font-size:11px;line-height:1.55;color:#374151;}
-        .cg-indent{padding-left:10px;}
-        .cg-indent-2{padding-left:22px;}
-        .cg-sel{background:#fef3c7;padding:1px 5px;border-radius:2px;color:#92400e;}
-        .cg-tip{color:#9ca3af;font-size:10px;margin-left:2px;}
-        .cg-table{flex:1;padding:0;font-size:11px;}
-        .cg-th{background:#f9fafb;padding:4px 8px;font-weight:600;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:10.5px;}
-        .cg-tr{padding:4px 8px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:6px;}
-        .cg-tr.cg-hl{background:#fef3c7;}
-        .cg-tr.cg-hl b{color:#b45309;}
-        .cg-val{color:#9ca3af;font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-        .cg-tag{background:#fbbf24;color:#78350f;font-size:9.5px;padding:1px 6px;border-radius:8px;font-weight:700;letter-spacing:.5px;flex-shrink:0;}
+        :root{
+            --bg-0:#06080F;
+            --bg-1:#0B1024;
+            --bg-2:#11173A;
+            --ink:#E5E7EB;
+            --ink-2:#94A3B8;
+            --ink-3:#64748B;
+            --line:rgba(148,163,184,.16);
+            --line-2:rgba(148,163,184,.28);
+            --accent:#00FFB3;       /* AI 信号绿 */
+            --accent-2:#7B61FF;     /* 紫色辉光 */
+            --amber:#FFB627;        /* 琥珀高亮 */
+            --rose:#FF6B9D;         /* 家长版粉 */
+        }
+        *{box-sizing:border-box}
+        html,body{background:var(--bg-0);color:var(--ink);}
+        body{
+            font-family:"DM Sans",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+            font-feature-settings:"ss01","cv01";
+            min-height:100vh;
+            overflow-x:hidden;
+        }
+        .font-display{font-family:"Bricolage Grotesque",serif;font-optical-sizing:auto;letter-spacing:-.02em;}
+        .font-mono{font-family:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+
+        /* ===== 背景：深空 + 网格 + 极光 ===== */
+        .bg-space{
+            position:fixed;inset:0;z-index:-2;
+            background:
+                radial-gradient(60% 50% at 15% 12%, rgba(123,97,255,.22) 0%, transparent 60%),
+                radial-gradient(50% 40% at 90% 8%, rgba(0,255,179,.18) 0%, transparent 60%),
+                radial-gradient(60% 60% at 80% 95%, rgba(255,107,157,.16) 0%, transparent 60%),
+                linear-gradient(180deg, #06080F 0%, #0B1024 50%, #06080F 100%);
+        }
+        .bg-grid{
+            position:fixed;inset:0;z-index:-1;pointer-events:none;
+            background-image:
+                radial-gradient(rgba(148,163,184,.18) 1px, transparent 1px);
+            background-size: 28px 28px;
+            background-position: -1px -1px;
+            mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 30%, transparent 75%);
+            -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 30%, transparent 75%);
+        }
+        .bg-scan{
+            position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.4;
+            background: repeating-linear-gradient(180deg, transparent 0, transparent 3px, rgba(0,255,179,.012) 3px, rgba(0,255,179,.012) 4px);
+        }
+
+        /* ===== 顶栏状态条 ===== */
+        .statusbar{
+            border-bottom:1px solid var(--line);
+            background:linear-gradient(180deg, rgba(11,16,36,.85), rgba(6,8,15,.65));
+            backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+            font-family:"JetBrains Mono",monospace;font-size:11.5px;
+        }
+        .pulse-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(0,255,179,.6);animation:pulse 1.8s infinite;}
+        @keyframes pulse{
+            0%{box-shadow:0 0 0 0 rgba(0,255,179,.55)}
+            70%{box-shadow:0 0 0 9px rgba(0,255,179,0)}
+            100%{box-shadow:0 0 0 0 rgba(0,255,179,0)}
+        }
+
+        /* ===== 标题光标 ===== */
+        .caret{display:inline-block;width:.55ch;height:1em;background:var(--accent);margin-left:.15em;vertical-align:-.12em;animation:blink 1.05s steps(1) infinite;}
+        @keyframes blink{50%{opacity:0}}
+
+        /* ===== 玻璃卡片 ===== */
+        .glass{
+            background:linear-gradient(180deg, rgba(17,23,42,.65), rgba(11,16,36,.55));
+            border:1px solid var(--line);
+            border-radius:18px;
+            backdrop-filter:blur(14px) saturate(140%);
+            -webkit-backdrop-filter:blur(14px) saturate(140%);
+            box-shadow:0 30px 60px -20px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04);
+        }
+        .glass-bright{
+            background:linear-gradient(180deg, rgba(0,255,179,.06), rgba(11,16,36,.4) 60%);
+            border:1px solid rgba(0,255,179,.28);
+        }
+        .glass-pink{
+            background:linear-gradient(180deg, rgba(255,107,157,.07), rgba(11,16,36,.4) 60%);
+            border:1px solid rgba(255,107,157,.26);
+        }
+        .glass-violet{
+            background:linear-gradient(180deg, rgba(123,97,255,.08), rgba(11,16,36,.4) 60%);
+            border:1px solid rgba(123,97,255,.26);
+        }
+
+        /* ===== 主 CTA 按钮 ===== */
+        .btn-primary{
+            position:relative;display:inline-flex;align-items:center;justify-content:center;gap:.55em;
+            width:100%;
+            padding:14px 20px;border-radius:14px;
+            font-family:"Bricolage Grotesque",serif;font-weight:700;font-size:16px;letter-spacing:.01em;
+            color:#02110B;cursor:pointer;border:0;
+            background:linear-gradient(135deg,#00FFB3 0%,#7B61FF 100%);
+            box-shadow:0 10px 30px -10px rgba(0,255,179,.5),0 6px 20px -8px rgba(123,97,255,.45);
+            transition:transform .15s ease,box-shadow .2s ease,filter .15s ease;
+            overflow:hidden;
+        }
+        .btn-primary::after{
+            content:"";position:absolute;inset:0;
+            background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,.35) 50%,transparent 70%);
+            transform:translateX(-120%);transition:transform .9s ease;
+        }
+        .btn-primary:hover{transform:translateY(-1px);box-shadow:0 18px 40px -10px rgba(0,255,179,.6),0 10px 25px -8px rgba(123,97,255,.55);filter:brightness(1.05);}
+        .btn-primary:hover::after{transform:translateX(120%);}
+        .btn-primary:active{transform:translateY(0)}
+        .btn-secondary{
+            display:inline-flex;align-items:center;justify-content:center;gap:.5em;
+            padding:11px 16px;border-radius:12px;
+            background:rgba(255,255,255,.04);
+            color:var(--ink);
+            border:1px solid var(--line-2);
+            font-weight:600;font-size:13.5px;
+            transition:all .15s ease;cursor:pointer;
+        }
+        .btn-secondary:hover{background:rgba(0,255,179,.08);border-color:rgba(0,255,179,.4);color:var(--accent);}
+
+        /* ===== 特性卡片 ===== */
+        .feat{position:relative;padding:22px 20px;border-radius:16px;background:linear-gradient(180deg,rgba(17,23,42,.6),rgba(11,16,36,.4));border:1px solid var(--line);transition:all .25s ease;overflow:hidden;}
+        .feat:hover{transform:translateY(-3px);border-color:rgba(0,255,179,.4);box-shadow:0 18px 40px -18px rgba(0,255,179,.35);}
+        .feat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--accent),transparent);}
+        .feat.pink::before{background:linear-gradient(180deg,var(--rose),transparent);}
+        .feat.violet::before{background:linear-gradient(180deg,var(--accent-2),transparent);}
+        .feat .num{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-3);letter-spacing:.18em;}
+        .feat .ic{font-size:26px;line-height:1;margin:6px 0 4px;display:inline-block;}
+        .feat h3{font-family:"Bricolage Grotesque",serif;font-weight:700;font-size:16px;color:#fff;margin:0 0 6px;}
+        .feat p{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin:0;}
+
+        /* ===== 滚动代码日志带 ===== */
+        .ticker{
+            position:relative;overflow:hidden;
+            border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+            background:linear-gradient(180deg, rgba(11,16,36,.6), rgba(6,8,15,.4));
+            font-family:"JetBrains Mono",monospace;font-size:11.5px;
+        }
+        .ticker::before,.ticker::after{content:"";position:absolute;top:0;bottom:0;width:60px;z-index:2;pointer-events:none;}
+        .ticker::before{left:0;background:linear-gradient(90deg,var(--bg-0),transparent);}
+        .ticker::after{right:0;background:linear-gradient(270deg,var(--bg-0),transparent);}
+        .ticker-track{display:inline-flex;gap:42px;padding:10px 0;white-space:nowrap;animation:tick 48s linear infinite;}
+        @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+        .tk-dot{color:var(--accent);}
+        .tk-key{color:var(--amber);}
+        .tk-num{color:var(--accent-2);}
+        .tk-mute{color:var(--ink-3);}
+
+        /* ===== 输入框 ===== */
+        .field{
+            width:100%;padding:11px 14px;border-radius:11px;
+            background:rgba(6,8,15,.6);
+            border:1px solid var(--line-2);
+            color:var(--ink);font-family:"JetBrains Mono",monospace;font-size:13.5px;letter-spacing:.05em;
+            transition:all .15s ease;
+        }
+        .field::placeholder{color:var(--ink-3);letter-spacing:0;}
+        .field:focus{outline:none;border-color:rgba(0,255,179,.55);box-shadow:0 0 0 4px rgba(0,255,179,.12);background:rgba(6,8,15,.85);}
+
+        /* ===== flash 提示 ===== */
+        .flash{border-radius:12px;padding:10px 14px;border:1px solid var(--line);font-size:13px;display:flex;align-items:center;gap:8px;}
+        .flash-yellow{background:rgba(255,182,39,.08);border-color:rgba(255,182,39,.3);color:#FCD34D;}
+        .flash-red{background:rgba(255,107,157,.08);border-color:rgba(255,107,157,.3);color:#FCA5C0;}
+        .flash-green{background:rgba(0,255,179,.08);border-color:rgba(0,255,179,.3);color:#6EE7B7;}
+        .flash-blue{background:rgba(123,97,255,.08);border-color:rgba(123,97,255,.3);color:#C4B5FD;}
+
+        /* ===== 客服卡 ===== */
+        .contact-card{background:linear-gradient(180deg,rgba(17,23,42,.55),rgba(11,16,36,.4));border:1px solid var(--line);border-radius:14px;padding:16px;}
+        .contact-card.amber{border-color:rgba(255,182,39,.25);}
+        .contact-card.gray{border-color:var(--line-2);}
+
+        /* ===== 浮入动画 ===== */
+        .rise{opacity:0;transform:translateY(8px);animation:rise .7s ease forwards;}
+        .rise.d1{animation-delay:.05s}
+        .rise.d2{animation-delay:.12s}
+        .rise.d3{animation-delay:.2s}
+        .rise.d4{animation-delay:.28s}
+        .rise.d5{animation-delay:.36s}
+        .rise.d6{animation-delay:.44s}
+        @keyframes rise{to{opacity:1;transform:translateY(0)}}
+
+        /* ===== 主品牌 hero ===== */
+        .hero-title{
+            font-family:"Bricolage Grotesque",serif;
+            font-weight:800;
+            font-size:clamp(34px, 6vw, 60px);
+            line-height:1.02;
+            letter-spacing:-.035em;
+            background:linear-gradient(180deg,#fff 0%,#94A3B8 130%);
+            -webkit-background-clip:text;background-clip:text;color:transparent;
+        }
+        .hero-title .acc{background:linear-gradient(135deg,#00FFB3 0%,#7B61FF 60%,#FFB627 120%);-webkit-background-clip:text;background-clip:text;color:transparent;}
+        .hero-sub{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink-2);letter-spacing:.04em;}
+        .tag-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(0,255,179,.08);border:1px solid rgba(0,255,179,.28);color:#6EE7B7;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;}
+
+        /* 适配小屏 */
+        @media (max-width:640px){
+            .hero-title{font-size:38px}
+        }
     </style>
 </head>
-<body class="app-body p-4">
-<div class="max-w-4xl mx-auto py-6 space-y-4">
+<body>
+<div class="bg-space"></div>
+<div class="bg-grid"></div>
+<div class="bg-scan"></div>
 
+<!-- 顶部状态条 -->
+<div class="statusbar">
+    <div class="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between gap-3 text-[var(--ink-2)]">
+        <div class="flex items-center gap-3">
+            <span class="pulse-dot"></span>
+            <span class="text-[var(--accent)]">SYS</span><span class="tk-mute">::</span><span>SIGNAL_ACQUIRED</span>
+            <span class="tk-mute hidden sm:inline">/</span>
+            <span class="hidden sm:inline">LUOGU_REPORT_PIPELINE</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="hidden md:inline">v3.6.0</span>
+            <span id="statusbarClock" class="text-[var(--ink-2)]">--:--:--</span>
+            <span class="text-[var(--ink-3)] hidden sm:inline">Asia/Shanghai</span>
+        </div>
+    </div>
+</div>
+
+<main class="max-w-4xl mx-auto px-4 pt-8 pb-12 space-y-5">
+
+    <!-- flash 消息 -->
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
-    <div class="space-y-2">
+    <div class="space-y-2 rise d1">
         {% for category, message in messages %}
-        <div class="app-box {% if category == 'warning' %}app-box-yellow{% elif category == 'error' %}app-box-red{% elif category == 'success' %}app-box-green{% else %}app-box-blue{% endif %}">
-            {{ message }}
+        <div class="flash {% if category == 'warning' %}flash-yellow{% elif category == 'error' %}flash-red{% elif category == 'success' %}flash-green{% else %}flash-blue{% endif %}">
+            <span class="font-mono text-[10px] opacity-70">[{{ category|upper }}]</span>
+            <span>{{ message }}</span>
         </div>
         {% endfor %}
     </div>
     {% endif %}
     {% endwith %}
 
-    <!-- 顶部品牌 -->
-    <div class="app-card text-center">
-        <h1 class="app-title">🏆 信竞 AI 报告 · 选手成长平台</h1>
-        <div class="app-muted flex items-center justify-center gap-2">
-            <span>QQ交流群：<span id="qqGroup" class="text-emerald-700 font-semibold select-all">610931699</span></span>
-            <button id="copyQqBtn" type="button" class="px-2 py-0.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs">复制</button>
+    <!-- 品牌主视觉 -->
+    <section class="text-center space-y-5 rise d2">
+        <div class="flex items-center justify-center gap-2">
+            <span class="tag-chip">
+                <span class="pulse-dot" style="width:5px;height:5px"></span>
+                AI · LUOGU · v3.6
+            </span>
         </div>
-    </div>
+        <h1 class="hero-title">
+            信息学 AI 测评<br>
+            <span class="acc">一站式选手成长平台</span>
+        </h1>
+        <p class="hero-sub max-w-xl mx-auto">
+            &gt; 基于洛谷做题数据 · 多维算法画像 · 一键生成可分享测评报告
+            <span class="caret"></span>
+        </p>
+    </section>
 
-    <!-- v3.5.2 主 CTA · 统一"AI 生成学习报告"入口 -->
-    <div class="app-card bg-gradient-to-r from-emerald-50 to-cyan-50 border-2 border-emerald-300">
-        <div class="text-center mb-3">
-            <h2 class="text-xl font-extrabold text-emerald-900 mb-1">🎓 AI 生成学习报告</h2>
-            <p class="text-xs text-gray-600">输入洛谷账号 + 报告信息 · 30 秒出报告 · 含注册·错题本·3 版本报告</p>
+    <!-- 主 CTA -->
+    <section class="glass glass-bright p-6 sm:p-8 rise d3">
+        <div class="flex items-start gap-3 mb-5">
+            <div class="font-mono text-[11px] text-[var(--ink-3)] leading-relaxed">
+                <div><span class="text-[var(--accent)]">→</span> <span class="text-[var(--amber)]">action</span>: <span class="text-white">generate_report</span></div>
+                <div class="opacity-70 ml-4">args: <span class="text-[var(--ink-2)]">[uid, cookies, profile]</span></div>
+            </div>
         </div>
-        <a href="/generate-form" class="app-btn app-btn-primary text-base py-3">
+        <div class="mb-5">
+            <div class="flex items-baseline gap-3 flex-wrap">
+                <h2 class="font-display text-2xl sm:text-[28px] font-extrabold text-white tracking-tight">AI 测评编程能力报告</h2>
+                <span class="font-mono text-[11px] text-[var(--ink-3)]">// ~3 min · 3 versions</span>
+            </div>
+            <p class="text-[13.5px] text-[var(--ink-2)] mt-1.5 leading-relaxed">
+                填写 UID + 信息学奖项，AI 抓取洛谷做题数据，生成
+                <span class="text-[var(--accent)]">选手版</span> /
+                <span class="text-[var(--rose)]">家长订阅版</span> /
+                <span class="text-[var(--accent-2)]">教练版</span>
+                三份报告：助力选手精准训练、家长生涯规划、教练科学指导。
+            </p>
+        </div>
+        <a href="/generate-form" class="btn-primary">
             🚀 立即生成我的学习报告
+            <span class="font-mono text-[12px] opacity-80 ml-1">↵</span>
         </a>
-        <p class="text-center text-xs text-gray-500 mt-2">报名信息（UID/姓名/学校/年级/城市）一次性填写，无需先注册</p>
-        <!-- 老用户快速入口（不生成新报告，直接看） -->
-        <a href="/select-mode" class="block text-center text-xs text-emerald-700 hover:underline mt-2">👀 我已注册 · 只想看历史报告 →</a>
-    </div>
+        <div class="mt-3 flex items-center justify-between text-[12px] text-[var(--ink-3)] flex-wrap gap-2">
+            <span class="font-mono">// 不需先注册 · UID + 报名信息一次填</span>
+            <a href="/select-mode" class="text-[var(--accent)] hover:underline font-medium">👀 我已注册 · 直接看历史报告 →</a>
+        </div>
 
-        <!-- 学员 UID 快速入口（保留 · 用于老用户/已注册用户） -->
-        <form id="me-entry" action="/me/0" method="get" class="mt-4 flex gap-2" onsubmit="event.preventDefault(); var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) window.location.href='/me/'+u; else alert('请输入 6-10 位洛谷 UID');">
-            <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID 6-10 位（已注册用户直接进入个人中心）" class="app-input flex-1">
-            <button type="submit" class="app-btn app-btn-secondary px-4 whitespace-nowrap">进入</button>
-        </form>
-    </div>
+        <!-- 老用户 UID 快速进入（嵌入主 CTA 内，更显眼） -->
+        <div class="mt-5 pt-5 border-t border-dashed border-[var(--line-2)]">
+            <div class="font-mono text-[10.5px] text-[var(--ink-3)] mb-2">// 已注册用户 · 直接进个人中心</div>
+            <form id="me-entry" action="/me/0" method="get" class="flex gap-2" onsubmit="event.preventDefault(); var u=document.getElementById('meUid').value.trim(); if(u && /^\d{6,10}$/.test(u)) window.location.href='/me/'+u; else alert('请输入 6-10 位洛谷 UID');">
+                <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}" placeholder="洛谷 UID（6-10 位数字）" class="field flex-1">
+                <button type="submit" class="btn-secondary whitespace-nowrap font-mono">进入 ›</button>
+            </form>
+        </div>
+    </section>
 
-    <!-- 3 大引擎（价值感知 · 替代价格表） · v3.6 暂时隐藏（已物理删除） -->
+    <!-- 3 大特性 -->
+    <section class="grid grid-cols-1 sm:grid-cols-3 gap-3 rise d4">
+        <div class="feat">
+            <div class="num">// NOI_01</div>
+            <div class="ic">🌳</div>
+            <h3>知识树图谱</h3>
+            <p>按 CSP-J / CSP-S / 省选 / NOI 四个级别画 4 棵知识树，果子大小 = 掌握度，一眼看出盲区。</p>
+        </div>
+        <div class="feat violet">
+            <div class="num">// NOI_02</div>
+            <div class="ic">🧠</div>
+            <h3>AI 深度解读</h3>
+            <p>大模型阅读全部做题记录，输出 AI 定级、性格画像、高频算法雷达、阶段成长曲线。</p>
+        </div>
+        <div class="feat pink">
+            <div class="num">// NOI_03</div>
+            <div class="ic">📨</div>
+            <h3>家长订阅版</h3>
+            <p>一份"家长看得懂"的报告：非技术语言 + 学习建议 + 关键事件解读，可订阅每周推送。</p>
+        </div>
+    </section>
 
-    <!-- 加 V 与客服（v3.5.2 唯一购买通道） · v3.5.2 传播期隐藏 -->
+    <!-- 滚动代码日志带 -->
+    <section class="ticker rise d5" aria-hidden="true">
+        <div class="ticker-track">
+            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
+            <!-- 复制一份用于无缝循环 -->
+            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
+            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
+        </div>
+    </section>
+
+    <!-- 客服/教练版 -->
     {% if not commerce_hidden %}
-    <div class="app-card">
-        <h2 class="text-sm font-bold text-gray-700 mb-3">💬 加 V 获取兑换码（家长/讲题）</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div class="app-box border-amber-200 bg-amber-50/40">
-                <div class="text-sm font-bold text-amber-800 mb-1">📱 加 V 通道（家长/讲题）</div>
-                <p class="text-xs text-amber-700 mb-2">加客服微信，回复「家长」或「讲题」领取兑换码</p>
-                <div class="flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
-                    <span class="text-xs text-gray-500">微信号：</span>
-                    <span class="font-mono font-bold text-amber-700 select-all" id="wechatVip">xinjing-ai-vip</span>
-                    <button id="copyVipBtn" type="button" class="ml-auto px-2 py-0.5 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs">复制</button>
-                </div>
-                <p class="text-xs text-gray-400 mt-2">工作日 9:00-21:00 · 节假日 10:00-18:00</p>
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-3 rise d6">
+        <div class="contact-card amber">
+            <div class="flex items-center justify-between mb-2">
+                <div class="font-mono text-[10.5px] text-[var(--ink-3)]">// CONTACT_PARENT</div>
+                <span class="font-mono text-[10px] text-[var(--amber)]">vip</span>
             </div>
-            <div class="app-box border-gray-200 bg-gray-50/40">
-                <div class="text-sm font-bold text-gray-800 mb-1">🏢 教练版咨询（机构/工作室）</div>
-                <p class="text-xs text-gray-700 mb-2">批量学员管理 · 兑换码生成 · 营收看板</p>
-                <div class="space-y-1 text-xs text-gray-700">
-                    <div>📞 电话：<span class="font-mono font-semibold">400-XXX-XXXX</span></div>
-                    <div>📧 邮箱：<span class="font-mono font-semibold">coach@xinjing-ai.com</span></div>
-                    <div>🆚 备注：教练版按学员数计费，<a href="/coach" class="text-emerald-600 hover:underline">查看详情</a></div>
-                </div>
+            <div class="text-[15px] font-bold text-[var(--amber)] mb-1.5 font-display">📱 家长 / 讲题 加 V</div>
+            <p class="text-[12px] text-[var(--ink-2)] mb-3 leading-relaxed">加客服微信，回复「家长」或「讲题」领取兑换码</p>
+            <div class="flex items-center gap-2 bg-[rgba(0,0,0,.35)] border border-[rgba(255,182,39,.25)] rounded-lg px-3 py-2">
+                <span class="text-[11px] text-[var(--ink-3)]">wx:</span>
+                <span class="font-mono font-bold text-[var(--amber)] select-all flex-1" id="wechatVip">xinjing-ai-vip</span>
+                <button id="copyVipBtn" type="button" class="px-2 py-0.5 rounded-md border border-[rgba(255,182,39,.3)] text-[var(--amber)] hover:bg-[rgba(255,182,39,.08)] text-[11px] font-mono">copy</button>
+            </div>
+            <p class="text-[11px] text-[var(--ink-3)] mt-2 font-mono">// 9:00-21:00 workdays · 10:00-18:00 holidays</p>
+        </div>
+        <div class="contact-card gray">
+            <div class="flex items-center justify-between mb-2">
+                <div class="font-mono text-[10.5px] text-[var(--ink-3)]">// CONTACT_COACH</div>
+                <span class="font-mono text-[10px] text-[var(--accent-2)]">B2B</span>
+            </div>
+            <div class="text-[15px] font-bold text-white mb-1.5 font-display">🏢 教练版 / 机构合作</div>
+            <p class="text-[12px] text-[var(--ink-2)] mb-3 leading-relaxed">批量学员管理 · 兑换码生成 · 营收看板</p>
+            <div class="space-y-1 text-[12px] text-[var(--ink-2)] font-mono">
+                <div>📞 <span class="text-white">400-XXX-XXXX</span></div>
+                <div>📧 <span class="text-white">coach@xinjing-ai.com</span></div>
+                <div>📋 按学员数计费 · <a href="/coach" class="text-[var(--accent)] hover:underline">查看详情 →</a></div>
             </div>
         </div>
-    </div>
+    </section>
     {% endif %}
 
-    <!-- v3.6 首页精简：暂时隐藏"新用户说明"+"给新用户"+"底部"三块 -->
+    <!-- 底栏 -->
+    <footer class="text-center text-[11px] text-[var(--ink-3)] font-mono pt-2 rise d6">
+        <span>© 2026 信竞 AI 报告 · Luogu-AI-Report</span>
+        <span class="mx-2 opacity-40">·</span>
+        <span>build <span class="text-[var(--accent)]">ba43a4b</span></span>
+        <span class="mx-2 opacity-40">·</span>
+        <span>QQ <span id="qqGroup" class="text-[var(--accent)] font-semibold select-all">610931699</span>
+            <button id="copyQqBtn" type="button" class="ml-1 px-1.5 py-0.5 rounded border border-[var(--line-2)] text-[var(--ink-2)] hover:text-[var(--accent)] hover:border-[var(--accent)]">copy</button>
+        </span>
+    </footer>
 
-</div>
+</main>
 
 <script>
-    (function () {
-        function v(id) { var el = document.querySelector('input[name="' + id + '"]'); return el ? (el.value || '').trim() : ''; }
-        var btn = document.getElementById('validateBtn');
-        var hint = document.getElementById('validateHint');
-        function refresh() {
-            var ok = !!v('client_id') && !!v('uid') && !!v('c3vk');
-            if (btn) btn.disabled = !ok;
-            if (hint) hint.textContent = ok ? '已填写三个参数，建议先点一次校验。' : '请先填写 __client_id、_uid、C3VK 后再校验。';
+    // 顶栏时钟
+    (function(){
+        var el=document.getElementById('statusbarClock');
+        if(!el) return;
+        function tick(){
+            var d=new Date();
+            var p=function(n){return (n<10?'0':'')+n};
+            el.textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
         }
-        ['client_id','uid','c3vk'].forEach(function (name) {
-            var el = document.querySelector('input[name="' + name + '"]');
-            if (el) el.addEventListener('input', refresh);
-        });
-        refresh();
+        tick();setInterval(tick,1000);
     })();
-    (function () {
-        var btn = document.getElementById('copyQqBtn');
-        var textEl = document.getElementById('qqGroup');
-        if (!btn || !textEl) return;
-        btn.addEventListener('click', async function () {
-            var value = (textEl.textContent || '').trim();
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
+
+    // 复制通用
+    function bindCopy(btnId,textId,okMsg,failMsg){
+        var btn=document.getElementById(btnId);
+        var textEl=document.getElementById(textId);
+        if(!btn||!textEl) return;
+        btn.addEventListener('click', async function(){
+            var value=(textEl.textContent||'').trim();
+            try{
+                if(navigator.clipboard&&navigator.clipboard.writeText){
                     await navigator.clipboard.writeText(value);
-                } else {
-                    var ta = document.createElement('textarea');
-                    ta.value = value;
-                    ta.style.position = 'fixed';
-                    ta.style.top = '-1000px';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
+                }else{
+                    var ta=document.createElement('textarea');
+                    ta.value=value;ta.style.position='fixed';ta.style.top='-1000px';
+                    document.body.appendChild(ta);ta.focus();ta.select();
+                    document.execCommand('copy');document.body.removeChild(ta);
                 }
-                btn.textContent = '已复制';
-                setTimeout(function () { btn.textContent = '复制'; }, 1200);
-            } catch (e) {
-                btn.textContent = '复制失败';
-                setTimeout(function () { btn.textContent = '复制'; }, 1200);
+                btn.textContent=okMsg;
+            }catch(e){
+                btn.textContent=failMsg;
             }
+            setTimeout(function(){btn.textContent='copy';},1200);
         });
-    })();
-    (function () {
-        var btn = document.getElementById('copyVipBtn');
-        var textEl = document.getElementById('wechatVip');
-        if (!btn || !textEl) return;
-        btn.addEventListener('click', async function () {
-            var value = (textEl.textContent || '').trim();
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(value);
-                } else {
-                    var ta = document.createElement('textarea');
-                    ta.value = value;
-                    ta.style.position = 'fixed';
-                    ta.style.top = '-1000px';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
-                }
-                btn.textContent = '已复制';
-                setTimeout(function () { btn.textContent = '复制'; }, 1200);
-            } catch (e) {
-                btn.textContent = '复制失败';
-                setTimeout(function () { btn.textContent = '复制'; }, 1200);
-            }
-        });
-    })();
+    }
+    bindCopy('copyQqBtn','qqGroup','copied!','failed');
+    bindCopy('copyVipBtn','wechatVip','copied!','failed');
 </script>
 </body>
 </html>
@@ -1184,6 +1469,9 @@ def _generate_ai_report_artifacts(
             failed_count=int(export_data.get("failed_count") or 0),
             eval_time=eval_time,
         )
+
+    # v3.7 · 报告生成后立刻标记 hide_pdf=1（统一走海报扫码，不开放 PDF 直链）
+    _record_hide_pdf(task_id)
 
 
 def validate_cookies(form: dict) -> dict[str, object]:
@@ -1649,24 +1937,28 @@ STATUS_HTML = """
     <title>报告生成状态</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <meta http-equiv="refresh" content="3">
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-lg text-center">
-        <h1 class="text-2xl font-bold text-blue-900 mb-4">报告生成状态</h1>
-        <div class="mb-4">
-            <span class="inline-block px-3 py-1 rounded-full text-sm font-semibold
-                {% if status == 'done' %}bg-green-100 text-green-800{% elif status == 'error' %}bg-red-100 text-red-800{% else %}bg-blue-100 text-blue-800{% endif %}">
-                {{ status }}
-            </span>
+<body class="app-body p-4">
+    <div class="max-w-2xl mx-auto py-6 space-y-4">
+        <div class="app-card text-center">
+            <h1 class="app-title">📊 报告生成状态</h1>
+            <p class="app-subtitle">AI 正在帮您的孩子写报告 · 完成后可继续操作</p>
         </div>
+        <div class="app-card text-center">
+            <div class="mb-4">
+                <span class="app-pill {% if status == 'done' %}app-pill-done{% elif status == 'error' %}app-pill-error{% else %}app-pill-running{% endif %}">
+                    {{ '✅ 完成' if status == 'done' else ('❌ 失败' if status == 'error' else '⏳ 进行中') }}
+                </span>
+            </div>
         {% if source_code_total and source_code_total|int > 0 %}
         <div class="mb-4 text-left">
             <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
                 <span>源码获取进度</span>
                 <span class="font-semibold text-gray-800">{{ source_code_success }}/{{ source_code_total }}</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div class="bg-blue-600 h-3" style="width: {{ (100 * (source_code_success|int) / (source_code_total|int)) if (source_code_total|int) > 0 else 0 }}%;"></div>
+            <div class="app-progress">
+                <div class="app-progress-fill" style="width: {{ (100 * (source_code_success|int) / (source_code_total|int)) if (source_code_total|int) > 0 else 0 }}%;"></div>
             </div>
         </div>
         {% endif %}
@@ -1676,8 +1968,8 @@ STATUS_HTML = """
                 <span>标签补全进度</span>
                 <span class="font-semibold text-gray-800">{{ tag_fetch_success }}/{{ tag_fetch_total }}</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div class="bg-amber-500 h-3" style="width: {{ (100 * (tag_fetch_success|int) / (tag_fetch_total|int)) if (tag_fetch_total|int) > 0 else 0 }}%;"></div>
+            <div class="app-progress">
+                <div class="app-progress-fill" style="width: {{ (100 * (tag_fetch_success|int) / (tag_fetch_total|int)) if (tag_fetch_total|int) > 0 else 0 }}%;"></div>
             </div>
         </div>
         {% endif %}
@@ -1687,8 +1979,8 @@ STATUS_HTML = """
                 <span>AI 报告生成进度</span>
                 <span class="font-semibold text-gray-800">{{ ai_progress }}%{% if ai_elapsed_seconds and ai_elapsed_seconds|int > 0 %} · {{ ai_elapsed_seconds }}s{% endif %}</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div class="bg-blue-600 h-3" style="width: {{ ai_progress|int }}%;"></div>
+            <div class="app-progress">
+                <div class="app-progress-fill" style="width: {{ ai_progress|int }}%;"></div>
             </div>
         </div>
         {% endif %}
@@ -1699,29 +1991,29 @@ STATUS_HTML = """
                 <span>📨 家长订阅版 AI 生成进度</span>
                 <span class="font-semibold text-gray-800">{{ ai_progress }}%{% if ai_elapsed_seconds and ai_elapsed_seconds|int > 0 %} · {{ ai_elapsed_seconds }}s{% endif %}</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                <div class="bg-gradient-to-r from-amber-400 to-rose-400 h-3" style="width: {{ ai_progress|int }}%;"></div>
+            <div class="app-progress">
+                <div class="app-progress-fill" style="width: {{ ai_progress|int }}%;"></div>
             </div>
         </div>
         {% if status == 'done' %}
-        <a href="{{ ps_html }}" target="_blank" class="block w-full bg-gradient-to-r from-amber-500 to-rose-500 text-white font-bold py-3 px-4 rounded-md hover:from-amber-600 hover:to-rose-600 transition mb-2">📨 查看家长订阅版（AI 真生成）</a>
-        <a href="{{ ps_md }}" target="_blank" class="block w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 transition">查看 Markdown 原文</a>
-        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="block w-full bg-white text-amber-700 border border-amber-300 font-semibold py-2 px-4 rounded-md hover:bg-amber-50 transition mt-2">↩ 返回家长订阅版页</a>
+        <a href="{{ ps_html }}" target="_blank" class="app-btn app-btn-amber mb-2">📨 查看家长订阅版（AI 真生成）</a>
+        <a href="{{ ps_md }}" target="_blank" class="app-btn app-btn-secondary mb-2">查看 Markdown 原文</a>
+        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-secondary">↩ 返回家长订阅版页</a>
         {% elif status == 'error' %}
-        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="block w-full bg-rose-500 text-white font-bold py-2 px-4 rounded-md hover:bg-rose-600 transition">返回重试</a>
+        <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-primary">返回重试</a>
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新，AI 正在基于您家孩子的报告重写一份家长视角的深度分析...</p>
         {% endif %}
         {% elif status == 'done' %}
         <div class="space-y-3">
-            <a href="{{ html }}" target="_blank" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition">查看 HTML 报告</a>
+            <a href="{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
             {# v3.7 · PDF 暂未开放：灰显按钮，强制走海报分享 #}
-            <button type="button" disabled class="block w-full bg-gray-200 text-gray-500 font-semibold py-2 px-4 rounded-md cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享">🔒 PDF 暂未开放</button>
-            <a href="{{ md }}" target="_blank" class="block w-full bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 transition">查看 Markdown 原文</a>
+            <button type="button" disabled class="app-btn bg-gray-200 text-gray-500 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享">🔒 PDF 暂未开放</button>
+            <a href="{{ md }}" target="_blank" class="app-btn app-btn-secondary">📄 查看 Markdown 原文</a>
             {% if me_url %}
             {# v3.6 修复：点击"最终生成家长订阅版"按钮 → 直接 POST 触发生成（不再跳到 API key 表单页） #}
             <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block">
-                <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-rose-500 text-white font-bold py-2.5 px-4 rounded-md hover:from-amber-600 hover:to-rose-600 transition">
+                <button type="submit" class="app-btn app-btn-amber">
                     📨 最终生成家长订阅版
                 </button>
                 <p class="text-[10px] text-gray-500 text-center mt-1">💡 使用服务端环境变量 OPENAI_API_KEY 直接生成（约 1-2 分钟）</p>
@@ -1729,11 +2021,11 @@ STATUS_HTML = """
             {% endif %}
         </div>
         {% elif status == 'error' %}
-        <a href="{{ retry_url }}" class="block w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition mt-4">返回重试</a>
+        <a href="{{ retry_url }}" class="app-btn app-btn-primary mt-4">返回重试</a>
         {% if me_url %}
         {# 错误状态也用 POST 表单，确保点击直接重试 #}
         <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block mt-2">
-            <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-rose-500 text-white font-bold py-2.5 px-4 rounded-md hover:from-amber-600 hover:to-rose-600 transition">
+            <button type="submit" class="app-btn app-btn-amber">
                 📨 重试家长订阅版
             </button>
         </form>
@@ -1741,31 +2033,36 @@ STATUS_HTML = """
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新...</p>
         {% endif %}
+        </div>
+        <p class="text-center text-xs text-gray-500">
+            <a href="/" class="app-link">← 返回首页</a>
+        </p>
     </div>
 </body>
 </html>
 """
 
 
-# v3.7 · 报告列表的「单行模板」（admin 后台 / 状态页共用）
+# v3.7.1 · 报告列表的「单行模板」（admin 后台 / 状态页共用）
 # - PDF 链接灰显：v3.7 PDF 暂未开放（生成但不下载，强制走海报分享）
 # - HTML / MD 保持原样可用
+# - 状态 pill / 链接 统一 emerald 主色（与首页一致）
 LIST_REPORTS_HTML = """
 {# 单个报告在列表中的一行（含 HTML / PDF / MD 三个操作 pill） #}
 <td class="px-6 py-3 space-x-2">
   {% if task.html %}
-  <a href="{{ task.html }}" target="_blank" class="text-blue-600 hover:underline text-xs">HTML</a>
+  <a href="{{ task.html }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">HTML</a>
   {% endif %}
   {# v3.7 · PDF 灰显 pill：暂不开放，引导走海报分享 #}
   {% if task.pdf %}
   <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded cursor-not-allowed" title="v3.7 暂未开放 PDF 版本">🔒 PDF 暂未开放</span>
   {% endif %}
   {% if task.md %}
-  <a href="{{ task.md }}" target="_blank" class="text-blue-600 hover:underline text-xs">MD</a>
+  <a href="{{ task.md }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">MD</a>
   {% endif %}
   {% if task.can_rebuild %}
   <form method="post" action="/admin/rebuild-html/{{ task.id }}" class="inline">
-    <button type="submit" class="text-xs text-indigo-600 hover:underline">重建 HTML</button>
+    <button type="submit" class="text-xs text-emerald-700 hover:underline font-semibold">重建 HTML</button>
   </form>
   {% endif %}
 </td>
@@ -2026,6 +2323,9 @@ def rebuild_existing_report_html(task_id: str, export_pdf: bool = False) -> str:
             pdf=pdf_url,
             message="已重建 HTML/PDF 报告" if export_pdf else "已重建 HTML 报告",
         )
+
+    # v3.7 · 重建后继续维持 hide_pdf=1
+    _record_hide_pdf(task_id)
     return html_url
 
 
@@ -2036,30 +2336,37 @@ ADMIN_LOGIN_HTML = """
     <meta charset="UTF-8">
     <title>管理员登录 - 洛谷 AI 测评报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-md">
-        <h1 class="text-2xl font-bold text-blue-900 mb-2">管理员登录</h1>
-        <p class="text-sm text-gray-500 mb-6">请输入管理员账号和密码后访问后台管理页面。</p>
+<body class="app-body p-4 flex items-center justify-center">
+    <div class="app-card max-w-md w-full">
+        <div class="text-center mb-4">
+            <div class="text-4xl mb-2">🔐</div>
+            <h1 class="app-title">管理员登录</h1>
+            <p class="app-subtitle">洛谷 AI 测评报告 · 后台管理</p>
+        </div>
         {% if error %}
-        <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</div>
+        <div class="app-box app-box-red mb-4">{{ error }}</div>
         {% endif %}
         {% if notice %}
-        <div class="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{{ notice }}</div>
+        <div class="app-box app-box-green mb-4">{{ notice }}</div>
         {% endif %}
         <form method="post" action="/admin/login" class="space-y-4">
             <input type="hidden" name="next" value="{{ next_url }}">
             <div>
-                <label class="block text-sm font-medium text-gray-700">管理员账号</label>
-                <input type="text" name="username" value="{{ username }}" required class="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                <label class="app-label">管理员账号</label>
+                <input type="text" name="username" value="{{ username }}" required class="app-input" autocomplete="username">
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-700">管理员密码</label>
-                <input type="password" name="password" required class="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                <label class="app-label">管理员密码</label>
+                <input type="password" name="password" required class="app-input" autocomplete="current-password">
             </div>
-            <button type="submit" class="w-full rounded-md bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 transition">登录后台</button>
+            <button type="submit" class="app-btn app-btn-primary">登录后台</button>
         </form>
-        <p class="mt-4 text-xs text-gray-400">可通过环境变量 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`ADMIN_SESSION_SECRET` 配置管理员登录。</p>
+        <p class="mt-4 text-xs text-gray-400 text-center">可通过环境变量 <code class="font-mono">ADMIN_USERNAME</code>、<code class="font-mono">ADMIN_PASSWORD</code>、<code class="font-mono">ADMIN_SESSION_SECRET</code> 配置管理员登录。</p>
+        <p class="mt-3 text-center">
+            <a href="/" class="text-xs text-emerald-700 hover:underline">← 返回首页</a>
+        </p>
     </div>
 </body>
 </html>
@@ -2075,110 +2382,113 @@ ADMIN_HTML = """
     <title>后台管理 - 洛谷 AI 测评报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <meta http-equiv="refresh" content="10">
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
-    <div class="max-w-6xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
-            <h1 class="text-3xl font-bold text-blue-900">后台管理</h1>
-            <div class="flex items-center gap-4">
-                <span class="text-sm text-gray-500">管理员：{{ admin_user }}</span>
-                <a href="/admin/students" class="text-blue-600 hover:underline">学员档案</a>
-                <a href="/" class="text-blue-600 hover:underline">返回首页</a>
+<body class="app-body p-6">
+    <div class="max-w-6xl mx-auto space-y-4">
+        <div class="app-card flex items-center justify-between">
+            <div>
+                <h1 class="app-title">🛠 后台管理</h1>
+                <p class="app-subtitle">洛谷 AI 测评报告 · 任务总览</p>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <span class="text-gray-500">管理员：<span class="font-semibold text-emerald-700">{{ admin_user }}</span></span>
+                <a href="/admin/students" class="app-link">学员档案</a>
+                <a href="/" class="app-link">返回首页</a>
                 <a href="/admin/logout" class="text-red-600 hover:underline">退出登录</a>
             </div>
         </div>
+
         {% if notice %}
-        <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">
-            {{ notice }}
-        </div>
+        <div class="app-box {% if notice_type == 'error' %}app-box-red{% else %}app-box-green{% endif %}">{{ notice }}</div>
         {% endif %}
 
         <!-- 统计卡片 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-xl shadow p-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="app-card">
                 <p class="text-sm text-gray-500">总生成次数</p>
-                <p class="text-2xl font-bold text-blue-700">{{ total_tasks }}</p>
+                <p class="text-2xl font-extrabold text-emerald-700">{{ total_tasks }}</p>
             </div>
-            <div class="bg-white rounded-xl shadow p-4">
+            <div class="app-card">
                 <p class="text-sm text-gray-500">今日生成</p>
-                <p class="text-2xl font-bold text-green-700">{{ today_tasks }}</p>
+                <p class="text-2xl font-extrabold text-emerald-600">{{ today_tasks }}</p>
             </div>
-            <div class="bg-white rounded-xl shadow p-4">
+            <div class="app-card">
                 <p class="text-sm text-gray-500">进行中</p>
-                <p class="text-2xl font-bold text-yellow-600">{{ running_tasks }}</p>
+                <p class="text-2xl font-extrabold text-amber-600">{{ running_tasks }}</p>
             </div>
-            <div class="bg-white rounded-xl shadow p-4">
+            <div class="app-card">
                 <p class="text-sm text-gray-500">失败次数</p>
-                <p class="text-2xl font-bold text-red-600">{{ error_tasks }}</p>
+                <p class="text-2xl font-extrabold text-rose-600">{{ error_tasks }}</p>
             </div>
         </div>
 
         <!-- 历史任务列表 -->
-        <div class="bg-white rounded-xl shadow overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-200">
-                <h2 class="text-lg font-semibold text-gray-800">历史任务列表</h2>
+        <div class="app-card p-0 overflow-hidden">
+            <div class="px-6 py-4 border-b border-emerald-100">
+                <h2 class="text-lg font-bold text-emerald-900">📋 历史任务列表</h2>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full text-sm text-left">
-                    <thead class="bg-gray-50 text-gray-600 font-medium">
+                <table class="app-table">
+                    <thead>
                         <tr>
-                            <th class="px-6 py-3">任务 ID</th>
-                            <th class="px-6 py-3">姓名</th>
-                            <th class="px-6 py-3">学校</th>
-                            <th class="px-6 py-3">年级</th>
-                            <th class="px-6 py-3">通过题数</th>
-                            <th class="px-6 py-3">失败题数</th>
-                            <th class="px-6 py-3">状态</th>
-                            <th class="px-6 py-3">时间</th>
-                            <th class="px-6 py-3">操作</th>
+                            <th>任务 ID</th>
+                            <th>姓名</th>
+                            <th>学校</th>
+                            <th>年级</th>
+                            <th>通过</th>
+                            <th>失败</th>
+                            <th>状态</th>
+                            <th>时间</th>
+                            <th>操作</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100">
+                    <tbody>
                         {% for task in tasks %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-6 py-3 font-mono text-xs text-gray-500">{{ task.id[:8] }}...</td>
-                            <td class="px-6 py-3 font-medium text-gray-900">{{ task.name }}</td>
-                            <td class="px-6 py-3 text-gray-600">{{ task.school }}</td>
-                            <td class="px-6 py-3 text-gray-600">{{ task.grade }}</td>
-                            <td class="px-6 py-3 text-green-700 font-semibold">{{ task.solved }}</td>
-                            <td class="px-6 py-3 text-red-600 font-semibold">{{ task.failed }}</td>
-                            <td class="px-6 py-3">
+                        <tr>
+                            <td class="font-mono text-xs text-gray-500">{{ task.id[:8] }}...</td>
+                            <td class="font-medium text-gray-900">{{ task.name }}</td>
+                            <td>{{ task.school }}</td>
+                            <td>{{ task.grade }}</td>
+                            <td class="text-emerald-700 font-semibold">{{ task.solved }}</td>
+                            <td class="text-rose-600 font-semibold">{{ task.failed }}</td>
+                            <td>
                                 {% if task.status == 'done' %}
-                                    <span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">完成</span>
+                                    <span class="app-pill app-pill-done">完成</span>
                                 {% elif task.status == 'error' %}
-                                    <span class="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800">失败</span>
+                                    <span class="app-pill app-pill-error">失败</span>
                                 {% elif task.status == 'running' %}
-                                    <span class="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">进行中</span>
+                                    <span class="app-pill app-pill-running">进行中</span>
                                 {% else %}
-                                    <span class="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-800">{{ task.status }}</span>
+                                    <span class="app-pill app-pill-muted">{{ task.status }}</span>
                                 {% endif %}
                             </td>
-                            <td class="px-6 py-3 text-gray-500 text-xs">{{ task.time }}</td>
-                            <td class="px-6 py-3 space-x-2">
+                            <td class="text-xs text-gray-500">{{ task.time }}</td>
+                            <td class="space-y-1">
                                 {% if task.html %}
-                                <a href="{{ task.html }}" target="_blank" class="text-blue-600 hover:underline text-xs">HTML</a>
+                                <a href="{{ task.html }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">HTML</a>
                                 {% endif %}
                                 {% if task.pdf %}
                                 {# v3.7 · PDF 暂未开放：灰显 pill，强制走海报分享 #}
-                                <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded cursor-not-allowed" title="v3.7 暂未开放 PDF 版本">🔒 PDF 暂未开放</span>
+                                <span class="text-xs px-2 py-0.5 bg-gray-200 text-gray-500 rounded cursor-not-allowed ml-1" title="v3.7 暂未开放 PDF 版本">🔒 PDF</span>
                                 {% endif %}
                                 {% if task.md %}
-                                <a href="{{ task.md }}" target="_blank" class="text-blue-600 hover:underline text-xs">MD</a>
+                                <a href="{{ task.md }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold ml-1">MD</a>
                                 {% endif %}
                                 {% if task.can_rebuild %}
-                                <form method="post" action="/admin/rebuild-html/{{ task.id }}" class="inline">
-                                    <button type="submit" class="text-xs text-indigo-600 hover:underline">重建 HTML</button>
+                                <form method="post" action="/admin/rebuild-html/{{ task.id }}" class="inline-block ml-1">
+                                    <button type="submit" class="text-xs text-emerald-700 hover:underline font-semibold">重建 HTML</button>
                                 </form>
                                 {% endif %}
                                 {% if task.rebuild_status == 'running' %}
-                                <span class="text-xs text-amber-600">重建中...</span>
+                                <div class="text-xs text-amber-600">重建中...</div>
                                 {% elif task.rebuild_status == 'done' %}
-                                <span class="text-xs text-green-600">已重建</span>
+                                <div class="text-xs text-emerald-600">已重建</div>
                                 {% elif task.rebuild_status == 'error' %}
-                                <span class="text-xs text-red-600">重建失败</span>
+                                <div class="text-xs text-rose-600">重建失败</div>
                                 {% endif %}
                                 {% if task.rebuild_message %}
-                                <span class="block mt-1 text-[11px] text-gray-500">{{ task.rebuild_message }}</span>
+                                <div class="text-[11px] text-gray-500">{{ task.rebuild_message }}</div>
                                 {% endif %}
                             </td>
                         </tr>
@@ -2543,14 +2853,13 @@ STUDENT_REPORT_HTML = """
     <meta charset="UTF-8">
     <title>🎓 学员版报告 · {{ student.real_name or luogu_uid }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#fef3c7 0%,#ecfdf5 50%,#dbeafe 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
-        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
         .progress-fill{transition:width 1s ease;}
         .medal{font-size:36px;display:inline-block;filter:drop-shadow(0 2px 4px rgba(0,0,0,.1));}
     </style>
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-3xl mx-auto py-6 space-y-4">
 
     <!-- 头部：欢迎 + 段位大徽章 -->
@@ -2696,12 +3005,12 @@ PARENT_REPORT_HTML = """
     <meta charset="UTF-8">
     <title>👨‍👩‍👧 家长版报告 · {{ student.real_name or '' }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 50%,#fde68a 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
         .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
     </style>
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-3xl mx-auto py-6 space-y-4">
 
     <!-- 头部：完整档案 -->
@@ -2790,8 +3099,8 @@ PARENT_SUBSCRIBE_HTML = """
     <meta charset="UTF-8">
     <title>📨 家长订阅版 · {{ student.real_name or luogu_uid }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#fef3c7 0%,#fce7f3 50%,#e0e7ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
         .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
         .gradient-text{background:linear-gradient(90deg,#f59e0b,#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent;}
         .countdown-pill{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;}
@@ -2799,7 +3108,7 @@ PARENT_SUBSCRIBE_HTML = """
         .copy-btn:hover{background:#f3f4f6;}
     </style>
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-4xl mx-auto py-6 space-y-4">
 
     <!-- 头部：付费版品牌 + 学员信息 -->
@@ -3069,8 +3378,8 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
     <meta charset="UTF-8">
     <title>📨 {{ student_name }} 的家长订阅版</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#fef3c7 0%,#fce7f3 50%,#e0e7ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;}
         .container{max-width:920px;margin:0 auto;padding:24px 16px;}
         .card{background:#fff;border-radius:18px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:32px;margin-bottom:16px;}
         .ai-body h1{font-size:1.5rem;font-weight:800;margin:24px 0 12px;color:#1f2937;}
@@ -3088,7 +3397,7 @@ _PARENT_SUBSCRIBE_SHELL_HTML = """
         .ai-body strong{color:#b45309;}
     </style>
 </head>
-<body>
+<body class="app-body">
 <div class="container">
     <div class="card">
         <div class="flex items-center justify-between flex-wrap gap-3">
@@ -3135,12 +3444,12 @@ COACH_REPORT_HTML = """
     <meta charset="UTF-8">
     <title>🎯 教练版报告 · 信竞 AI 报告 v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#f1f5f9 0%,#e0e7ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
         .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
     </style>
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-5xl mx-auto py-6 space-y-4">
 
     <!-- 头部 -->
@@ -3289,8 +3598,9 @@ ADMIN_STUDENTS_LIST_HTML = """
     <meta charset="UTF-8">
     <title>学员档案 - 后台管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-6xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">学员档案</h1>
@@ -3370,8 +3680,9 @@ ADMIN_STUDENTS_NEW_HTML = """
     <meta charset="UTF-8">
     <title>新建学员 - 后台管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-2xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">新建学员</h1>
@@ -3444,8 +3755,9 @@ ADMIN_STUDENTS_DETAIL_HTML = """
     <meta charset="UTF-8">
     <title>学员详情 - 后台管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-5xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">学员 #{{ student.id }} {{ student.real_name or ('UID-' + student.luogu_uid) }}</h1>
@@ -3564,8 +3876,9 @@ ADMIN_STUDENTS_GESP_NEW_HTML = """
     <meta charset="UTF-8">
     <title>录入 GESP 成绩 - 后台管理</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-2xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">录入 GESP 成绩</h1>
@@ -3806,8 +4119,8 @@ GENERATE_FORM_HTML = """
     <meta charset="UTF-8">
     <title>🎓 AI 生成学习报告 · 信竞 AI 报告 v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
         .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
         .field-section{border-left:4px solid #059669;padding-left:12px;margin-bottom:16px;}
         .field-section h3{font-size:14px;font-weight:800;color:#047857;margin-bottom:8px;}
@@ -3818,14 +4131,15 @@ GENERATE_FORM_HTML = """
         .app-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;border:none;}
         .app-btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(5,150,105,.3);}
     </style>
+    {{ app_skin_head() }}
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-2xl mx-auto py-6 space-y-4">
 
     <div class="text-center mb-4">
         <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">🎯 v3.5.2 统一入口</span>
         <h1 class="text-2xl font-extrabold text-gray-800 mt-2">🎓 AI 生成学习报告</h1>
-        <p class="text-sm text-gray-500 mt-1">一次性填写 · 30 秒出报告 · 3 版本报告 + 错题本 + 段位</p>
+        <p class="text-sm text-gray-500 mt-1">一次性填写 · 3 分钟出报告 · 3 版本报告 + 错题本 + 段位</p>
     </div>
 
     {% if error %}
@@ -4077,13 +4391,13 @@ GENERATE_FORM_HTML = """
 
 @app.route("/select-mode", methods=["GET", "POST"])
 def select_mode():
-    """v3.5.2 老用户快速入口（已注册选手输 UID 直接看报告，不生成新报告）"""
+    """v3.6 老用户快速入口：输 UID → 直接展示该选手所有历史报告（html/pdf）"""
     import re as _re
     import os as _os
     _uid_guide_exists = _os.path.exists(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "static", "uid_guide.png"))
     if request.method == "GET":
         return render_template_string(SELECT_MODE_HTML, error=None, form={}, static_exists_uid_guide=_uid_guide_exists)
-    # POST 接收 luogu_uid → 校验 → 引导身份
+    # POST 接收 luogu_uid → 校验 → 扫 reports/ 下该 UID 的所有报告
     luogu_uid = (request.form.get("luogu_uid") or "").strip()
     if not _re.match(r"^\d{6,10}$", luogu_uid):
         return render_template_string(
@@ -4092,13 +4406,20 @@ def select_mode():
             form={"luogu_uid": luogu_uid},
             static_exists_uid_guide=_uid_guide_exists,
         ), 400
-    # 查询是否已注册
+    # 1) 已注册 → 走 /me/<uid>（个人中心也带历史报告，但入口直达列表更快）
     stu = _admin_students.get_student_by_uid(luogu_uid)
     if stu:
-        # 已注册 → 进入 /me/<uid>（内部自动引导选身份）
         return redirect(url_for("student_me", luogu_uid=luogu_uid))
-    # 未注册 → /register（4 字段·预填 UID）
-    return redirect(url_for("register_student") + f"?luogu_uid={luogu_uid}")
+    # 2) 未注册 / 任意用户 → 直接扫 reports/ 找该 UID 所有报告
+    reports = _list_reports_for_uid(luogu_uid)
+    if not reports:
+        return render_template_string(
+            SELECT_MODE_HTML,
+            error=f"UID {luogu_uid} 暂无历史报告（请先在首页生成新报告）",
+            form={"luogu_uid": luogu_uid},
+            static_exists_uid_guide=_uid_guide_exists,
+        ), 404
+    return render_template_string(LIST_REPORTS_HTML, luogu_uid=luogu_uid, reports=reports)
 
 
 SELECT_MODE_HTML = """
@@ -4108,8 +4429,8 @@ SELECT_MODE_HTML = """
     <meta charset="UTF-8">
     <title>选择报告版本 · 信竞 AI 报告 v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
         .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
         .big-btn{display:flex;align-items:center;justify-content:center;width:100%;border-radius:12px;padding:14px;font-weight:800;transition:all .15s ease;cursor:pointer;}
         .big-btn-primary{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;}
@@ -4117,22 +4438,23 @@ SELECT_MODE_HTML = """
         .big-btn-secondary{background:#fff;color:#047857;border:2px solid #6ee7b7;}
         .big-btn-secondary:hover{background:#ecfdf5;}
     </style>
+    {{ app_skin_head() }}
 </head>
-<body class="p-4">
+<body class="app-body p-4">
 <div class="max-w-2xl mx-auto py-6 space-y-4">
 
     <div class="bg-white rounded-2xl card-shadow p-6">
         <div class="text-center mb-4">
-            <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">v3.5.2</span>
-            <h1 class="text-2xl font-extrabold text-gray-800 mt-2">🎓 AI 生成学习报告</h1>
-            <p class="text-sm text-gray-500 mt-1">基于洛谷做题数据 + 30 秒 AI 分析</p>
+            <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">📁 历史报告</span>
+            <h1 class="text-2xl font-extrabold text-gray-800 mt-2">📚 查看历史报告</h1>
+            <p class="text-sm text-gray-500 mt-1">输入洛谷 UID · 一次性展示该选手历次生成的全部报告（HTML / PDF）</p>
         </div>
 
         <form method="post" class="space-y-3">
             <div>
                 <label class="block text-sm font-bold text-gray-700 mb-1">洛谷 UID <span class="text-red-500">*</span></label>
                 <input name="luogu_uid" inputmode="numeric" pattern="\\d{6,10}" required placeholder="请输入 6-10 位数字 UID" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200" value="{{ form.get('luogu_uid','') }}">
-                <p class="text-xs text-gray-400 mt-1">首次使用？先输入 UID，系统会引导你完成 4 字段注册（地域/年龄是报告核心数据）</p>
+                <p class="text-xs text-gray-400 mt-1">没找到该 UID 的报告？请先到 <a href="/" class="text-emerald-600 hover:underline">首页</a> 生成新报告</p>
 
                 <!-- UID 获取图文指引（点击展开 / 折叠） -->
                 <details class="mt-2">
@@ -4169,16 +4491,94 @@ SELECT_MODE_HTML = """
             <div class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{{ error }}</div>
             {% endif %}
 
-            <button type="submit" class="big-btn big-btn-primary">🚀 立即生成我的学习报告</button>
+            <button type="submit" class="big-btn big-btn-primary">🔍 查看历史报告</button>
         </form>
     </div>
 
-    <div class="bg-white rounded-2xl card-shadow p-5 text-center">
-        <p class="text-xs text-gray-500">没有洛谷账号？</p>
-        <a href="/register" class="text-emerald-600 hover:underline text-sm">前往 4 字段极简注册 →</a>
+    <p class="text-center text-xs text-gray-400">信竞 AI 报告 · v3.5.2</p>
+</div>
+</body>
+</html>
+"""
+
+LIST_REPORTS_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>历史报告列表 · UID {{ luogu_uid }} · v3.6</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#ecfdf5 0%,#f0f9ff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+        .file-pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:9999px;font-size:12px;font-weight:600;text-decoration:none;transition:all .15s ease;border:1px solid transparent;}
+        .pill-html{background:#dbeafe;color:#1d4ed8;}
+        .pill-html:hover{background:#bfdbfe;border-color:#3b82f6;}
+        .pill-pdf{background:#fee2e2;color:#b91c1c;}
+        .pill-pdf:hover{background:#fecaca;border-color:#ef4444;}
+        .pill-md{background:#f3f4f6;color:#4b5563;}
+        .pill-md:hover{background:#e5e7eb;border-color:#6b7280;}
+        .pill-missing{background:#f3f4f6;color:#9ca3af;cursor:not-allowed;opacity:.55;}
+        .report-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px 18px;transition:all .2s ease;}
+        .report-card:hover{border-color:#10b981;box-shadow:0 8px 20px rgba(16,185,129,.10);}
+        .badge{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#6b7280;background:#f9fafb;padding:2px 6px;border-radius:4px;}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-3xl mx-auto py-6 space-y-4">
+
+    <!-- 顶部 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+                <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">📁 历史报告</span>
+                <h1 class="text-2xl font-extrabold text-gray-800 mt-2">📚 UID {{ luogu_uid }} 的历史报告</h1>
+                <p class="text-sm text-gray-500 mt-1">共找到 <b class="text-emerald-700">{{ reports|length }}</b> 份历史报告（按时间倒序）</p>
+            </div>
+            <a href="/select-mode" class="text-sm text-emerald-700 hover:underline whitespace-nowrap">← 返回重新输入</a>
+        </div>
     </div>
 
-    <p class="text-center text-xs text-gray-400">信竞 AI 报告 · v3.5.2</p>
+    <!-- 报告列表 -->
+    {% for r in reports %}
+    <div class="report-card">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-base font-bold text-gray-800 truncate">📄 {{ r.task_id }} <span class="text-gray-400">·</span> {{ r.name }}</span>
+                    {% if r.is_latest %}<span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">最新</span>{% endif %}
+                </div>
+                <div class="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span>🕒 {{ r.mtime_str }}</span>
+                    <span class="opacity-40">|</span>
+                    <span class="badge">{{ r.file_count }} 个文件</span>
+                </div>
+                <!-- 文件链接 -->
+                <div class="mt-3 flex items-center gap-1.5 flex-wrap">
+                    {% for f in r.files %}
+                    {% if f.exists %}
+                    <a href="{{ f.url }}" target="_blank" class="file-pill pill-{{ f.kind }}">{% if f.kind=='html' %}🌐{% elif f.kind=='pdf' %}📕{% else %}📝{% endif %} {{ f.label }}</a>
+                    {% else %}
+                    <span class="file-pill pill-missing" title="该文件暂未生成">{% if f.kind=='html' %}🌐{% elif f.kind=='pdf' %}📕{% else %}📝{% endif %} {{ f.label }} · 未生成</span>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    {% if reports|length == 0 %}
+    <div class="bg-white rounded-2xl card-shadow p-6 text-center text-gray-500 text-sm">
+        未找到该 UID 的历史报告。
+    </div>
+    {% endif %}
+
+    <!-- 底部 -->
+    <div class="text-center text-xs text-gray-400 space-y-1">
+        <div>没有你要的报告？<a href="/" class="text-emerald-600 hover:underline">去首页生成新报告 →</a></div>
+        <div>信竞 AI 报告 · v3.6</div>
+    </div>
 </div>
 </body>
 </html>
@@ -4511,8 +4911,8 @@ ADMIN_CODES_HTML = """
     <meta charset="UTF-8">
     <title>兑换码管理 · 信竞 AI 报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:#f9fafb;}
         .card{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);padding:18px;}
         .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
         .code-cell{font-family:"JetBrains Mono","SF Mono",Consolas,monospace;letter-spacing:.5px;}
@@ -4520,7 +4920,7 @@ ADMIN_CODES_HTML = """
         .highlight-cell{background:#fde68a;padding:1px 4px;border-radius:3px;}
     </style>
 </head>
-<body class="min-h-screen p-4">
+<body class="app-body min-h-screen p-4">
 <div class="max-w-6xl mx-auto space-y-4">
     <div class="flex items-center justify-between">
         <div>
@@ -4677,8 +5077,8 @@ REDEEM_HTML = """
     <meta charset="UTF-8">
     <title>兑换码激活 · 信竞 AI 报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#fef3c7 0%,#fed7aa 100%);min-height:100vh;}
         .sku-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;}
         .sku-card.pro{border-color:#f59e0b;background:linear-gradient(135deg,#fffbeb,#fef3c7);}
         .sku-card.parent{border-color:#3b82f6;background:linear-gradient(135deg,#eff6ff,#dbeafe);}
@@ -4686,7 +5086,7 @@ REDEEM_HTML = """
         .sku-card.camp-s{border-color:#ef4444;background:linear-gradient(135deg,#fef2f2,#fee2e2);}
     </style>
 </head>
-<body class="flex items-center justify-center p-4">
+<body class="app-body flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-2xl">
         <div class="text-center mb-5">
             <div class="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-full mb-2">v3.5.2 · 兑换码激活</div>
@@ -4784,11 +5184,11 @@ COACH_LANDING_HTML = """
     <meta charset="UTF-8">
     <title>教练版咨询 · 信竞 AI 报告 · v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#e0e7ff 0%,#cffafe 100%);min-height:100vh;}
     </style>
 </head>
-<body class="flex items-center justify-center p-4">
+<body class="app-body flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-2xl">
         <div class="text-center mb-6">
             <div class="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full mb-2">v3.5.2 · 教练版 B2B</div>
@@ -5277,14 +5677,14 @@ _ME_PICKER_HTML = """
 <title>进入个人中心 · 洛谷 AI 教练</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.tailwindcss.com"></script>
-<style>body{background:#F0FDF4;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}</style>
+{{ app_skin_head() }}
 </head>
-<body class="min-h-screen flex items-center justify-center p-4">
-  <div class="bg-white rounded-2xl shadow-lg border border-emerald-100 p-6 w-full max-w-md space-y-4">
+<body class="app-body min-h-screen flex items-center justify-center p-4">
+  <div class="app-card max-w-md w-full space-y-4">
     <div class="text-center">
       <div class="text-4xl mb-1">👋</div>
-      <h1 class="text-xl font-bold text-gray-800">进入个人中心</h1>
-      <p class="text-xs text-gray-500 mt-1">输入你的洛谷 UID，查看 3 版本学习报告（学员·家长·教练）</p>
+      <h1 class="app-title">进入个人中心</h1>
+      <p class="app-subtitle">输入你的洛谷 UID，查看 3 版本学习报告（学员·家长·教练）</p>
     </div>
 
     <form id="meForm" action="/me/0" method="get" class="space-y-3"
@@ -5292,13 +5692,11 @@ _ME_PICKER_HTML = """
                     var u=document.getElementById('meUid').value.trim();
                     if(!/^\\d{6,10}$/.test(u)){alert('请输入 6-10 位洛谷 UID');return;}
                     window.location.href='/me/'+u;">
-      <label class="block text-sm font-medium text-gray-700">洛谷 UID</label>
+      <label class="app-label">洛谷 UID</label>
       <input id="meUid" type="text" inputmode="numeric" pattern="\\d{6,10}"
              placeholder="如：582694（6-10 位数字）"
-             class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-emerald-400 focus:border-emerald-500"
-             autofocus required>
-      <button type="submit"
-              class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 rounded-md transition">
+             class="app-input" autofocus required>
+      <button type="submit" class="app-btn app-btn-primary">
         进入个人中心 →
       </button>
     </form>
@@ -5306,8 +5704,8 @@ _ME_PICKER_HTML = """
     <div class="border-t border-gray-200 pt-3 text-xs text-gray-500 space-y-1">
       <p>💡 不知道自己的 UID？</p>
       <ul class="list-disc list-inside space-y-0.5 text-gray-600">
-        <li>登录 <a href="https://www.luogu.com.cn" target="_blank" class="text-emerald-600 hover:underline">luogu.com.cn</a>，点右上角头像，URL 里的数字就是 UID</li>
-        <li>还没生成报告？<a href="/" class="text-emerald-600 hover:underline">先去生成 →</a></li>
+        <li>登录 <a href="https://www.luogu.com.cn" target="_blank" class="app-link">luogu.com.cn</a>，点右上角头像，URL 里的数字就是 UID</li>
+        <li>还没生成报告？<a href="/" class="app-link">先去生成 →</a></li>
       </ul>
     </div>
   </div>
@@ -5317,6 +5715,201 @@ _ME_PICKER_HTML = """
 
 
 @app.route("/me", methods=["GET"])
+@app.route("/studymate/ai-tutor", methods=["GET", "POST"])
+def studymate_ai_tutor():
+    """v3.6 · StudyMate AI 讲题入口
+
+    接收来自 /me/<uid> 错题集的「AI 讲题」按钮：
+      - GET  ?uid=&pid=&title=&source=&summary=  → 展示该错题 + 「开始 AI 讲题」表单
+      - POST （带 problem_id）→ 启动 StudyMate 讲题（v3.6 stub：渲染「AI 正在生成专属题解」占位页，
+        后续接 LLM 时把 prompt + problem_id 交给 StudyMate worker 即可）
+
+    设计目标：
+      1) 把错题信息（题号 / 标题 / 来源 / AI 摘要 / 错因）打包好交给 StudyMate
+      2) 家长订阅门控：未订阅 → 引导去 /redeem
+      3) 生成的讲题结果落盘到 reports/<uid>/studymate/<pid>.md（v3.6 暂以 session-only 占位）
+    """
+    luogu_uid = (request.values.get("uid") or "").strip()
+    problem_id = (request.values.get("pid") or "").strip()
+    title = (request.values.get("title") or "").strip()
+    prob_source = (request.values.get("source") or "").strip()
+    summary = (request.values.get("summary") or "").strip()
+
+    if not luogu_uid or not problem_id:
+        return render_template_string(
+            STUDYMATE_TUTOR_HTML,
+            error="缺少必要参数：uid / pid",
+            luogu_uid=luogu_uid,
+            problem_id=problem_id,
+            title=title,
+            prob_source=prob_source,
+            summary=summary,
+            has_parent_sub=False,
+            status="error",
+        ), 400
+
+    # 家长订阅门控（与 /me/<uid> 同源逻辑）
+    has_parent_sub = False
+    try:
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM activation_codes ac "
+                "JOIN students s ON s.id = ac.student_id "
+                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
+                "AND ac.redeemed_at IS NOT NULL "
+                "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
+                (str(luogu_uid).strip(),),
+            ).fetchone()
+        finally:
+            conn.close()
+        has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
+    except Exception:
+        has_parent_sub = False
+
+    # POST：启动 AI 讲题（v3.6 stub：渲染进度页）
+    if request.method == "POST":
+        return render_template_string(
+            STUDYMATE_TUTOR_HTML,
+            error=None,
+            luogu_uid=luogu_uid,
+            problem_id=problem_id,
+            title=title,
+            prob_source=prob_source,
+            summary=summary,
+            has_parent_sub=has_parent_sub,
+            status="starting",
+        )
+
+    return render_template_string(
+        STUDYMATE_TUTOR_HTML,
+        error=None,
+        luogu_uid=luogu_uid,
+        problem_id=problem_id,
+        title=title,
+        prob_source=prob_source,
+        summary=summary,
+        has_parent_sub=has_parent_sub,
+        status="idle",
+    )
+
+
+STUDYMATE_TUTOR_HTML = r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyMate AI 讲题 · {{ problem_id or "—" }} · UID {{ luogu_uid }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{background:linear-gradient(135deg,#eff6ff 0%,#ecfeff 100%);min-height:100vh;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
+        .card-shadow{box-shadow:0 10px 25px rgba(0,0,0,.06);}
+        .pulse-dot{width:8px;height:8px;border-radius:50%;background:#3b82f6;display:inline-block;animation:pulse 1.2s infinite;}
+        @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(1.4);}}
+        .lock-box{background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #f59e0b;}
+    </style>
+</head>
+<body class="p-4">
+<div class="max-w-2xl mx-auto py-6 space-y-4">
+
+    <!-- 顶部 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">🤖 StudyMate</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">AI 讲题</span>
+            {% if has_parent_sub %}<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">✅ 已解锁</span>{% else %}<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">🔒 需家长订阅</span>{% endif %}
+        </div>
+        <h1 class="text-2xl font-extrabold text-gray-800">📖 {{ problem_id or "—" }} · {{ title or "(无标题)" }}</h1>
+        <p class="text-sm text-gray-500 mt-1">{% if prob_source %}来源：{{ prob_source }} · {% endif %}学员 UID {{ luogu_uid }}</p>
+    </div>
+
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 rounded-2xl card-shadow p-5 text-sm text-red-700">
+        ❌ {{ error }}
+        <div class="mt-2"><a href="/me/{{ luogu_uid }}" class="text-red-700 underline">← 返回个人中心</a></div>
+    </div>
+    {% endif %}
+
+    <!-- 错题上下文（已自动传入） -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <h2 class="text-sm font-bold text-gray-700 mb-2">📦 已传给 StudyMate 的错题上下文</h2>
+        <div class="space-y-2 text-sm">
+            <div class="flex gap-2"><span class="text-gray-500 w-16">题号</span><span class="font-mono font-bold text-blue-700">{{ problem_id or "—" }}</span></div>
+            <div class="flex gap-2"><span class="text-gray-500 w-16">标题</span><span class="text-gray-800">{{ title or "—" }}</span></div>
+            {% if prob_source %}<div class="flex gap-2"><span class="text-gray-500 w-16">来源</span><span class="text-purple-700">{{ prob_source }}</span></div>{% endif %}
+            {% if summary %}
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mt-2">
+                <div class="text-xs text-gray-500 mb-1">AI 题解摘要</div>
+                <div class="text-sm text-gray-700 leading-relaxed">{{ summary }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not has_parent_sub %}
+    <!-- 家长订阅门控 -->
+    <div class="lock-box rounded-2xl card-shadow p-5">
+        <h2 class="text-base font-bold text-amber-800 mb-2">🔒 AI 讲题 · 需家长订阅</h2>
+        <p class="text-sm text-amber-900 mb-3 leading-relaxed">StudyMate AI 讲题是「家长订阅」会员功能。家长加 V 兑换 <code class="font-mono bg-white px-1.5 py-0.5 rounded text-xs">PARENT-SUB-XXXX</code> 后，AI 讲题自动解锁。</p>
+        <a href="/redeem" class="inline-block px-4 py-2 bg-amber-500 text-white text-sm font-bold rounded-lg hover:bg-amber-600">🎁 兑换家长订阅码</a>
+        <a href="/me/{{ luogu_uid }}" class="inline-block px-4 py-2 border border-amber-300 text-amber-800 text-sm font-bold rounded-lg hover:bg-amber-50 ml-1">← 返回个人中心</a>
+    </div>
+    {% else %}
+    <!-- 启动 / 进度 -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        {% if status == "starting" %}
+        <h2 class="text-base font-bold text-blue-700 mb-2 flex items-center gap-2">
+            <span class="pulse-dot"></span> AI 正在为你生成专属题解…
+        </h2>
+        <p class="text-sm text-gray-600 leading-relaxed mb-3">
+            StudyMate 正在基于学员 UID <code class="font-mono">{{ luogu_uid }}</code> 的 <b>知识点盲区 / 错题历史 / 提交行为</b>，
+            为 <b>{{ problem_id }} {{ title }}</b> 生成「从暴力到正解」的专属讲解（v3.6 接入真实 LLM 后即时返回）。
+        </p>
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            <div class="font-bold mb-1">📋 讲题 Prompt 已组装：</div>
+            <pre class="whitespace-pre-wrap font-mono text-[11px] leading-relaxed mt-1">题目：{{ problem_id }} {{ title }}{% if prob_source %}（{{ prob_source }}）{% endif %}
+
+学员背景：
+- UID: {{ luogu_uid }}
+- 错因摘要：{{ summary or "(无)" }}
+
+请生成：
+1. 暴力思路（30% 估分）
+2. 瓶颈分析（时间/空间）
+3. 关键性质/不变量观察
+4. 正解代码（C++/Python 均可）
+5. 与本学员能力短板关联的训练建议</pre>
+        </div>
+        <div class="mt-3 text-xs text-gray-500">v3.6 stub：StudyMate 真实讲题 worker 待接入；当前已展示完整 prompt，便于对接。</div>
+        {% else %}
+        <h2 class="text-base font-bold text-gray-800 mb-2">🚀 准备启动 AI 讲题</h2>
+        <p class="text-sm text-gray-600 mb-3">点击下方按钮，StudyMate 将基于该错题上下文生成「从暴力到正解」的专属讲解。</p>
+        <form method="POST" action="/studymate/ai-tutor">
+            <input type="hidden" name="uid" value="{{ luogu_uid }}">
+            <input type="hidden" name="pid" value="{{ problem_id }}">
+            <input type="hidden" name="title" value="{{ title }}">
+            <input type="hidden" name="source" value="{{ prob_source }}">
+            <input type="hidden" name="summary" value="{{ summary }}">
+            <button type="submit" class="w-full py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600">
+                🤖 开始 AI 讲题
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="text-center text-xs text-gray-400 space-y-1">
+        <div><a href="/me/{{ luogu_uid }}" class="text-emerald-600 hover:underline">← 返回个人中心</a></div>
+        <div>信竞 AI 报告 · StudyMate v3.6</div>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+
 @app.route("/me/", methods=["GET"])
 def me_picker():
     """无 UID 的 /me 入口 → UID 输入中转页（避免 404 误判系统故障）"""
@@ -5329,10 +5922,38 @@ def student_me(luogu_uid: str):
 
     简化模式：v3.5.2 暂用 luogu_uid 直链（家长端 token 同款模式）。
     未来 v3.5.3 接微信扫码/手机 OTP 后改为带签名 token。
+
+    v3.6 · fallback：未注册但有 report.md → 渲染「轻量版个人中心」（仅展示 UID +
+    6 维评分 + 错题集 + AI 讲题入口），不再 404。这让老用户「凭 UID 看错题」成为可能。
     """
     student = _admin_students.get_student_by_uid(luogu_uid)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+        # v3.6 fallback：扫 reports/ 看有没有该 UID 的报告
+        from pathlib import Path as _P_fb
+        _has_report = False
+        try:
+            _reports_root = _P_fb(__file__).parent / "reports"
+            if _reports_root.exists():
+                for _d in _reports_root.iterdir():
+                    if not _d.is_dir() or not (_d / "report.md").exists():
+                        continue
+                    _sidecar = _d / "luogu_uid.txt"
+                    if _sidecar.exists():
+                        try:
+                            if _sidecar.read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
+                                _has_report = True
+                                break
+                        except Exception:
+                            pass
+                    if str(luogu_uid) in _d.name:
+                        _has_report = True
+                        break
+        except Exception:
+            _has_report = False
+        if not _has_report:
+            return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+        # 有 report → 渲染轻量版（用 STUDENT_ME_HTML + 空 student dict）
+        return _render_student_me_lite(luogu_uid)
     progress = _admin_students.get_student_gesp_progress(int(student["id"])) or {}
     # v3.5.2: 解析 city 所在省份 + grade 中文 label
     student_dict = dict(student)
@@ -5359,6 +5980,24 @@ def student_me(luogu_uid: str):
         has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
     except Exception:
         has_parent_sub = False
+    # v3.6 · 解析该选手最新报告 → 6 维评分 + 千分制 + 错题
+    achievements = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—",
+        "mistakes": [],
+        "report_dir": None,
+    }
+    try:
+        latest = _find_latest_report_dir(luogu_uid)
+        if latest and (latest / "report.md").exists():
+            report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
+            ext = _extract_achievements_from_report(report_md)
+            achievements.update(ext)
+            achievements["report_dir"] = latest.name
+    except Exception as _e:
+        achievements["_err"] = str(_e)[:200]
+
     return render_template_string(
         STUDENT_ME_HTML,
         student=student_dict,
@@ -5369,7 +6008,185 @@ def student_me(luogu_uid: str):
         csp_award_types=_admin_students.CSP_AWARD_TYPES,
         csp_award_levels=_admin_students.CSP_AWARD_LEVELS,
         commerce_hidden=_HIDE_COMMERCE,
+        achievements=achievements,
+        mistake_count=len(achievements.get("mistakes") or []),
     )
+
+
+def _render_student_me_lite(luogu_uid: str):
+    """v3.6 · 轻量版个人中心（学员未注册但有 report.md 时回退到这）
+
+    只展示：UID + 6 维评分 + 千分制 + 错题集 + AI 讲题入口
+    隐藏：GESP 段位、自录奖项、家长订阅 CTA（这些都需要先注册）
+    """
+    from pathlib import Path as _P_lite
+    # 解析最新 report
+    achievements = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—",
+        "mistakes": [],
+        "report_dir": None,
+    }
+    try:
+        latest = _find_latest_report_dir(luogu_uid)
+        if latest and (latest / "report.md").exists():
+            report_md = (latest / "report.md").read_text(encoding="utf-8", errors="replace")
+            ext = _extract_achievements_from_report(report_md)
+            achievements.update(ext)
+            achievements["report_dir"] = latest.name
+    except Exception as _e:
+        achievements["_err"] = str(_e)[:200]
+
+    # 构造一个匿名 student dict（让模板不报 KeyError）
+    student_dict = {
+        "real_name": None,
+        "luogu_uid": luogu_uid,
+        "province": None,
+        "city": None,
+        "gender": None,
+        "grade": None,
+        "grade_label": None,
+        "registered_via": "report-only",
+    }
+    return render_template_string(
+        STUDENT_ME_LITE_HTML,
+        student=student_dict,
+        token=luogu_uid,
+        achievements=achievements,
+        mistake_count=len(achievements.get("mistakes") or []),
+    )
+
+
+# v3.6 · 轻量版个人中心模板（只展示 UID + 6 维 + 错题 + AI 讲题）
+STUDENT_ME_LITE_HTML = r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错题本 · UID {{ token }} · v3.6</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-emerald-50 to-cyan-50 min-h-screen">
+    <div class="bg-gradient-to-r from-emerald-600 to-cyan-600 text-white">
+        <div class="max-w-3xl mx-auto p-6">
+            <h1 class="text-2xl font-bold mb-1">📚 错题本 · v3.6</h1>
+            <p class="text-sm opacity-90">洛谷 UID <strong>{{ token }}</strong> · 仅展示 AI 报告中的错题与个人成就</p>
+            <p class="text-xs opacity-75 mt-1">
+                💡 学员尚未完成注册，如需 GESP 段位 / 自录奖项 / 家长订阅等功能，
+                <a href="/register" class="underline font-bold">前往注册 →</a>
+            </p>
+        </div>
+    </div>
+
+    <div class="max-w-3xl mx-auto p-4 -mt-4 space-y-4">
+
+        <!-- 个人成就（千分制 + 6 维） -->
+        <div class="bg-white rounded-2xl shadow p-5">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🏅 个人成就（来自 AI 报告）</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-amber-700 font-bold">⭐ AI 评测分（千分制）</div>
+                    {% if achievements.ai_score_thousand is not none %}
+                    <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
+                    <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    {% else %}
+                    <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
+                    <div class="text-xs text-gray-400 mt-1">暂未生成 AI 报告</div>
+                    {% endif %}
+                </div>
+                <div class="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-gray-600 font-bold">🏆 GESP 段位</div>
+                    <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
+                    <div class="text-xs text-gray-400 mt-1">需先注册</div>
+                </div>
+                <div class="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-gray-600 font-bold">🏅 信息学奖项</div>
+                    <div class="text-3xl font-extrabold text-gray-300 mt-1">0</div>
+                    <div class="text-xs text-gray-400 mt-1">需先注册</div>
+                </div>
+            </div>
+
+            {% if achievements.six_dim %}
+            <div class="mt-4 border-t border-gray-100 pt-3">
+                <div class="text-xs text-gray-500 mb-2">📊 6 维能力评分</div>
+                <div class="space-y-1.5">
+                    {% for k, v in achievements.six_dim.items() %}
+                    <div class="flex items-center gap-2 text-xs">
+                        <div class="w-20 text-gray-600 text-right">{{ k }}</div>
+                        <div class="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                            <div class="h-full rounded-full
+                                {% if v >= 75 %}bg-green-500
+                                {% elif v >= 55 %}bg-emerald-400
+                                {% elif v >= 40 %}bg-amber-400
+                                {% else %}bg-red-400{% endif %}" style="width: {{ v }}%"></div>
+                        </div>
+                        <div class="w-10 text-right font-mono font-bold
+                            {% if v >= 75 %}text-green-700
+                            {% elif v >= 55 %}text-emerald-700
+                            {% elif v >= 40 %}text-amber-700
+                            {% else %}text-red-700{% endif %}">{{ v }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if achievements.report_dir %}
+                <div class="text-[10px] text-gray-400 mt-2">数据来源：{{ achievements.report_dir }} / report.md</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 错题集 -->
+        <div class="bg-white rounded-2xl shadow p-5">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-lg font-bold text-gray-800">📚 我的错题集</h2>
+                <span class="text-xs text-gray-500">{{ mistake_count }} 道错题</span>
+            </div>
+
+            {% if mistake_count > 0 %}
+            <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                {% for m in achievements.mistakes %}
+                <div class="border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition">
+                    <div class="flex items-start justify-between gap-2 flex-wrap">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-1.5 flex-wrap text-sm">
+                                <span class="text-gray-400 font-mono text-xs">#{{ m.idx }}</span>
+                                {% if m.problem_id %}
+                                <a href="https://www.luogu.com.cn/problem/{{ m.problem_id }}" target="_blank" class="font-bold text-blue-700 hover:underline">{{ m.problem_id }}</a>
+                                {% endif %}
+                                <span class="font-bold text-gray-800 truncate">{{ m.title }}</span>
+                                {% if m.source %}<span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
+                            </div>
+                            {% if m.summary %}
+                            <div class="text-xs text-gray-600 mt-1.5 line-clamp-2">💡 {{ m.summary }}</div>
+                            {% endif %}
+                        </div>
+                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ m.title|urlencode }}&source={{ m.source|urlencode }}&summary={{ m.summary|urlencode }}"
+                           class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap">
+                            🤖 AI 讲题
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」将自动把错题传给 StudyMate</p>
+            {% else %}
+            <div class="text-center py-6 text-sm text-gray-400">
+                🌱 暂无错题记录 · <a href="/" class="text-emerald-600 hover:underline">去生成新报告 →</a>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="text-center text-xs text-gray-400">
+            信竞 AI 报告 · 错题本 v3.6 ·
+            <a href="/" class="text-emerald-600 hover:underline">返回首页</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 
 # ---- v3.5.2 传播期 · 位置图分享卡（PNG） ----
@@ -5576,6 +6393,140 @@ def _extract_ai_evaluation_from_report(report_md: str) -> dict:
         out["report_date"] = m.group(1)
 
     return out
+
+def _extract_achievements_from_report(report_md: str) -> dict:
+    """v3.6 · 从 report.md 抽「个人成就」+「错题集」。
+
+    返回 dict：
+      - six_dim:    {"基础算法": 72, "数据结构": 33, "图论": 33,
+                    "动态规划": 39, "字符串": 47, "数学": 40}  (0-100)
+      - ai_score_thousand: int (0-1000)   = mean(six_dim) * 10
+      - ai_score_label:    str           = "⭐⭐⭐⭐" 等档位（5 档）
+      - mistakes: list[dict]，每项：
+          { idx, problem_id, title, source, summary, bottleneck }
+        problem_id 可能是 "P11229" 或 ""（无法识别时）
+    """
+    import re
+    out = {
+        "six_dim": {},
+        "ai_score_thousand": None,
+        "ai_score_label": "—",
+        "mistakes": [],
+    }
+    if not report_md:
+        return out
+
+    # ─── 1) 六维能力评分（第 4 节「六维能力雷达表与诊断」）──
+    # 行形如：
+    #   | **基础算法** | **72** | 🟡 熟练 | ...   （分数有 **）
+    #   | **基础算法** | 90 | 🟢 精通 | ...      （分数无 **）
+    dim_keys = ["基础算法", "数据结构", "图论", "动态规划", "字符串", "数学"]
+    six = {}
+    for k in dim_keys:
+        # 宽匹配：行首 | ... 关键字 ... | ... 数字 ... |
+        m = re.search(
+            r"^\s*\|[\s*]*?" + re.escape(k) + r"[\s*]*?\|[\s*]*?(\d{1,3})[\s*]*?\|",
+            report_md, re.M,
+        )
+        if m:
+            try:
+                v = int(m.group(1))
+                if 0 <= v <= 100:
+                    six[k] = v
+            except Exception:
+                pass
+    out["six_dim"] = six
+
+    # ─── 2) 千分制总分 = mean × 10 ───────────────────
+    if six:
+        mean_score = sum(six.values()) / len(six)
+        out["ai_score_thousand"] = round(mean_score * 10)
+        # 5 档评级
+        s = out["ai_score_thousand"]
+        if s >= 850:
+            out["ai_score_label"] = "🏆 顶尖"
+        elif s >= 700:
+            out["ai_score_label"] = "⭐ 优秀"
+        elif s >= 550:
+            out["ai_score_label"] = "🔵 良好"
+        elif s >= 400:
+            out["ai_score_label"] = "🟡 基础"
+        else:
+            out["ai_score_label"] = "🔴 待提升"
+
+    # ─── 3) 错题集（第 10 节「未通过题目专属题解」）──────
+    # 锚点：### 10. 【未通过题目...(从暴力到正解)】  → 抓 "未通过题目" 之后整行
+    m10 = re.search(
+        r"^###\s*10\.?\s*[【\[]未通过题目.*?$",
+        report_md, re.M,
+    )
+    if not m10:
+        return out
+    section = report_md[m10.end():]
+
+    # 找所有 #### N. xxx 块
+    blocks = re.split(r"^####\s*(\d+)\.\s*(.+?)$", section, flags=re.M)
+    # blocks 形如 [pre, idx1, title1, body1, idx2, title2, body2, ...]
+    mistakes = []
+    i = 1
+    while i + 2 <= len(blocks) - 1:
+        idx = blocks[i].strip()
+        title_line = blocks[i + 1].strip()
+        body = blocks[i + 2]
+        i += 3
+
+        # 解析题号 / 来源 / 标题
+        # 形如 "P11229 [CSP-J 2024] 小木棍"
+        pid = ""
+        source = ""
+        title = title_line
+        m_pid = re.match(r"(P\d{4,6})\s*(.*)", title_line)
+        if m_pid:
+            pid = m_pid.group(1)
+            rest = m_pid.group(2).strip()
+            m_src = re.match(r"\[([^\]]+)\]\s*(.*)", rest)
+            if m_src:
+                source = m_src.group(1).strip()
+                title = m_src.group(2).strip()
+            else:
+                title = rest
+        else:
+            # 可能 "P11229 小木棍"（无来源）
+            m_pid2 = re.match(r"(P\d{4,6})\s+(.+)", title_line)
+            if m_pid2:
+                pid = m_pid2.group(1)
+                title = m_pid2.group(2).strip()
+
+        # AI 题解摘要
+        summary = ""
+        m_sum = re.search(
+            r"\*\*?AI\s*题解摘要\*\*?[：:]\s*(.+?)(?=\n\s*\n|\n\*|$)",
+            body, re.S,
+        )
+        if m_sum:
+            summary = re.sub(r"\s+", " ", m_sum.group(1).strip())[:200]
+
+        # 瓶颈摘要
+        bottleneck = ""
+        m_bot = re.search(
+            r"\*\*?b\)\s*瓶颈[在][哪][里][?]?\*\*?\s*(.+?)(?=\n\s*\n|\n\*\*?c\)|$)",
+            body, re.S,
+        )
+        if m_bot:
+            bottleneck = re.sub(r"\s+", " ", m_bot.group(1).strip())[:200]
+
+        mistakes.append({
+            "idx": int(idx) if idx.isdigit() else len(mistakes) + 1,
+            "problem_id": pid,
+            "title": title or "(无标题)",
+            "source": source,
+            "summary": summary,
+            "bottleneck": bottleneck,
+        })
+
+    out["mistakes"] = mistakes
+    return out
+
 
 
 def _build_share_card_data(luogu_uid: str) -> dict | None:
@@ -6628,6 +7579,92 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
     return pool[0]
 
 
+def _list_reports_for_uid(luogu_uid: str) -> list:
+    """扫描 reports/ 找该 UID 全部报告目录（按 mtime 倒序）。
+
+    复用 _find_latest_report_dir 的三段式匹配：
+      1) 侧车文件 luogu_uid.txt 精确匹配
+      2) 目录名包含 luogu_uid（旧式命名）
+      3) 同姓名（多 UID 兜底，按目录名 _ 切割取尾段）
+
+    返回 [{task_id, name, mtime, mtime_str, files:[{label, kind, url, exists}], is_latest}, ...]
+    """
+    from datetime import datetime as _dt
+    reports_root = Path(__file__).parent / "reports"
+    if not reports_root.exists():
+        return []
+    target_uid = str(luogu_uid or "").strip()
+    if not target_uid:
+        return []
+
+    matches = []
+    for d in reports_root.iterdir():
+        if not d.is_dir():
+            continue
+        # 必须有 report.md 才算"完整报告"
+        if not (d / "report.md").exists():
+            continue
+        hit = False
+        # 1) 侧车文件精确匹配
+        sidecar = d / "luogu_uid.txt"
+        if sidecar.exists():
+            try:
+                if sidecar.read_text(encoding="utf-8", errors="replace").strip() == target_uid:
+                    hit = True
+            except Exception:
+                pass
+        # 2) 旧式：目录名包含 UID
+        if not hit and target_uid in d.name:
+            hit = True
+        if not hit:
+            continue
+        # 解析目录名 <task_id>_<name>
+        parts = d.name.split("_", 1)
+        task_id = parts[0] if parts else d.name
+        name = parts[1] if len(parts) > 1 else ""
+        try:
+            mt = d.stat().st_mtime
+            mtime_str = _dt.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            mt = 0
+            mtime_str = "未知时间"
+        # 候选文件（按展示顺序）
+        candidates = [
+            ("完整版 · report.html", "html", "report.html"),
+            ("完整版 · report.pdf",  "pdf",  "report.pdf"),
+            ("选手版 · me.html",     "html", "me.html"),
+            ("选手版 · me.pdf",      "pdf",  "me.pdf"),
+            ("家长版 · parent.html", "html", "parent.html"),
+            ("家长版 · parent.pdf",  "pdf",  "parent.pdf"),
+            ("教练版 · coach.html",  "html", "coach.html"),
+            ("教练版 · coach.pdf",   "pdf",  "coach.pdf"),
+            ("Markdown 原文",        "md",   "report.md"),
+        ]
+        files = []
+        for label, kind, fname in candidates:
+            p = d / fname
+            files.append({
+                "label": label,
+                "kind": kind,
+                "url": f"/reports/{d.name}/{fname}",
+                "exists": p.exists(),
+            })
+        matches.append({
+            "task_id": task_id,
+            "name": name or "(未命名选手)",
+            "dir_name": d.name,
+            "mtime": mt,
+            "mtime_str": mtime_str,
+            "files": files,
+            "file_count": sum(1 for f in files if f["exists"]),
+        })
+
+    matches.sort(key=lambda x: x["mtime"], reverse=True)
+    if matches:
+        matches[0]["is_latest"] = True
+    return matches
+
+
 def _run_parent_subscribe(
     task_id: str,
     report_dir: Path,
@@ -6879,27 +7916,24 @@ REGISTER_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>学员注册 · v3.5.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { font-family: -appleSystem, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
-        .reg-shadow { box-shadow: 0 8px 32px rgba(0,0,0,0.08); }
-    </style>
+    {{ app_skin_head() }}
 </head>
-<body class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-green-50 via-white to-emerald-50">
-    <div class="w-full max-w-md bg-white rounded-2xl reg-shadow p-7">
-        <div class="text-center mb-5">
-            <div class="inline-block px-3 py-1 bg-green-100 text-green-700 text-xs rounded-full mb-2">v3.5.2</div>
-            <h1 class="text-xl font-bold text-gray-800 mb-1">学员注册</h1>
-            <p class="text-xs text-gray-500">学而思图 1 模式 · 4 字段极简</p>
+<body class="app-body min-h-screen flex items-center justify-center p-4">
+    <div class="app-card max-w-md w-full">
+        <div class="text-center mb-4">
+            <div class="app-pill app-pill-done mb-2">v3.5.2</div>
+            <h1 class="app-title">学员注册</h1>
+            <p class="app-subtitle">学而思图 1 模式 · 4 字段极简</p>
         </div>
 
         {% if error %}
-        <div class="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">⚠️ {{ error }}</div>
+        <div class="app-box app-box-red mb-4">⚠️ {{ error }}</div>
         {% endif %}
 
         <form method="POST" class="space-y-3">
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 城市</label>
-                <select name="city" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                <label class="app-label"><span class="text-red-500">*</span> 城市</label>
+                <select name="city" required class="app-input">
                     <option value="">请选择城市</option>
                     {% for group, items in cities %}
                     <optgroup label="📍 {{ group }}">
@@ -6912,16 +7946,16 @@ REGISTER_HTML = """
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 姓名</label>
+                <label class="app-label"><span class="text-red-500">*</span> 姓名</label>
                 <input type="text" name="real_name" required maxlength="20"
                        value="{{ form.real_name or '' }}"
                        placeholder="请输入姓名"
-                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                       class="app-input">
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 年级</label>
-                <select name="grade" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                <label class="app-label"><span class="text-red-500">*</span> 年级</label>
+                <select name="grade" required class="app-input">
                     <option value="">请选择年级</option>
                     {% for g_val, g_label in grades %}
                     <option value="{{ g_val }}" {% if form.grade == g_val %}selected{% endif %}>{{ g_label }}</option>
@@ -6930,10 +7964,10 @@ REGISTER_HTML = """
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 性别</label>
+                <label class="app-label"><span class="text-red-500">*</span> 性别</label>
                 <div class="grid grid-cols-2 gap-2">
-                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-green-50 {% if form.gender == 'M' %}bg-green-50 border-green-500{% endif %}">
-                        <input type="radio" name="gender" value="M" {% if form.gender == 'M' %}checked{% endif %} class="text-green-600">
+                    <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-emerald-50 {% if form.gender == 'M' %}bg-emerald-50 border-emerald-500{% endif %}">
+                        <input type="radio" name="gender" value="M" {% if form.gender == 'M' %}checked{% endif %} class="text-emerald-600">
                         <span>♂ 男生</span>
                     </label>
                     <label class="flex items-center justify-center gap-2 border rounded-lg px-3 py-2 cursor-pointer hover:bg-pink-50 {% if form.gender == 'F' %}bg-pink-50 border-pink-500{% endif %}">
@@ -6947,18 +7981,18 @@ REGISTER_HTML = """
                 <p class="text-xs text-gray-500 mb-2">🔐 实名信息（任选其一，借力主站认证）</p>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1"><span class="text-red-500">*</span> 洛谷 UID</label>
+                    <label class="app-label"><span class="text-red-500">*</span> 洛谷 UID</label>
                     <input type="text" name="luogu_uid" required pattern="[0-9]{6,10}"
                            value="{{ form.luogu_uid or '' }}"
                            placeholder="6-10 位数字"
-                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                           class="app-input">
                     <p class="text-xs text-gray-400 mt-1">v3.5.2 借力洛谷主站实名 · 学员档案主键</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2 mt-2">
                     <div>
                         <label class="block text-xs text-gray-600 mb-1">微信扫码（可选）</label>
-                        <button type="button" onclick="document.getElementById('wechat_openid').value='demo_wx_openid_' + Math.random().toString(36).slice(2,10); this.textContent='✓ 已扫码';" class="w-full bg-green-500 text-white text-xs px-2 py-2 rounded-lg hover:bg-green-600">
+                        <button type="button" onclick="document.getElementById('wechat_openid').value='demo_wx_openid_' + Math.random().toString(36).slice(2,10); this.textContent='✓ 已扫码';" class="w-full bg-emerald-500 text-white text-xs px-2 py-2 rounded-lg hover:bg-emerald-600">
                             🟢 微信扫码
                         </button>
                         <input type="hidden" name="wechat_openid" id="wechat_openid" value="">
@@ -6969,7 +8003,7 @@ REGISTER_HTML = """
                         <input type="tel" name="phone" pattern="1[3-9][0-9]{9}"
                                value="{{ form.phone or '' }}"
                                placeholder="11 位手机号"
-                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                               class="app-input">
                     </div>
                 </div>
 
@@ -6977,7 +8011,7 @@ REGISTER_HTML = """
                     <label class="block text-xs text-gray-600 mb-1">出生日期（可选 · 用于 CSP 年龄判定）</label>
                     <input type="date" name="birth_date"
                            value="{{ form.birth_date or '' }}"
-                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                           class="app-input">
                 </div>
             </div>
 
@@ -6986,19 +8020,22 @@ REGISTER_HTML = """
                        {% if form.agree %}checked{% endif %}
                        class="mt-1">
                 <label for="agree" class="text-xs text-gray-600">
-                    已阅读并同意 <a href="#" class="text-green-600 underline">《用户协议》</a>
-                    和 <a href="#" class="text-green-600 underline">《未成年人个人信息保护知情同意书》</a>
+                    已阅读并同意 <a href="#" class="app-link">《用户协议》</a>
+                    和 <a href="#" class="app-link">《未成年人个人信息保护知情同意书》</a>
                     （PIPL §5.2 · 14 岁以下需监护人陪同）
                 </label>
             </div>
 
-            <button type="submit" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3 rounded-lg hover:from-green-700 hover:to-emerald-700 transition">
-                完成
+            <button type="submit" class="app-btn app-btn-primary">
+                ✅ 完成注册
             </button>
         </form>
 
         <div class="text-center mt-4">
             <a href="/me/999105" class="text-xs text-gray-400 hover:text-gray-600">→ 体验已注册学员 /me/999105</a>
+        </div>
+        <div class="text-center mt-2">
+            <a href="/" class="text-xs text-emerald-700 hover:underline">← 返回首页</a>
         </div>
     </div>
 </body>
@@ -7014,20 +8051,23 @@ STUDENT_ME_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>学员 Pro · {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+    <style>
+        /* v3.7.1 · 个人中心：保留特色 hero header，但加入首页 app-body 渐变 + app-card 卡片 */
+        .me-hero{background:linear-gradient(135deg,#059669 0%,#0d9488 100%);color:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:24px;}
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div class="bg-gradient-to-r from-green-700 to-emerald-700 text-white">
-        <div class="max-w-3xl mx-auto p-6">
-            <h1 class="text-2xl font-bold mb-1">🎓 学员 Pro · v3.5.2</h1>
-            <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong></p>
-            <p class="text-xs opacity-75 mt-1">
-                UID {{ student.luogu_uid }}
-                · {{ student.province or '' }} {{ student.city or '城市未填' }}
-                · {% if student.gender == 'M' %}男生{% elif student.gender == 'F' %}女生{% else %}性别未填{% endif %}
-                · 年级 {{ student.grade_label or student.grade or '—' }}
-                · 注册渠道 {{ student.registered_via or 'admin' }}
-            </p>
-        </div>
+<body class="app-body p-4">
+    <div class="me-hero max-w-3xl mx-auto mb-4">
+        <h1 class="text-2xl font-extrabold mb-1">🎓 学员 Pro · v3.5.2</h1>
+        <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong></p>
+        <p class="text-xs opacity-75 mt-1">
+            UID {{ student.luogu_uid }}
+            · {{ student.province or '' }} {{ student.city or '城市未填' }}
+            · {% if student.gender == 'M' %}男生{% elif student.gender == 'F' %}女生{% else %}性别未填{% endif %}
+            · 年级 {{ student.grade_label or student.grade or '—' }}
+            · 注册渠道 {{ student.registered_via or 'admin' }}
+        </p>
     </div>
 
     <div class="max-w-3xl mx-auto p-4 -mt-4">
@@ -7154,6 +8194,120 @@ STUDENT_ME_HTML = """
             {% endif %}
         </div>
 
+        <!-- v3.6 · 个人成就（千分制 AI 评分 + 6 维雷达 + GESP/奖项汇总） -->
+        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="achievements">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🏅 我的个人成就</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <!-- 千分制 AI 评测分 -->
+                <div class="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-amber-700 font-bold">⭐ AI 评测分（千分制）</div>
+                    {% if achievements.ai_score_thousand is not none %}
+                    <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
+                    <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    {% else %}
+                    <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
+                    <div class="text-xs text-gray-400 mt-1">暂未生成 AI 报告</div>
+                    {% endif %}
+                </div>
+
+                <!-- GESP 段位 -->
+                <div class="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-green-700 font-bold">🏆 GESP 段位</div>
+                    {% if progress and progress.student and progress.student.gesp_latest_level %}
+                    <div class="text-4xl font-extrabold text-green-700 mt-1">{{ progress.student.gesp_latest_level }}<span class="text-lg"> 级</span></div>
+                    <div class="text-xs text-green-600 mt-1">
+                        {% if progress.student.gesp_latest_score is not none %}{{ progress.student.gesp_latest_score }} 分{% else %}免初赛通道{% endif %}
+                    </div>
+                    {% else %}
+                    <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
+                    <div class="text-xs text-gray-400 mt-1">尚未录入 GESP 真考</div>
+                    {% endif %}
+                </div>
+
+                <!-- 信息学竞赛奖项数 -->
+                <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-center">
+                    <div class="text-xs text-blue-700 font-bold">🏅 信息学奖项</div>
+                    <div class="text-4xl font-extrabold text-blue-700 mt-1">{{ award_summary.total_awards or 0 }}</div>
+                    <div class="text-xs text-blue-600 mt-1">条已录入 · CSP/NOIP/NOI</div>
+                </div>
+            </div>
+
+            <!-- 6 维能力雷达（迷你条形版） -->
+            {% if achievements.six_dim %}
+            <div class="mt-4 border-t border-gray-100 pt-3">
+                <div class="text-xs text-gray-500 mb-2">📊 6 维能力评分（来自最新 AI 报告）</div>
+                <div class="space-y-1.5">
+                    {% for k, v in achievements.six_dim.items() %}
+                    <div class="flex items-center gap-2 text-xs">
+                        <div class="w-20 text-gray-600 text-right">{{ k }}</div>
+                        <div class="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                            <div class="h-full rounded-full
+                                {% if v >= 75 %}bg-green-500
+                                {% elif v >= 55 %}bg-emerald-400
+                                {% elif v >= 40 %}bg-amber-400
+                                {% else %}bg-red-400{% endif %}" style="width: {{ v }}%"></div>
+                        </div>
+                        <div class="w-10 text-right font-mono font-bold
+                            {% if v >= 75 %}text-green-700
+                            {% elif v >= 55 %}text-emerald-700
+                            {% elif v >= 40 %}text-amber-700
+                            {% else %}text-red-700{% endif %}">{{ v }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if achievements.report_dir %}
+                <div class="text-[10px] text-gray-400 mt-2">数据来源：{{ achievements.report_dir }} / report.md</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- v3.6 · 错题集（点击 AI 讲题 → 直接传错题给 StudyMate） -->
+        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="mistakes">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-lg font-bold text-gray-800">📚 我的错题集</h2>
+                <span class="text-xs text-gray-500">{{ mistake_count }} 道错题 · 来自最新 AI 报告</span>
+            </div>
+
+            {% if mistake_count > 0 %}
+            <div class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                {% for m in achievements.mistakes %}
+                <div class="border border-gray-200 rounded-lg p-3 hover:border-emerald-300 transition">
+                    <div class="flex items-start justify-between gap-2 flex-wrap">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-1.5 flex-wrap text-sm">
+                                <span class="text-gray-400 font-mono text-xs">#{{ m.idx }}</span>
+                                {% if m.problem_id %}
+                                <a href="https://www.luogu.com.cn/problem/{{ m.problem_id }}" target="_blank" class="font-bold text-blue-700 hover:underline">{{ m.problem_id }}</a>
+                                {% endif %}
+                                <span class="font-bold text-gray-800 truncate">{{ m.title }}</span>
+                                {% if m.source %}<span class="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
+                            </div>
+                            {% if m.summary %}
+                            <div class="text-xs text-gray-600 mt-1.5 line-clamp-2">💡 {{ m.summary }}</div>
+                            {% endif %}
+                            {% if m.bottleneck %}
+                            <div class="text-xs text-red-600 mt-1">⚠️ {{ m.bottleneck[:120] }}{% if m.bottleneck|length > 120 %}…{% endif %}</div>
+                            {% endif %}
+                        </div>
+                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ m.title|urlencode }}&source={{ m.source|urlencode }}&summary={{ m.summary|urlencode }}"
+                           class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap">
+                            🤖 AI 讲题
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="text-[10px] text-gray-400 mt-2">💡 点击「AI 讲题」将自动把错题（题号 / 标题 / 错因 / 摘要）传给 StudyMate，启动专属讲解</p>
+            {% else %}
+            <div class="text-center py-6 text-sm text-gray-400">
+                🌱 暂无错题记录
+                <div class="text-xs mt-1">{% if achievements.report_dir %}最新报告 {{ achievements.report_dir }} 未抽取到错题{% else %}请先在首页生成一份 AI 报告{% endif %}</div>
+            </div>
+            {% endif %}
+        </div>
+
         <!-- v3.5.2 传播期 · 位置图分享入口（v3.6 头部已加分享图标按钮，底部保留简化版仅作 anchor / 详情） -->
         <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl shadow p-4 mb-4 text-center">
             <p class="text-sm text-gray-700 mb-2">
@@ -7255,13 +8409,12 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
 <meta property="og:image" content="/me/{{ luogu_uid }}/share-card.png">
 <title>{{ student_name }} 的洛谷 AI 测评报告</title>
 <script src="https://cdn.tailwindcss.com"></script>
+{{ app_skin_head() }}
 <style>
-body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-       background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%); }
 .glass { backdrop-filter: blur(8px); background: rgba(255,255,255,0.85); }
 </style>
 </head>
-<body class="min-h-screen">
+<body class="app-body min-h-screen">
 
 <header class="sticky top-0 z-40 glass border-b border-gray-200">
   <div class="max-w-[480px] mx-auto px-4 py-3 flex items-center justify-between">
@@ -7403,12 +8556,17 @@ REGISTER_INVALID_HTML = """
     <meta charset="UTF-8">
     <title>学员未注册</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-50 min-h-screen flex items-center justify-center p-6">
-    <div class="bg-white rounded-2xl shadow p-8 max-w-md w-full text-center">
-        <h1 class="text-2xl font-bold text-amber-700 mb-3">⚠️ {{ message }}</h1>
-        <p class="text-gray-600 mb-4">请先完成注册</p>
-        <a href="/register" class="inline-block bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">去注册</a>
+<body class="app-body p-6 flex items-center justify-center min-h-screen">
+    <div class="app-card max-w-md w-full text-center">
+        <div class="text-5xl mb-3">⚠️</div>
+        <h1 class="app-title">{{ message }}</h1>
+        <p class="app-subtitle">请先完成注册</p>
+        <a href="/register" class="app-btn app-btn-primary mt-4">去注册</a>
+        <p class="mt-3 text-xs text-gray-500">
+            <a href="/" class="app-link">← 返回首页</a>
+        </p>
     </div>
 </body>
 </html>
@@ -7557,8 +8715,9 @@ ADMIN_STUDENTS_GUARDIANS_HTML = """
     <meta charset="UTF-8">
     <title>家长列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-4xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">👨‍👩‍👧 家长列表</h1>
@@ -7671,8 +8830,9 @@ ADMIN_STUDENTS_GOAL_HTML = """
     <meta charset="UTF-8">
     <title>学员目标 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-3xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">🎯 学员目标路径</h1>
@@ -7745,8 +8905,9 @@ ADMIN_STUDENTS_REPORTS_HTML = """
     <meta charset="UTF-8">
     <title>周报列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen p-6">
+<body class="app-body p-6">
     <div class="max-w-4xl mx-auto">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-3xl font-bold text-blue-900">📊 家长周报</h1>
@@ -7812,12 +8973,12 @@ PARENT_PANEL_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>家长端 · 赛事仪表盘 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
         .card-shadow { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="app-body min-h-screen">
     <!-- 顶部 Banner（学而思图 2 风格：双 CTA + 强基倒计时） -->
     <div class="bg-gradient-to-r from-blue-900 via-indigo-700 to-purple-700 text-white">
         <div class="max-w-3xl mx-auto p-6">
@@ -8183,8 +9344,9 @@ PARENT_TOKEN_INVALID_HTML = """
     <meta charset="UTF-8">
     <title>家长链接无效</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+<body class="app-body min-h-screen flex items-center justify-center p-6">
     <div class="bg-white rounded-xl shadow p-8 max-w-md w-full text-center">
         <h1 class="text-2xl font-bold text-red-700 mb-3">⚠️ 链接无效</h1>
         <p class="text-gray-600 mb-4">{{ message }}</p>
@@ -8202,11 +9364,11 @@ PARENT_TOKEN_ENTRY_HTML = """
     <meta charset="UTF-8">
     <title>家长端入口 · 信竞 AI 报告</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
     <style>
-        body{font-family:-appleSystem,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);min-height:100vh;}
     </style>
 </head>
-<body class="flex items-center justify-center p-4">
+<body class="app-body flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
         <div class="text-center mb-5">
             <div class="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-full mb-2">v3.5.2 · 家长端</div>
