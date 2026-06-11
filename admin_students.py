@@ -41,6 +41,7 @@ def create_student(
     is_minor: bool = False,
     note: str | None = None,
     city: str | None = None,
+    province: str | None = None,  # v3.8 · 省份（用于家长版报告本地政策匹配）
     gender: str | None = None,
     birth_date: str | None = None,
     registered_via: str = "admin",
@@ -50,6 +51,9 @@ def create_student(
     v3.5.2 新增（学而思图 1 模式）：
       - city / gender / birth_date / registered_via 4 字段
       - 14 岁以下 + 无授权 → real_name 强制 NULL（PIPL §5.2 防护）
+
+    v3.8 新增：
+      - province 字段（用于本地升学政策匹配）
     """
     if not str(luogu_uid or "").strip():
         raise ValueError("luogu_uid 必填")
@@ -81,6 +85,15 @@ def create_student(
                 registered_via or "admin",
             ),
         )
+        # v3.8 · 单独 UPDATE province（兼容老 schema 中可能不存在的列）
+        if province:
+            try:
+                conn.execute(
+                    "UPDATE students SET province = ? WHERE id = ?",
+                    ((province or "").strip(), int(cur.lastrowid)),
+                )
+            except Exception:
+                pass
         conn.commit()
         return int(cur.lastrowid)
     finally:

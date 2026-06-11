@@ -7,7 +7,7 @@ import os
 import sqlite3
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 # 允许通过环境变量覆盖，便于 Docker 命名卷挂目录场景
@@ -60,8 +60,20 @@ TASK_COLUMNS: dict[str, str] = {
 
 
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    # v3.8 · 多进程/IDE 自动重启场景下避免 "unable to open database file"
+    # · check_same_thread=False: Flask 跨线程访问同一连接
+    # · busy_timeout=10000:  写锁被占时最多等 10s，而不是立刻抛 SQLITE_BUSY
+    # · journal_mode=WAL:     读写并发不互斥，readers 不阻塞 writer
+    # · foreign_keys=ON:      让 _admin_students 等子模块的 FK 约束真正生效
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+    except Exception:
+        # WAL 在某些只读 FS / 网络盘下不可用，失败时降级回默认（不致命）
+        pass
     return conn
 
 
@@ -709,14 +721,95 @@ def list_columns() -> list[str]:
     return [row["name"] for row in rows]
 
 
-def insert_task(task_id: str, status: str = "queued", message: str = "排队中..."):
+def get_latest_done_task_for_uid(luogu_uid: str, since_hours: int = 24) -> dict | None:
+    """v3.8 · 查最近 N 小时内该 UID 是否已生成过报告（用于每日 1 次限流）
+
+    Args:
+        luogu_uid: 洛谷 UID（字符串）
+        since_hours: 限定 N 小时内（默认 24）
+
+    Returns:
+        若存在已完成的 report.md 任务，返回该任务字典；
+        否则返回 None。
+
+    判定条件：
+      - tasks.luogu_uid = ?
+      - tasks.status IN ('done', 'partial')
+      - tasks.created_at >= now - N hours
+      - 优先返回最近一条
+    """
+    uid = str(luogu_uid or "").strip()
+    if not uid:
+        return None
     conn = _get_conn()
-    conn.execute(
-        "INSERT OR IGNORE INTO tasks (task_id, status, message, created_at) VALUES (?, ?, ?, ?)",
-        (task_id, status, message, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        # 兼容老库（luogu_uid 列可能不存在）
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "luogu_uid" not in cols:
+            return None
+        threshold = (datetime.now() - timedelta(hours=int(since_hours))).strftime("%Y-%m-%d %H:%M:%S")
+        row = conn.execute(
+            """
+            SELECT t.task_id, t.status, t.created_at, t.html, t.student_name
+            FROM tasks t
+            WHERE t.luogu_uid = ?
+              AND t.status IN ('done', 'partial')
+              AND (t.created_at IS NULL OR t.created_at >= ?)
+            ORDER BY t.created_at DESC
+            LIMIT 1
+            """,
+            (uid, threshold),
+        ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def insert_task(task_id: str, status: str = "queued", message: str = "排队中...", luogu_uid: str = ""):
+    conn = _get_conn()
+    try:
+        # v3.8 · 幂等添加 luogu_uid 列（用于每日 1 次生成限制）
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN luogu_uid TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_luogu_uid ON tasks(luogu_uid)")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute(
+            "INSERT OR IGNORE INTO tasks (task_id, status, message, created_at, luogu_uid) VALUES (?, ?, ?, ?, ?)",
+            (task_id, status, message, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), str(luogu_uid or "").strip()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_task(task_id: str) -> bool:
+    """v3.8 · 物理删除一条任务（同时返回 report 文件路径，便于调用方清理磁盘）
+
+    Returns:
+        bool: True=删除成功；False=任务不存在
+    """
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return False
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT task_id, html, pdf, md FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
 
 
 def update_task(task_id: str, **kwargs):

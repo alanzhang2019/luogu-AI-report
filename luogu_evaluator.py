@@ -2149,6 +2149,7 @@ def generate_ai_report(
     *,
     output_path: str | None = None,
     resume_prefix: str | None = None,
+    luogu_uid: str = "",
 ) -> str:
     """生成 AI Markdown 报告。
 
@@ -2159,6 +2160,7 @@ def generate_ai_report(
         model_name: 模型名
         output_path: 若提供，token 会以流式增量写入该文件，断连时 partial 留在文件里
         resume_prefix: 若提供，作为"已生成的开头"喂给模型，要求其直接续写
+        luogu_uid: v3.8 · 洛谷 UID，用于拉取学员档案（GESP/CSP 奖项 + 政策匹配）注入 prompt
     """
     from syllabus_matcher import format_syllabus_report, load_syllabus_context
 
@@ -2257,6 +2259,112 @@ def generate_ai_report(
 - 7: NOI/NOI+/CTSC（黑色）
 """
 
+    # v3.8 · 拉取学员完整档案 + GESP/CSP 奖项 + 当地政策匹配，注入 prompt
+    profile_block = ""
+    policy_block = ""
+    if luogu_uid:
+        try:
+            from task_store import _get_conn as _ts_get_conn, match_school_for_student
+            conn = _ts_get_conn()
+            try:
+                stu_row = conn.execute(
+                    "SELECT id, real_name, gender, birth_date, school, city, grade "
+                    "FROM students WHERE luogu_uid = ?",
+                    (str(luogu_uid).strip(),),
+                ).fetchone()
+                if stu_row:
+                    sd = dict(stu_row)
+                    sid_int = int(sd.get("id") or 0)
+                    # 年龄换算
+                    age_str = ""
+                    if sd.get("birth_date"):
+                        try:
+                            from datetime import date as _date
+                            y, m, d = [int(x) for x in str(sd["birth_date"]).split("-")[:3]]
+                            today = _date.today()
+                            age = today.year - y - ((today.month, today.day) < (m, d))
+                            age_str = f"{age}岁"
+                        except Exception:
+                            age_str = str(sd.get("birth_date") or "")
+                    # GESP 真考历史
+                    gesp_lines = []
+                    for g in conn.execute(
+                        "SELECT g.registered_level, g.actual_score, g.passed, "
+                        "       c.name AS exam_name, c.data_year "
+                        "FROM gesp_exams g LEFT JOIN competitions c ON c.id = g.exam_id "
+                        "WHERE g.student_id = ? ORDER BY c.event_date DESC",
+                        (sid_int,),
+                    ).fetchall():
+                        gd = dict(g)
+                        passed = "✅通过" if gd.get("passed") else "❌未通过"
+                        score = f"{gd.get('actual_score')}分" if gd.get("actual_score") else "未记录分数"
+                        gesp_lines.append(
+                            f"  - GESP L{gd.get('registered_level')} · {gd.get('exam_name') or gd.get('data_year') or '?'} · {passed} · {score}"
+                        )
+                    # CSP/NOIP/NOI 奖项
+                    award_lines = []
+                    for a in conn.execute(
+                        "SELECT competition_type, award_level, award_year, actual_score, province "
+                        "FROM csp_awards WHERE student_id = ? ORDER BY award_year DESC",
+                        (sid_int,),
+                    ).fetchall():
+                        ad = dict(a)
+                        type_label = {
+                            "csp_j_pre": "CSP-J 初赛", "csp_j_final": "CSP-J 复赛",
+                            "csp_s_pre": "CSP-S 初赛", "csp_s_final": "CSP-S 复赛",
+                            "noip_1": "NOIP 普及组", "noi_bronze": "NOI 铜牌",
+                            "noi_silver": "NOI 银牌", "noi_gold": "NOI 金牌",
+                        }.get(ad.get("competition_type") or "", ad.get("competition_type") or "?")
+                        level_label = {
+                            "excellent": "优秀", "first": "一等", "second": "二等",
+                            "third": "三等", "bronze": "铜牌", "silver": "银牌", "gold": "金牌",
+                        }.get(ad.get("award_level") or "", ad.get("award_level") or "?")
+                        score = f" · {ad.get('actual_score')}分" if ad.get("actual_score") else ""
+                        prov = f" · {ad.get('province')}" if ad.get("province") else ""
+                        award_lines.append(
+                            f"  - {ad.get('award_year')} {type_label} {level_label}{score}{prov}"
+                        )
+                    profile_block_lines = [
+                        f"- 姓名：{sd.get('real_name') or '未填'}",
+                        f"- 性别/年龄：{'男' if (sd.get('gender') or '').upper() == 'M' else '女' if (sd.get('gender') or '').upper() == 'F' else '未填'} / {age_str or '未填生日'}",
+                        f"- 学校：{sd.get('school') or '未填'}",
+                        f"- 城市/年级：{sd.get('city') or '未填'} / {sd.get('grade') or '未填'}",
+                    ]
+                    if gesp_lines:
+                        profile_block_lines.append("- GESP 真考历史：")
+                        profile_block_lines.extend(gesp_lines)
+                    if award_lines:
+                        profile_block_lines.append("- CSP/NOIP/NOI 获奖历史：")
+                        profile_block_lines.extend(award_lines)
+                    elif not gesp_lines:
+                        profile_block_lines.append("- 暂无 GESP/CSP/NOIP/NOI 比赛记录")
+                    profile_block = "\n".join(profile_block_lines)
+
+                    # 当地政策匹配
+                    try:
+                        match = match_school_for_student(sd)
+                        match_lines = [
+                            f"- 学段：{match.get('stage_label') or '未识别'}",
+                            f"- 省份/城市：{match.get('province') or '未识别'} / {match.get('city') or '未填'}",
+                            f"- 升学路径：{match.get('match_type_label') or '暂无匹配'}",
+                        ]
+                        ms = match.get("matches") or []
+                        if ms:
+                            match_lines.append("- 可冲刺目标学校（前 3）：")
+                            for m in ms[:3]:
+                                psum = (m.get("policy_summary") or "").strip()
+                                if len(psum) > 60:
+                                    psum = psum[:60] + "…"
+                                req = m.get("requires_competition") or "无明确门槛"
+                                match_lines.append(f"  · {m.get('school_name')}（需 {req}）")
+                        policy_block = "\n".join(match_lines)
+                    except Exception:
+                        pass
+            finally:
+                conn.close()
+        except Exception as _prof_e:
+            profile_block = f"（档案拉取失败：{_prof_e}）"
+
     prompt = f"""
 你是一位顶级的算法竞赛金牌教练。我导出了一位选手的近期洛谷做题记录（包括已通过和尝试但未通过的题目代码）。
 请你根据我提供的【能力评估参考框架】以及【官方考纲】，对他进行深度的诊断，并针对他【未做完/做错的题目】给出极具启发性的题解。
@@ -2268,6 +2376,12 @@ def generate_ai_report(
 {difficulty_guide}
 
 {syllabus_context}
+
+### 选手学籍档案（来自 self_register 表单 · v3.8 增强）
+{profile_block or "（无档案数据，可能未注册或仅游客模式）"}
+
+### 当地升学政策 + 目标学校政策（v3.8 增强）
+{policy_block or "（无政策匹配数据）"}
 
 ### 选手的全局数据统计
 - 本次导出中已通过题数: {solved_count}
@@ -2435,6 +2549,7 @@ def generate_parent_subscribe(
     api_key: str,
     base_url: str | None,
     model_name: str,
+    luogu_uid: str = "",
 ) -> str:
     """v3.5.2 · 家长订阅版（真 AI 二次生成，非视图层）
 
@@ -2448,9 +2563,14 @@ def generate_parent_subscribe(
 
     5 个维度跟家长订阅版 UI 卡片一一对应，但内容是 AI 真正生成的，
     而不是模板里硬编码的占位文本。
+
+    v3.8 · 增强：注入学员档案（GESP/CSP/NOIP/NOI 奖项 + 当地政策匹配 +
+    目标学校政策），让家长版 AI 真正"懂孩子"，避免空话。
     """
     from openai import OpenAI
     import datetime
+    import json as _json
+    import sqlite3 as _sqlite3
 
     if not str(api_key or "").strip():
         raise ValueError("未配置 OpenAI API Key")
@@ -2476,6 +2596,120 @@ def generate_parent_subscribe(
     solved = export_data.get("solved_count", 0)
     failed = export_data.get("failed_count", 0)
 
+    # v3.8 · 拉取学员完整档案 + 奖项 + GESP 成绩 + 当地政策匹配
+    profile_block = ""
+    policy_block = ""
+    if luogu_uid:
+        try:
+            from task_store import _get_conn as _ts_get_conn, match_school_for_student
+            conn = _ts_get_conn()
+            try:
+                # 学籍档案（含性别、生日、学校、城市）
+                stu_row = conn.execute(
+                    "SELECT id, real_name, gender, birth_date, school, city, grade "
+                    "FROM students WHERE luogu_uid = ?",
+                    (str(luogu_uid).strip(),),
+                ).fetchone()
+                if stu_row:
+                    sd = dict(stu_row)
+                    sid_int = int(sd.get("id") or 0)
+                    # 年龄换算
+                    age_str = ""
+                    if sd.get("birth_date"):
+                        try:
+                            from datetime import date as _date
+                            y, m, d = [int(x) for x in str(sd["birth_date"]).split("-")[:3]]
+                            today = _date.today()
+                            age = today.year - y - ((today.month, today.day) < (m, d))
+                            age_str = f"{age}岁（出生 {sd['birth_date']}）"
+                        except Exception:
+                            age_str = str(sd.get("birth_date") or "")
+                    # 同步取 GESP 真考历史
+                    gesp_lines = []
+                    for g in conn.execute(
+                        "SELECT g.registered_level, g.actual_score, g.passed, "
+                        "       g.certificate_no, c.name AS exam_name, c.event_date, c.data_year "
+                        "FROM gesp_exams g LEFT JOIN competitions c ON c.id = g.exam_id "
+                        "WHERE g.student_id = ? ORDER BY c.event_date DESC",
+                        (sid_int,),
+                    ).fetchall():
+                        gd = dict(g)
+                        passed = "✅通过" if gd.get("passed") else "❌未通过"
+                        score = f"{gd.get('actual_score')}分" if gd.get("actual_score") else "未记录分数"
+                        gesp_lines.append(
+                            f"  - GESP L{gd.get('registered_level')} · {gd.get('exam_name') or gd.get('data_year') or '?'} · {passed} · {score}"
+                        )
+                    # 同步取 CSP/NOIP/NOI 奖项
+                    award_lines = []
+                    for a in conn.execute(
+                        "SELECT competition_type, award_level, award_year, actual_score, province, certificate_no "
+                        "FROM csp_awards WHERE student_id = ? ORDER BY award_year DESC",
+                        (sid_int,),
+                    ).fetchall():
+                        ad = dict(a)
+                        type_label = {
+                            "csp_j_pre": "CSP-J 初赛", "csp_j_final": "CSP-J 复赛",
+                            "csp_s_pre": "CSP-S 初赛", "csp_s_final": "CSP-S 复赛",
+                            "noip_1": "NOIP 普及组", "noi_bronze": "NOI 铜牌",
+                            "noi_silver": "NOI 银牌", "noi_gold": "NOI 金牌",
+                        }.get(ad.get("competition_type") or "", ad.get("competition_type") or "?")
+                        level_label = {
+                            "excellent": "优秀", "first": "一等", "second": "二等",
+                            "third": "三等", "bronze": "铜牌", "silver": "银牌", "gold": "金牌",
+                        }.get(ad.get("award_level") or "", ad.get("award_level") or "?")
+                        score = f" · {ad.get('actual_score')}分" if ad.get("actual_score") else ""
+                        prov = f" · {ad.get('province')}" if ad.get("province") else ""
+                        award_lines.append(
+                            f"  - {ad.get('award_year')} {type_label} {level_label}{score}{prov}"
+                        )
+                    profile_block_lines = [
+                        f"- 姓名：{sd.get('real_name') or '未填'}",
+                        f"- 性别/年龄：{'男' if (sd.get('gender') or '').upper() == 'M' else '女' if (sd.get('gender') or '').upper() == 'F' else '未填'} / {age_str or '未填生日'}",
+                        f"- 学校：{sd.get('school') or '未填'}",
+                        f"- 城市/年级：{sd.get('city') or '未填'} / {sd.get('grade') or '未填'}",
+                        f"- 累计洛谷：通过 {solved} 题，未通过 {failed} 题",
+                    ]
+                    if gesp_lines:
+                        profile_block_lines.append("- GESP 真考历史：")
+                        profile_block_lines.extend(gesp_lines)
+                    if award_lines:
+                        profile_block_lines.append("- CSP/NOIP/NOI 获奖历史：")
+                        profile_block_lines.extend(award_lines)
+                    elif not gesp_lines:
+                        profile_block_lines.append("- 暂无 GESP/CSP/NOIP/NOI 比赛记录（可能未参加或未录入）")
+                    profile_block = "\n".join(profile_block_lines)
+
+                    # 当地升学政策 + 目标学校政策匹配
+                    try:
+                        match = match_school_for_student(sd)
+                        match_lines = [
+                            f"- 学段：{match.get('stage_label') or '未识别'}（{match.get('stage') or '?'}）",
+                            f"- 省份/城市：{match.get('province') or '未识别'} / {match.get('city') or '未填'}",
+                            f"- 升学路径类型：{match.get('match_type_label') or '暂无匹配'}",
+                        ]
+                        ms = match.get("matches") or []
+                        if ms:
+                            match_lines.append(f"- 可冲刺的目标学校（按优先级，前 5 个）：")
+                            for m in ms[:5]:
+                                psum = (m.get("policy_summary") or "").strip()
+                                # 截断长策略文本
+                                if len(psum) > 80:
+                                    psum = psum[:80] + "…"
+                                req = m.get("requires_competition") or "无明确获奖门槛"
+                                match_lines.append(
+                                    f"  · {m.get('school_name')}（需要 {req}）· {psum or '详见政策原文'}"
+                                )
+                        else:
+                            match_lines.append("- 暂无系统内置的匹配学校，建议家长到当地教育局/目标校官网查询当年招生简章")
+                        policy_block = "\n".join(match_lines)
+                    except Exception as _pe:
+                        policy_block = f"（政策匹配失败：{_pe}）"
+            finally:
+                conn.close()
+        except Exception as _prof_e:
+            profile_block = f"（档案拉取失败：{_prof_e}）"
+            policy_block = ""
+
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
     system_prompt = (
@@ -2486,6 +2720,11 @@ def generate_parent_subscribe(
         "  - 给出**具体动作**（如『每周刷 10 道贪心』），不要『加强训练』这种空话\n"
         "  - 涉及未来时间点用『距您家孩子还有 N 年』\n"
         "  - 决策建议必须给 2-3 个分支，**不要假设一定要走 OI**\n"
+        "**必须**在分析中**显式引用**下方【选手完整档案】中的所有数据：\n"
+        "  - 学校/城市/年级/年龄 → 影响升学窗口与目标校选择\n"
+        "  - GESP/CSP/NOIP/NOI 历年奖项 → 影响『已具备什么能力 / 还要补什么』\n"
+        "  - 当地升学政策 + 目标学校政策 → 章节 3 必须**逐条引用**，给家长『具体哪所学校要什么奖』\n"
+        "  - 已通过/未通过题数 → 评估学习曲线\n"
         "输出格式：Markdown，必须严格按以下 5 个 H2 章节输出，缺一不可：\n"
         "## 1. 学习进度评估（家长版）\n"
         "## 2. 学习规划建议（短/中/长期）\n"
@@ -2497,14 +2736,19 @@ def generate_parent_subscribe(
     )
 
     user_prompt = (
-        f"【选手基础信息】\n"
+        f"【选手基础信息（来自洛谷）】\n"
         f"- 城市/年级：{student.get('city', '未填')} / {student.get('grade', '未填')}\n"
         f"- 累计通过题目：{solved}，未通过：{failed}\n"
-        f"- GESP 历史：{gesp if gesp else '无'}\n"
+        f"- GESP 历史摘要：{gesp if gesp else '无'}\n"
+        f"\n【选手完整档案（来自 self_register 表单 · 必须引用）】\n"
+        f"```\n{profile_block or '（无档案数据，可能未注册或未填写 GESP/CSP 奖项）'}\n```\n"
+        f"\n【当地升学政策 + 目标学校政策匹配（家长版核心数据）】\n"
+        f"```\n{policy_block or '（无政策匹配数据）'}\n```\n"
         f"\n【同一份洛谷 AI 报告（节选，作为上下文）】\n"
         f"```markdown\n{context_md}\n```\n"
         f"\n【生成时间】{current_time}\n"
-        f"\n请按 system 提示的 5 个章节生成 Markdown 报告。"
+        f"\n请按 system 提示的 5 个章节生成 Markdown 报告，"
+        f"在第 1/3 章**显式引用**【选手完整档案】和【当地升学政策】中的具体数据（如学校名、城市、奖项年份、目标校名）。"
     )
 
     client_kwargs = {"api_key": api_key, "timeout": 1800.0}

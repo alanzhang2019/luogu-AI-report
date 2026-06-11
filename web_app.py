@@ -6,7 +6,7 @@ import threading
 import time
 import hmac
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from urllib.parse import urlsplit, urlunsplit
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
@@ -225,6 +225,157 @@ app.secret_key = (
     or os.environ.get("FLASK_SECRET_KEY")
     or "luogu-ai-report-admin-secret-change-me"
 )
+# v3.8 · 学员注册后会话保持 180 天（"记住我" · 避免重复输入 UID/姓名）
+app.permanent_session_lifetime = timedelta(days=180)
+
+
+# v3.8 · 中国省市二级联动数据（用于 /generate-form 表单 · 城市 + CSP 省份）
+CHINA_REGIONS: list[dict] = [
+    # 直辖市（自身即"城市"）
+    {"code": "11", "name": "北京", "cities": ["北京"]},
+    {"code": "12", "name": "天津", "cities": ["天津"]},
+    {"code": "31", "name": "上海", "cities": ["上海"]},
+    {"code": "50", "name": "重庆", "cities": ["重庆"]},
+    # 省
+    {"code": "13", "name": "河北", "cities": ["石家庄", "唐山", "秦皇岛", "保定", "邯郸", "廊坊", "沧州", "邢台", "张家口", "承德", "衡水"]},
+    {"code": "14", "name": "山西", "cities": ["太原", "大同", "临汾", "运城", "晋中", "长治", "晋城", "吕梁", "忻州", "朔州", "阳泉"]},
+    {"code": "15", "name": "内蒙古", "cities": ["呼和浩特", "包头", "鄂尔多斯", "赤峰", "通辽", "呼伦贝尔", "巴彦淖尔", "乌兰察布"]},
+    {"code": "21", "name": "辽宁", "cities": ["沈阳", "大连", "鞍山", "抚顺", "本溪", "丹东", "锦州", "营口", "阜新", "辽阳", "盘锦", "铁岭", "朝阳", "葫芦岛"]},
+    {"code": "22", "name": "吉林", "cities": ["长春", "吉林", "延边", "四平", "通化", "白城", "辽源", "白山", "松原"]},
+    {"code": "23", "name": "黑龙江", "cities": ["哈尔滨", "大庆", "齐齐哈尔", "牡丹江", "佳木斯", "鸡西", "鹤岗", "双鸭山", "黑河", "伊春", "绥化"]},
+    {"code": "32", "name": "江苏", "cities": ["南京", "苏州", "无锡", "常州", "南通", "徐州", "扬州", "盐城", "淮安", "连云港", "镇江", "泰州", "宿迁"]},
+    {"code": "33", "name": "浙江", "cities": ["杭州", "宁波", "温州", "嘉兴", "绍兴", "金华", "台州", "湖州", "丽水", "衢州", "舟山"]},
+    {"code": "34", "name": "安徽", "cities": ["合肥", "芜湖", "蚌埠", "阜阳", "淮南", "安庆", "滁州", "六安", "马鞍山", "宿州", "宣城", "铜陵", "淮北", "黄山", "池州"]},
+    {"code": "35", "name": "福建", "cities": ["福州", "厦门", "泉州", "漳州", "莆田", "三明", "南平", "龙岩", "宁德"]},
+    {"code": "36", "name": "江西", "cities": ["南昌", "九江", "赣州", "宜春", "吉安", "上饶", "抚州", "景德镇", "萍乡", "新余", "鹰潭"]},
+    {"code": "37", "name": "山东", "cities": ["济南", "青岛", "烟台", "潍坊", "临沂", "淄博", "济宁", "泰安", "威海", "德州", "聊城", "滨州", "东营", "菏泽", "枣庄", "日照"]},
+    {"code": "41", "name": "河南", "cities": ["郑州", "洛阳", "开封", "新乡", "信阳", "南阳", "安阳", "焦作", "平顶山", "许昌", "商丘", "周口", "驻马店", "鹤壁", "濮阳", "三门峡", "漯河", "济源"]},
+    {"code": "42", "name": "湖北", "cities": ["武汉", "黄冈", "宜昌", "襄阳", "荆州", "十堰", "孝感", "黄石", "咸宁", "荆门", "鄂州", "随州", "恩施"]},
+    {"code": "43", "name": "湖南", "cities": ["长沙", "衡阳", "株洲", "岳阳", "常德", "湘潭", "永州", "邵阳", "益阳", "郴州", "怀化", "娄底", "湘西", "张家界"]},
+    {"code": "44", "name": "广东", "cities": ["广州", "深圳", "东莞", "佛山", "中山", "珠海", "惠州", "汕头", "湛江", "江门", "肇庆", "茂名", "揭阳", "梅州", "清远", "韶关", "阳江", "潮州", "汕尾", "河源", "云浮"]},
+    {"code": "45", "name": "广西", "cities": ["南宁", "桂林", "柳州", "梧州", "北海", "贵港", "玉林", "百色", "钦州", "河池", "防城港", "来宾", "崇左"]},
+    {"code": "46", "name": "海南", "cities": ["海口", "三亚", "三沙", "儋州", "五指山", "琼海", "文昌", "万宁", "东方"]},
+    {"code": "51", "name": "四川", "cities": ["成都", "绵阳", "南充", "宜宾", "泸州", "德阳", "乐山", "达州", "自贡", "广安", "遂宁", "内江", "眉山", "广元", "雅安", "巴中", "资阳", "甘孜", "凉山", "阿坝"]},
+    {"code": "52", "name": "贵州", "cities": ["贵阳", "遵义", "六盘水", "安顺", "毕节", "铜仁", "黔东南", "黔南", "黔西南"]},
+    {"code": "53", "name": "云南", "cities": ["昆明", "大理", "丽江", "曲靖", "玉溪", "红河", "楚雄", "文山", "普洱", "昭通", "西双版纳", "保山", "临沧", "德宏", "迪庆", "怒江"]},
+    {"code": "54", "name": "西藏", "cities": ["拉萨", "日喀则", "昌都", "林芝", "山南", "那曲", "阿里"]},
+    {"code": "61", "name": "陕西", "cities": ["西安", "咸阳", "宝鸡", "延安", "汉中", "渭南", "榆林", "安康", "商洛", "铜川"]},
+    {"code": "62", "name": "甘肃", "cities": ["兰州", "天水", "嘉峪关", "酒泉", "张掖", "武威", "白银", "平凉", "庆阳", "定西", "陇南", "临夏", "甘南"]},
+    {"code": "63", "name": "青海", "cities": ["西宁", "海东", "海西", "海南", "海北", "玉树", "黄南", "果洛"]},
+    {"code": "64", "name": "宁夏", "cities": ["银川", "石嘴山", "吴忠", "固原", "中卫"]},
+    {"code": "65", "name": "新疆", "cities": ["乌鲁木齐", "喀什", "伊宁", "克拉玛依", "吐鲁番", "哈密", "阿克苏", "和田", "阿勒泰", "塔城", "昌吉", "博尔塔拉", "巴音郭楞", "克孜勒苏"]},
+]
+
+
+def _get_region_options() -> dict:
+    """v3.8 · 生成前端省市二级联动 JSON
+
+    返回：
+        {
+            "regions": [
+                {"code": "11", "name": "北京", "cities": ["北京"]},
+                ...
+            ],
+            "region_names": ["北京", "天津", "上海", ...]  # 省份列表
+        }
+    """
+    regions = CHINA_REGIONS
+    region_names = [r["name"] for r in regions]
+    return {
+        "regions": regions,
+        "region_names": region_names,
+    }
+
+
+# 注入到 Jinja 模板全局（一次注册，所有 render_template_string 自动可用）
+try:
+    app.jinja_env.globals["region_options"] = _get_region_options()
+except Exception as _je:
+    app.logger.warning(f"region_options 注入失败: {_je}")
+
+
+def _set_student_session(luogu_uid: str, student_id: int, real_name: str = "") -> None:
+    """v3.8 · 注册/识别成功后写入学员会话（永久 cookie · 180 天）"""
+    try:
+        session.permanent = True
+        session["student_uid"] = str(luogu_uid).strip()
+        session["student_sid"] = int(student_id) if student_id else 0
+        session["student_name"] = (real_name or "").strip()
+        session["student_login_at"] = datetime.now().isoformat(timespec="seconds")
+    except Exception as _e:
+        app.logger.warning(f"_set_student_session failed: {_e}")
+
+
+def _load_student_form_from_session() -> dict:
+    """v3.8 · 从 session 读取最近一次登录学员，回填 GENERATE_FORM_HTML 的 form 字段"""
+    uid = str(session.get("student_uid") or "").strip()
+    try:
+        stu = _admin_students.get_student_by_uid(uid)
+        if not stu:
+            return {}
+        # 同步读取手机号（v3.5.2 注册时存到 guardians）
+        phone = ""
+        try:
+            from task_store import _get_conn
+            conn = _get_conn()
+            try:
+                row = conn.execute(
+                    "SELECT g.phone FROM guardians g JOIN students s ON s.id = g.student_id "
+                    "WHERE s.luogu_uid = ? ORDER BY g.id DESC LIMIT 1",
+                    (uid,),
+                ).fetchone()
+                if row:
+                    phone = dict(row).get("phone") or ""
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        # 同步读取 GESP 自录历史奖项（如有）
+        gesp_level = ""
+        gesp_score = ""
+        gesp_year = ""
+        gesp_cert = ""
+        try:
+            from admin_students import get_student_gesp_progress
+            prog = get_student_gesp_progress(int(stu.get("id") or 0)) or {}
+            # 取最高级别的最近一次
+            best = None
+            for ex in (prog.get("exams") or []):
+                if not best or int(ex.get("level") or 0) > int(best.get("level") or 0):
+                    best = ex
+            if best:
+                gesp_level = str(best.get("level") or "")
+                gesp_score = str(best.get("score") or "")
+                gesp_year = str(best.get("award_year") or best.get("exam_year") or "")
+                gesp_cert = best.get("certificate_no") or ""
+        except Exception:
+            pass
+        return {
+            "uid": uid,
+            "real_name": (stu.get("real_name") or "").strip(),
+            "city": (stu.get("city") or "").strip(),
+            "province": (stu.get("province") or "").strip(),  # v3.8 · 省份回填
+            "grade": (stu.get("grade") or "").strip(),
+            "gender": (stu.get("gender") or "").strip(),
+            "school": (stu.get("school") or "").strip(),
+            "birth_date": (stu.get("birth_date") or "").strip(),
+            "phone": phone,
+            "gesp_level": gesp_level,
+            "gesp_score": gesp_score,
+            "gesp_year": gesp_year,
+            "gesp_certificate_no": gesp_cert,
+            # 洛谷 cookies 和 OpenAI 配置不持久化（安全性）
+            "client_id": "",
+            "c3vk": "",
+            "api_key": "",
+            "base_url": "",
+            "model_name": "",
+            "_from_session": True,  # 标记：来自 session，前端可显示"已登录"
+            "_student_name": (stu.get("real_name") or "").strip() or f"UID {uid}",
+        }
+    except Exception as _e:
+        app.logger.warning(f"_load_student_form_from_session failed: {_e}")
+        return {}
 
 
 # v3.7.1 · 全站统一皮肤（与首页 INDEX_HTML 风格一致：emerald/teal 主色 + 渐变背景）
@@ -494,6 +645,96 @@ def _source_cache_dir(uid: int | str) -> Path:
 def _source_cache_file(uid: int | str, pid: str) -> Path:
     safe_pid = "".join(ch for ch in str(pid or "").strip() if ch.isalnum() or ch in {"_", "-"})
     return _source_cache_dir(uid) / f"{safe_pid or 'unknown'}.json"
+
+
+# ========== v3.8 · 标签 & 作业记录 全局磁盘缓存（重试秒过） ==========
+# 标签是洛谷全局数据，所有用户共享一份 → _ROOT/.source_cache/_tag_maps.json
+# 作业记录是按用户隔离 → _ROOT/.source_cache/<uid>/_practice.json
+# 这两个数据每用户每小时变动很小，但当前实现每次跑报告都会重拉，
+# 加缓存后 "返回重试" 可以秒级跳过洛谷 API，只花 AI 生成时间。
+_TAG_MAPS_CACHE_FILE = _ROOT / ".source_cache" / "_tag_maps.json"
+_PRACTICE_CACHE_TTL_SECONDS = 6 * 3600  # 作业记录 6h 过期（标签基本不变，可视为永久）
+
+
+def _load_cached_tag_maps() -> tuple[dict | None, dict | None, str]:
+    """读取标签缓存（全局），返回 (tag_by_id, type_by_id, cached_at) 或 (None, None, '')"""
+    if not _TAG_MAPS_CACHE_FILE.exists():
+        return None, None, ""
+    try:
+        payload = json.loads(_TAG_MAPS_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None, None, ""
+    if not isinstance(payload, dict):
+        return None, None, ""
+    tag_by_id = payload.get("tag_by_id")
+    type_by_id = payload.get("type_by_id")
+    cached_at = str(payload.get("_cached_at", "") or "")
+    if not isinstance(tag_by_id, dict) or not isinstance(type_by_id, dict):
+        return None, None, ""
+    return tag_by_id, type_by_id, cached_at
+
+
+def _save_cached_tag_maps(tag_by_id: dict, type_by_id: dict) -> None:
+    """保存标签缓存（全局）"""
+    try:
+        _TAG_MAPS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tag_by_id": tag_by_id,
+            "type_by_id": type_by_id,
+            "_cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        _TAG_MAPS_CACHE_FILE.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except Exception as _e:
+        app.logger.warning(f"v3.8 保存 tag_maps 缓存失败: {_e}")
+
+
+def _load_cached_practice(uid: int | str) -> dict | None:
+    """读取作业记录缓存（按 uid，6h TTL）"""
+    cache_file = _source_cache_dir(uid) / "_practice.json"
+    if not cache_file.exists():
+        return None
+    try:
+        payload = json.loads(cache_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    cached_at_str = str(payload.get("_cached_at", "") or "")
+    try:
+        cached_at = datetime.strptime(cached_at_str, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+    if (datetime.now() - cached_at).total_seconds() > _PRACTICE_CACHE_TTL_SECONDS:
+        return None  # 过期
+    practice = payload.get("practice")
+    if not isinstance(practice, dict):
+        return None
+    return practice
+
+
+def _save_cached_practice(uid: int | str, practice_obj) -> None:
+    """保存作业记录缓存（按 uid）
+
+    Args:
+        practice_obj: luogu.get_user_practice(uid) 的返回值（有 .data 属性）
+    """
+    try:
+        data = getattr(practice_obj, "data", None)
+        if data is None:
+            return
+        cache_file = _source_cache_dir(uid) / "_practice.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "practice": data if isinstance(data, dict) else {},
+            "_cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        cache_file.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    except Exception as _e:
+        app.logger.warning(f"v3.8 保存 practice 缓存失败: {_e}")
 
 
 def load_cached_source_record(uid: int | str, pid: str) -> dict | None:
@@ -827,6 +1068,14 @@ INDEX_HTML = """
         .ticker::before{left:0;background:linear-gradient(90deg,var(--bg-0),transparent);}
         .ticker::after{right:0;background:linear-gradient(270deg,var(--bg-0),transparent);}
         .ticker-track{display:inline-flex;gap:42px;padding:10px 0;white-space:nowrap;animation:tick 48s linear infinite;}
+        /* v3.8 · 强基 39 校：深色 glass 风格（与页面 hero/cards 统一） */
+        .ticker-schools .ticker-track{display:inline-flex;gap:14px;padding:12px 18px;background:transparent;white-space:nowrap;animation:tick 90s linear infinite;}
+        .school-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:linear-gradient(180deg,rgba(17,23,42,.72),rgba(11,16,36,.62));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 4px 12px rgba(0,0,0,.25);font-size:13.5px;font-weight:600;color:var(--ink);border:1px solid rgba(0,255,179,.22);transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease,background .25s ease;}
+        .school-chip:hover{transform:translateY(-2px);border-color:rgba(0,255,179,.55);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 8px 20px rgba(0,255,179,.22);background:linear-gradient(180deg,rgba(17,23,42,.88),rgba(11,16,36,.78));}
+        .school-emoji{font-size:15px;line-height:1;filter:saturate(1.1);}
+        .school-img{width:24px;height:24px;object-fit:contain;flex-shrink:0;background:#fff;border-radius:4px;padding:2px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.2));}
+        .school-name{font-family:'Noto Sans SC',ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em;color:var(--ink);}
+        .ticker-schools:hover .ticker-track{animation-play-state:paused;}
         @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
         .tk-dot{color:var(--accent);}
         .tk-key{color:var(--amber);}
@@ -879,6 +1128,30 @@ INDEX_HTML = """
         .hero-title .acc{background:linear-gradient(135deg,#00FFB3 0%,#7B61FF 60%,#FFB627 120%);-webkit-background-clip:text;background-clip:text;color:transparent;}
         .hero-sub{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink-2);letter-spacing:.04em;}
         .tag-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:rgba(0,255,179,.08);border:1px solid rgba(0,255,179,.28);color:#6EE7B7;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;}
+
+        /* v3.8 · 首页主视觉下的 QQ 群号醒目条 */
+        .qq-banner{
+            display:inline-flex;align-items:center;gap:14px;margin:14px auto 0;
+            padding:12px 16px 12px 14px;border-radius:14px;
+            background:linear-gradient(135deg,rgba(0,255,179,.10) 0%,rgba(123,97,255,.10) 100%);
+            border:1px solid rgba(0,255,179,.32);
+            box-shadow:0 6px 20px -8px rgba(0,255,179,.28),inset 0 1px 0 rgba(255,255,255,.04);
+            backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+            max-width:100%;
+        }
+        .qq-banner:hover{border-color:rgba(0,255,179,.55);box-shadow:0 8px 24px -8px rgba(0,255,179,.42),inset 0 1px 0 rgba(255,255,255,.06);}
+        .qq-banner-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;background:rgba(0,255,179,.12);color:var(--accent);flex-shrink:0;}
+        .qq-banner-text{display:inline-flex;flex-direction:column;align-items:flex-start;line-height:1.2;gap:2px;}
+        .qq-banner-label{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.12em;color:var(--ink-2);text-transform:uppercase;}
+        .qq-banner-num{font-family:"JetBrains Mono",monospace;font-size:18px;font-weight:800;letter-spacing:.05em;color:var(--accent);text-shadow:0 0 12px rgba(0,255,179,.35);}
+        .qq-banner-copy{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;background:rgba(0,255,179,.10);border:1px solid rgba(0,255,179,.4);color:var(--accent);font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:all .15s ease;flex-shrink:0;}
+        .qq-banner-copy:hover{background:rgba(0,255,179,.22);border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 10px -2px rgba(0,255,179,.4);}
+        .qq-banner-copy:active{transform:translateY(0);}
+        @media (max-width:480px){
+            .qq-banner{padding:10px 12px;gap:10px;}
+            .qq-banner-icon{width:32px;height:32px;}
+            .qq-banner-num{font-size:16px;}
+        }
 
         /* 适配小屏 */
         @media (max-width:640px){
@@ -940,6 +1213,20 @@ INDEX_HTML = """
             &gt; 基于洛谷做题数据 · 多维算法画像 · 一键生成可分享测评报告
             <span class="caret"></span>
         </p>
+        <!-- v3.8 · 醒目的 QQ 交流群入口（替代原底栏的 build/QQ 提示） -->
+        <div class="qq-banner rise d3" role="group" aria-label="QQ 交流群">
+            <span class="qq-banner-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C7.58 2 4 5.58 4 10c0 2.07.85 3.96 2.24 5.39-.27.83-.76 1.84-1.69 2.69-.18.17-.07.46.18.45 1.65-.06 3.21-.7 4.31-1.34.93.27 1.94.43 2.96.43s2.03-.16 2.96-.43c1.1.64 2.66 1.28 4.31 1.34.25.01.36-.28.18-.45-.93-.85-1.42-1.86-1.69-2.69C19.15 13.96 20 12.07 20 10c0-4.42-3.58-8-8-8zM8.5 9.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></svg>
+            </span>
+            <div class="qq-banner-text">
+                <span class="qq-banner-label">QQ 交流群</span>
+                <span id="qqGroup" class="qq-banner-num select-all">610931699</span>
+            </div>
+            <button id="copyQqBtn" type="button" class="qq-banner-copy" title="复制群号">
+                <span class="copy-label">copy</span>
+                <span class="copied-label" style="display:none">✓ 已复制</span>
+            </button>
+        </div>
     </section>
 
     <!-- 主 CTA -->
@@ -1004,26 +1291,69 @@ INDEX_HTML = """
         </div>
     </section>
 
-    <!-- 滚动代码日志带 -->
-    <section class="ticker rise d5" aria-hidden="true">
-        <div class="ticker-track">
-            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
-            <!-- 复制一份用于无缝循环 -->
-            <span><span class="tk-dot">●</span> <span class="tk-key">fetch</span> luogu.ac/record <span class="tk-mute">...</span> <span class="tk-num">1024</span> rows</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">cluster</span> algorithms <span class="tk-mute">→</span> 10 categories</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">llm</span> <span class="tk-mute">draft</span> ai_evaluation <span class="tk-mute">...</span> 87%</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">render</span> knowledge_tree.svg <span class="tk-mute">×</span> <span class="tk-num">4</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">build</span> radar_chart.png <span class="tk-mute">·</span> 6 axes</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">emit</span> poster.html <span class="tk-mute">→</span> <span class="tk-num">2048×2730</span></span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">export</span> report.md / report.html / report.pdf</span>
-            <span><span class="tk-dot">●</span> <span class="tk-key">save</span> reports/&lt;uid&gt;_&lt;name&gt;/ <span class="tk-mute">ok</span></span>
+    <!-- 强基 39 校 · 滚动展示（校徽 + 校名） -->
+    <section class="ticker rise d5" aria-label="强基计划 39 所高校">
+        <div class="ticker-track ticker-schools">
+            {# v3.7 · 强基 39 校：真实校徽 PNG + 校名（v3.8 替换 emoji）
+               缺失校徽自动用 emoji 兜底（前端 onerror）#}
+            {% set qiangji_schools = [
+                ('pku',   '北京大学',         '🔵', '北京'),
+                ('thu',   '清华大学',         '🟣', '北京'),
+                ('ruc',   '中国人民大学',     '🔴', '北京'),
+                ('buaa',  '北京航空航天大学', '🔵', '北京'),
+                ('bit',   '北京理工大学',     '🟢', '北京'),
+                ('cau',   '中国农业大学',     '🟡', '北京'),
+                ('bnu',   '北京师范大学',     '🔵', '北京'),
+                ('muc',   '中央民族大学',     '⚪', '北京'),
+                ('nankai','南开大学',         '🟣', '天津'),
+                ('tju',   '天津大学',         '🔵', '天津'),
+                ('dlut',  '大连理工大学',     '🟢', '辽宁'),
+                ('neu',   '东北大学',         '🟡', '辽宁'),
+                ('jlu',   '吉林大学',         '🔴', '吉林'),
+                ('hit',   '哈尔滨工业大学',   '🔵', '黑龙江'),
+                ('fdu',   '复旦大学',         '🔴', '上海'),
+                ('tongji','同济大学',         '🔵', '上海'),
+                ('sjtu',  '上海交通大学',     '🔵', '上海'),
+                ('ecnu',  '华东师范大学',     '🟢', '上海'),
+                ('nju',   '南京大学',         '🟣', '江苏'),
+                ('seu',   '东南大学',         '🟡', '江苏'),
+                ('zju',   '浙江大学',         '🔴', '浙江'),
+                ('ustc',  '中国科学技术大学', '🔴', '安徽'),
+                ('xmu',   '厦门大学',         '🟡', '福建'),
+                ('sdu',   '山东大学',         '🔵', '山东'),
+                ('ouc',   '中国海洋大学',     '🔵', '山东'),
+                ('whu',   '武汉大学',         '🟣', '湖北'),
+                ('hust',  '华中科技大学',     '🟢', '湖北'),
+                ('csu',   '中南大学',         '🟡', '湖南'),
+                ('hnu',   '湖南大学',         '🔴', '湖南'),
+                ('nudt',  '国防科技大学',     '🟢', '湖南'),
+                ('sysu',  '中山大学',         '🔵', '广东'),
+                ('scut',  '华南理工大学',     '🔴', '广东'),
+                ('scu',   '四川大学',         '🟡', '四川'),
+                ('cqu',   '重庆大学',         '🔵', '重庆'),
+                ('uestc', '电子科技大学',     '🔵', '四川'),
+                ('xjtu',  '西安交通大学',     '🔴', '陕西'),
+                ('nwpu',  '西北工业大学',     '🔵', '陕西'),
+                ('nwafu', '西北农林科技大学', '🟢', '陕西'),
+                ('lzu',   '兰州大学',         '🔵', '甘肃'),
+            ] %}
+            {% for s in qiangji_schools %}
+            <span class="school-chip" title="{{ s[1] }} · {{ s[3] }}">
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+                <span class="school-emoji" style="display:none">{{ s[2] }}</span>
+                <span class="school-name">{{ s[1] }}</span>
+            </span>
+            {% endfor %}
+            {# 复制一份用于无缝循环滚动 #}
+            {% for s in qiangji_schools %}
+            <span class="school-chip" title="{{ s[1] }} · {{ s[3] }}" aria-hidden="true">
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+                <span class="school-emoji" style="display:none">{{ s[2] }}</span>
+                <span class="school-name">{{ s[1] }}</span>
+            </span>
+            {% endfor %}
         </div>
     </section>
 
@@ -1063,12 +1393,6 @@ INDEX_HTML = """
     <!-- 底栏 -->
     <footer class="text-center text-[11px] text-[var(--ink-3)] font-mono pt-2 rise d6">
         <span>© 2026 信竞 AI 报告 · Luogu-AI-Report</span>
-        <span class="mx-2 opacity-40">·</span>
-        <span>build <span class="text-[var(--accent)]">ba43a4b</span></span>
-        <span class="mx-2 opacity-40">·</span>
-        <span>QQ <span id="qqGroup" class="text-[var(--accent)] font-semibold select-all">610931699</span>
-            <button id="copyQqBtn" type="button" class="ml-1 px-1.5 py-0.5 rounded border border-[var(--line-2)] text-[var(--ink-2)] hover:text-[var(--accent)] hover:border-[var(--accent)]">copy</button>
-        </span>
     </footer>
 
 </main>
@@ -1086,13 +1410,17 @@ INDEX_HTML = """
         tick();setInterval(tick,1000);
     })();
 
-    // 复制通用
+    // 复制通用（支持按钮内嵌 .copy-label / .copied-label 两个 span）
     function bindCopy(btnId,textId,okMsg,failMsg){
         var btn=document.getElementById(btnId);
         var textEl=document.getElementById(textId);
         if(!btn||!textEl) return;
+        var copyLabel=btn.querySelector('.copy-label');
+        var copiedLabel=btn.querySelector('.copied-label');
+        var hasDualLabel=!!(copyLabel&&copiedLabel);
         btn.addEventListener('click', async function(){
             var value=(textEl.textContent||'').trim();
+            var done=false;
             try{
                 if(navigator.clipboard&&navigator.clipboard.writeText){
                     await navigator.clipboard.writeText(value);
@@ -1102,11 +1430,23 @@ INDEX_HTML = """
                     document.body.appendChild(ta);ta.focus();ta.select();
                     document.execCommand('copy');document.body.removeChild(ta);
                 }
-                btn.textContent=okMsg;
-            }catch(e){
-                btn.textContent=failMsg;
+                done=true;
+            }catch(e){}
+            if(hasDualLabel){
+                copyLabel.style.display='none';
+                copiedLabel.style.display='inline';
+                copiedLabel.textContent=done?('✓ '+okMsg):failMsg;
+            }else{
+                btn.textContent=done?okMsg:failMsg;
             }
-            setTimeout(function(){btn.textContent='copy';},1200);
+            setTimeout(function(){
+                if(hasDualLabel){
+                    copyLabel.style.display='';
+                    copiedLabel.style.display='none';
+                }else{
+                    btn.textContent='copy';
+                }
+            },1400);
         });
     }
     bindCopy('copyQqBtn','qqGroup','copied!','failed');
@@ -1322,6 +1662,7 @@ def _generate_ai_report_artifacts(
     school: str,
     grade: str,
     resume_md_prefix: str | None = None,
+    luogu_uid: str = "",  # v3.8 · 注入档案 + 奖项 + 政策
 ) -> None:
     current_stage = "生成 AI 报告"
     with TASKS_LOCK:
@@ -1368,6 +1709,7 @@ def _generate_ai_report_artifacts(
                     model_name,
                     output_path=str(md_path),
                     resume_prefix=current_resume or None,
+                    luogu_uid=luogu_uid,  # v3.8 · 注入档案 + 奖项 + 政策匹配
                 )
                 ai_holder["exc"] = None
                 break
@@ -1448,7 +1790,7 @@ def _generate_ai_report_artifacts(
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(report_md)
         except Exception as _norm_err:
-            log_message("WARN", f"normalize_report_markdown failed in main flow: {_norm_err}")
+            app.logger.warning(f"normalize_report_markdown failed in main flow: {_norm_err}")
 
     current_stage = "生成图表与 HTML/PDF"
     chart_paths = generate_chart_images(export_data, str(assets_dir))
@@ -1473,6 +1815,31 @@ def _generate_ai_report_artifacts(
 
     # v3.7 · 报告生成后立刻标记 hide_pdf=1（统一走海报扫码，不开放 PDF 直链）
     _record_hide_pdf(task_id)
+
+    # v3.8 · 报告生成完成时预渲染分享海报 PNG → 写入 report_dir/share-card.png
+    # 用户点击"📤 生成海报分享"时直接读取缓存（O(1)），不再现场 matplotlib 渲染（5-15s）
+    try:
+        _cached_uid = (str(form.get("luogu_uid") or form.get("uid") or "")).strip()
+        if not _cached_uid and out_dir and out_dir.exists():
+            # 从目录名兜底提取（目录命名规则：<real_name>_<uid>_<timestamp>）
+            _dir_name = out_dir.name
+            _parts = _dir_name.split("_")
+            if len(_parts) >= 2 and _parts[-2].isdigit():
+                _cached_uid = _parts[-2]
+        if _cached_uid:
+            _sc_data = _build_share_card_data(_cached_uid)
+            if _sc_data:
+                # qr_url 用 base URL（让本地和线上都能扫码）
+                _base = request.host_url.rstrip("/") if request else ""
+                if not _base:
+                    _base = "https://oi.aijiangti.cn"  # v3.8 · 部署默认域名
+                _sc_qr = f"{_base}/r/{_cached_uid}"
+                _sc_png = _render_share_card_png(_sc_data, _sc_qr)
+                _sc_path = out_dir / "share-card.png"
+                _sc_path.write_bytes(_sc_png)
+                app.logger.info(f"v3.8 share-card.png cached: {_sc_path} ({len(_sc_png)} bytes)")
+    except Exception as _sc_err:
+        app.logger.warning(f"v3.8 预渲染分享海报失败（不影响主流程）: {_sc_err}")
 
 
 def validate_cookies(form: dict) -> dict[str, object]:
@@ -1515,14 +1882,29 @@ def validate_cookies(form: dict) -> dict[str, object]:
 def run_generation(task_id: str, form: dict):
     current_stage = "初始化"
     try:
+        # v3.8 · 自动补全学员档案（保证 AI 报告 / 海报用得到 city/school/province）
+        _form_uid = str(form.get("luogu_uid") or form.get("uid") or "").strip()
+        if _form_uid:
+            _auto_upsert_student_profile(_form_uid, form)
+
         with TASKS_LOCK:
             update_task(task_id, status="running", message="正在连接洛谷 API...")
 
         api_key, api_key_source = resolve_openai_api_key(form)
         base_url = form.get("base_url", "").strip() or DEFAULT_BASE_URL or os.environ.get("OPENAI_BASE_URL", "") or None
         model_name = form.get("model_name", "").strip() or DEFAULT_MODEL_NAME or os.environ.get("OPENAI_MODEL_NAME", "") or "gpt-4o"
-        max_passed = int(form.get("max_passed", 10))
-        max_failed = int(form.get("max_failed", 5))
+        # v3.8 · 全量抓取默认开启，单侧上限 2500 题（防止极端账号拖死服务）
+        MAX_FETCH_LIMIT = 2500
+        try:
+            max_passed = int(form.get("max_passed", MAX_FETCH_LIMIT) or MAX_FETCH_LIMIT)
+        except (TypeError, ValueError):
+            max_passed = MAX_FETCH_LIMIT
+        try:
+            max_failed = int(form.get("max_failed", MAX_FETCH_LIMIT) or MAX_FETCH_LIMIT)
+        except (TypeError, ValueError):
+            max_failed = MAX_FETCH_LIMIT
+        max_passed = max(0, min(max_passed, MAX_FETCH_LIMIT))
+        max_failed = max(0, min(max_failed, MAX_FETCH_LIMIT))
         student_name = form.get("student_name", "未知选手").strip()
         school = form.get("school", "未知学校").strip()
         grade = form.get("grade", "未知年级").strip()
@@ -1592,6 +1974,7 @@ def run_generation(task_id: str, form: dict):
                 school=school,
                 grade=grade,
                 resume_md_prefix=resume_md_prefix or None,
+                luogu_uid=str(form.get("luogu_uid", "") or "").strip(),  # v3.8 · 注入档案
             )
             return
 
@@ -1607,8 +1990,37 @@ def run_generation(task_id: str, form: dict):
             update_task(task_id, message=f"已连接，用户 ID: {uid}，正在拉取做题记录...")
 
         current_stage = "获取标签与练习数据"
-        tag_by_id, type_by_id = _build_tag_maps(luogu)
-        practice = luogu.get_user_practice(uid)
+        # v3.8 · 先尝试命中磁盘缓存（标签全局，作业记录 6h TTL），避免每次重试都重拉
+        cached_tag_by_id, cached_type_by_id, tag_cached_at = _load_cached_tag_maps()
+        if cached_tag_by_id is not None:
+            tag_by_id, type_by_id = cached_tag_by_id, cached_type_by_id
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=f"✅ 命中标签缓存（{tag_cached_at}），跳过洛谷拉取，秒进下一步",
+                )
+        else:
+            tag_by_id, type_by_id = _build_tag_maps(luogu)
+            _save_cached_tag_maps(tag_by_id, type_by_id)
+
+        cached_practice_data = _load_cached_practice(uid)
+        if cached_practice_data is not None:
+            # v3.8 · 构造一个轻量代理对象（split_practice_problems 只用 .data）
+            class _PracticeProxy:
+                __slots__ = ("data",)
+
+                def __init__(self, data):
+                    self.data = data
+
+            practice = _PracticeProxy(cached_practice_data)
+            with TASKS_LOCK:
+                update_task(
+                    task_id,
+                    message=f"✅ 命中作业记录缓存（6h TTL），跳过洛谷拉取，秒进下一步",
+                )
+        else:
+            practice = luogu.get_user_practice(uid)
+            _save_cached_practice(uid, practice)
 
         current_stage = "预检提交记录权限"
         luogu.get_record_list(page=1, uid=uid, user=str(uid))
@@ -1869,6 +2281,7 @@ def run_generation(task_id: str, form: dict):
             student_name=student_name,
             school=school,
             grade=grade,
+            luogu_uid=_form_uid,  # v3.8 · 注入档案（已含 luogu_uid/uid 兜底）
         )
     except Exception as e:
         # 用 task 表里最新写入的 stage 替换外层缓存的 current_stage，
@@ -1915,8 +2328,10 @@ def validate_cookies_page():
 def generate():
     form_data = request.form.to_dict()
     task_id = str(uuid.uuid4())
+    # v3.8 · 取 UID（兜底 luogu_uid/uid 两种字段名）供 tasks.luogu_uid 写入
+    _g_uid = str(form_data.get("luogu_uid") or form_data.get("uid") or "").strip()
     with TASKS_LOCK:
-        insert_task(task_id, status="queued", message="排队中...")
+        insert_task(task_id, status="queued", message="排队中...", luogu_uid=_g_uid)
         update_task(
             task_id,
             student_name=str(form_data.get("student_name", "未知选手") or "未知选手").strip(),
@@ -1944,7 +2359,7 @@ STATUS_HTML = """
     <div class="max-w-2xl mx-auto py-6 space-y-4">
         <div class="app-card text-center">
             <h1 class="app-title">📊 报告生成状态</h1>
-            <p class="app-subtitle">AI 正在帮您的孩子写报告 · 完成后可继续操作</p>
+            <p class="app-subtitle">AI 正在生成报告，请不要关闭本页面</p>
         </div>
         <div class="app-card text-center">
             <div class="mb-4">
@@ -2007,12 +2422,13 @@ STATUS_HTML = """
         {% endif %}
         {% elif status == 'done' %}
         <div class="space-y-3">
-            <a href="{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
-            {# v3.7 · PDF 暂未开放：灰显按钮，强制走海报分享 #}
-            <button type="button" disabled class="app-btn bg-gray-200 text-gray-500 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享">🔒 PDF 暂未开放</button>
-            <a href="{{ md }}" target="_blank" class="app-btn app-btn-secondary">📄 查看 Markdown 原文</a>
+            {# v3.8 · 用户态报告页：HTML + 海报分享 + 家长订阅版（PDF/Markdown 隐藏到 /admin 后台） #}
+            <div class="grid grid-cols-2 gap-3">
+                <a href="{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
+                <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
+            </div>
             {% if me_url %}
-            {# v3.6 修复：点击"最终生成家长订阅版"按钮 → 直接 POST 触发生成（不再跳到 API key 表单页） #}
+            {# v3.8 · 恢复"生成家长订阅版"入口（之前和 PDF 一起被误删） #}
             <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block">
                 <button type="submit" class="app-btn app-btn-amber">
                     📨 最终生成家长订阅版
@@ -2021,6 +2437,98 @@ STATUS_HTML = """
             </form>
             {% endif %}
         </div>
+
+        {# v3.8 · 海报分享模态框（点击右上方"生成海报分享"触发） #}
+        <div id="posterModal" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+             onclick="if(event.target===this) closeSharePoster()">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 relative">
+                <button type="button" onclick="closeSharePoster()" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-lg">×</button>
+                <h3 class="text-lg font-bold text-gray-800 mb-1 text-center">📤 分享海报</h3>
+                <p class="text-xs text-gray-500 text-center mb-3">首次生成约 5-15 秒，生成后自动下载</p>
+                <div class="flex justify-center bg-gray-50 border border-gray-200 rounded-lg p-2 mb-3 min-h-[200px] items-center relative">
+                    <img id="posterImg" src="" alt="学习报告海报"
+                         class="max-w-full h-auto rounded shadow"
+                         style="display:none"
+                         onerror="this.style.display='none'; var eb=document.getElementById('posterError'); if(eb){eb.textContent='海报加载失败';eb.style.display='';}" />
+                    <div id="posterLoading" class="text-center text-gray-500">
+                        <div class="inline-block w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                        <p class="text-sm">海报生成中…</p>
+                        <p class="text-[10px] text-gray-400 mt-1">首次需要 matplotlib 渲染，约 5-15 秒</p>
+                    </div>
+                    <div id="posterError" class="text-center text-rose-600 text-sm" style="display:none"></div>
+                </div>
+                <div class="flex gap-2">
+                    <a id="posterDownloadBtn" href="/me/{{ luogu_uid }}/share-card.png" download="学习报告海报_{{ luogu_uid }}.png"
+                       class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
+                    <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            function openSharePoster(){
+                var m=document.getElementById('posterModal');
+                var img=document.getElementById('posterImg');
+                var loading=document.getElementById('posterLoading');
+                var errorBox=document.getElementById('posterError');
+                var btn=document.getElementById('posterDownloadBtn');
+                if(!m||!img) return;
+                // 初始态：loading 显、img 隐、error 隐
+                if(loading) loading.style.display='';
+                if(errorBox) errorBox.style.display='none';
+                img.style.display='none';
+                m.classList.remove('hidden');
+                // 1) 预加载海报 PNG（matplotlib 现场渲染，可能 5-15s）
+                var url='/me/{{ luogu_uid }}/share-card.png?t='+Date.now();
+                var pre=new Image();
+                pre.onload=function(){
+                    // 2) 加载完成 → 显示 + 自动下载
+                    img.src=url;
+                    img.style.display='';
+                    if(loading) loading.style.display='none';
+                    if(errorBox) errorBox.style.display='none';
+                    triggerDownload(url);
+                };
+                pre.onerror=function(){
+                    // 3) 失败：loading 隐、error 显（提示重试）
+                    if(loading) loading.style.display='none';
+                    img.style.display='none';
+                    if(errorBox){
+                        errorBox.textContent='海报生成失败（HTTP '+(pre.failedStatus||'?')+'）· 请稍后重试或联系管理员';
+                        errorBox.style.display='';
+                    }
+                };
+                pre.src=url;
+
+                function triggerDownload(finalUrl){
+                    try{
+                        // 优先复用"再次下载"按钮（带 download 属性）
+                        if(btn){
+                            btn.href=finalUrl;
+                            btn.setAttribute('download','学习报告海报_{{ luogu_uid }}.png');
+                            btn.click();
+                            return;
+                        }
+                    }catch(e){}
+                    // 兜底：构造临时 a 标签
+                    try{
+                        var a=document.createElement('a');
+                        a.href=finalUrl;
+                        a.download='学习报告海报_{{ luogu_uid }}.png';
+                        a.style.display='none';
+                        document.body.appendChild(a);a.click();document.body.removeChild(a);
+                    }catch(e){console.error('[poster download]',e);}
+                }
+            }
+            function closeSharePoster(){
+                var m=document.getElementById('posterModal');
+                if(m) m.classList.add('hidden');
+            }
+            window.openSharePoster=openSharePoster;
+            window.closeSharePoster=closeSharePoster;
+            document.addEventListener('keydown',function(e){if(e.key==='Escape')closeSharePoster();});
+        })();
+        </script>
         {% elif status == 'error' %}
         <a href="{{ retry_url }}" class="app-btn app-btn-primary mt-4">返回重试</a>
         {% if me_url %}
@@ -2044,9 +2552,8 @@ STATUS_HTML = """
 """
 
 
-# v3.7.1 · 报告列表的「单行模板」（admin 后台 / 状态页共用）
-# - PDF 链接灰显：v3.7 PDF 暂未开放（生成但不下载，强制走海报分享）
-# - HTML / MD 保持原样可用
+# v3.8 · 报告列表的「单行模板」（admin 后台用）
+# - HTML / PDF / MD 全部可下载（用户态报告页已隐藏 PDF/MD，统一走海报）
 # - 状态 pill / 链接 统一 emerald 主色（与首页一致）
 LIST_REPORTS_HTML = """
 {# 单个报告在列表中的一行（含 HTML / PDF / MD 三个操作 pill） #}
@@ -2054,9 +2561,9 @@ LIST_REPORTS_HTML = """
   {% if task.html %}
   <a href="{{ task.html }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">HTML</a>
   {% endif %}
-  {# v3.7 · PDF 灰显 pill：暂不开放，引导走海报分享 #}
+  {# v3.8 · admin 后台可下载 PDF（仅后台开放） #}
   {% if task.pdf %}
-  <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded cursor-not-allowed" title="v3.7 暂未开放 PDF 版本">🔒 PDF 暂未开放</span>
+  <a href="{{ task.pdf }}" download class="text-emerald-700 hover:underline text-xs font-semibold" title="v3.8 仅管理员可下载 PDF">PDF</a>
   {% endif %}
   {% if task.md %}
   <a href="{{ task.md }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">MD</a>
@@ -2129,6 +2636,42 @@ def serve_static(filename):
     if target.is_file():
         return send_file(str(target), conditional=True)
     return ("Not Found", 404)
+
+
+@app.route("/admin/reports/<path:filename>")
+def admin_serve_report(filename):
+    """v3.8 · admin 后台白名单：直接读 reports/ 下文件，跳过 _check_file_visibility 拦截。
+
+    - 必须 admin 登录（否则跳 /admin/login）
+    - 不走 hide_pdf / hide_html 拦截
+    - 支持强制下载（as_attachment=True + download_name）
+    """
+    if not is_admin_authenticated():
+        # 走普通拦截，避免暴露文件存在性
+        from flask import redirect, url_for
+        return redirect(url_for("admin_login", next=f"/admin/reports/{filename}"))
+    # 防止路径穿越：拒绝 '..' / 绝对路径 / 跳到 reports 之外
+    if ".." in filename or filename.startswith("/") or "\\" in filename:
+        return ("Forbidden", 403)
+    from pathlib import Path as _P
+    reports_root = (_P(__file__).resolve().parent / "reports")
+    if not reports_root.exists():
+        reports_root = (_P.cwd() / "reports")
+    target = (reports_root / filename).resolve()
+    try:
+        target.relative_to(reports_root.resolve())
+    except ValueError:
+        return ("Forbidden", 403)
+    if not target.is_file():
+        return ("Not Found", 404)
+    # 推断下载名（保留原文件名）
+    download_name = target.name
+    return send_file(
+        str(target),
+        as_attachment=True,
+        download_name=download_name,
+        conditional=True,
+    )
 
 
 @app.route("/reports/<path:filename>")
@@ -2470,8 +3013,8 @@ ADMIN_HTML = """
                                 <a href="{{ task.html }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold">HTML</a>
                                 {% endif %}
                                 {% if task.pdf %}
-                                {# v3.7 · PDF 暂未开放：灰显 pill，强制走海报分享 #}
-                                <span class="text-xs px-2 py-0.5 bg-gray-200 text-gray-500 rounded cursor-not-allowed ml-1" title="v3.7 暂未开放 PDF 版本">🔒 PDF</span>
+                                {# v3.8 · admin 后台可下载 PDF（用户态报告页已隐藏，统一走海报） #}
+                                <a href="/admin/reports/{{ task.pdf | replace('reports/', '') }}" download class="text-emerald-700 hover:underline text-xs font-semibold ml-1" title="v3.8 仅管理员可下载 PDF">PDF</a>
                                 {% endif %}
                                 {% if task.md %}
                                 <a href="{{ task.md }}" target="_blank" class="text-emerald-700 hover:underline text-xs font-semibold ml-1">MD</a>
@@ -2479,6 +3022,13 @@ ADMIN_HTML = """
                                 {% if task.can_rebuild %}
                                 <form method="post" action="/admin/rebuild-html/{{ task.id }}" class="inline-block ml-1">
                                     <button type="submit" class="text-xs text-emerald-700 hover:underline font-semibold">重建 HTML</button>
+                                </form>
+                                {% endif %}
+                                {# v3.8 · admin 强制删除（DB + 磁盘文件，绕过 24h 限流）#}
+                                {% if task.id and not task.is_orphan %}
+                                <form method="post" action="/admin/reports/{{ task.id }}/delete" class="inline-block ml-1"
+                                      onsubmit="return confirm('确认删除任务 {{ task.id[:8] }}... 吗？\\n\\n将删除数据库记录和报告文件，该学员 24h 限流会解除。\\n（可重新生成报告）')">
+                                    <button type="submit" class="text-xs text-rose-600 hover:text-rose-800 hover:underline font-semibold" title="v3.8 强制删除报告，绕过 24h 限流">🗑 删除</button>
                                 </form>
                                 {% endif %}
                                 {% if task.rebuild_status == 'running' %}
@@ -2548,6 +3098,162 @@ def _run_rebuild_existing_report_html(task_id: str) -> None:
         set_rebuild_state(task_id, "error", str(exc))
     else:
         set_rebuild_state(task_id, "done", "HTML/PDF 已重建完成")
+
+
+def _auto_upsert_student_profile(luogu_uid: str, form: dict) -> None:
+    """v3.8 · 自动补全学员档案
+
+    解决"明明填写了城市，海报/AI 报告却说缺少城市/学校"的问题：
+      - 如**果**学**员**档**案**不**存**在** → **自**动**创**建**（**从** form 取**姓**名**/**城**市**/**省**份**/**学**校**/**年**级**）
+      - 如**果**学**员**档**案**存**在**但** city/school/province **为**空** → **用** form 中**的**信**息** UPDATE
+
+    不打**断** run_generation 主**流**程**。
+    """
+    if not str(luogu_uid or "").strip():
+        return
+    try:
+        existing = _admin_students.get_student_by_uid(luogu_uid)
+        # 从 form 提取字段（统一 strip）
+        name = (form.get("student_name") or "").strip()
+        city = (form.get("city") or "").strip()
+        province = (form.get("province") or "").strip()
+        school = (form.get("school") or "").strip()
+        grade = (form.get("grade") or "").strip()
+        gender = (form.get("gender") or "").strip().upper()
+        if gender and gender not in ("M", "F"):
+            gender = ""
+
+        if not existing:
+            # 学员档案不存在 → 创建（必须有姓名 + UID 才有意义）
+            if not name:
+                return
+            try:
+                _admin_students.create_student(
+                    luogu_uid=str(luogu_uid).strip(),
+                    real_name=name or None,
+                    school=school or None,
+                    grade=grade or None,
+                    city=city or None,
+                    province=province or None,
+                    gender=gender or None,
+                    is_minor=False,  # 兜底用 False，由家长后续补未成年人标记
+                    registered_via="auto_from_report",
+                )
+                app.logger.info(
+                    f"v3.8 自动创建学员档案 UID={luogu_uid} (name={name}, city={city}, school={school})"
+                )
+                return
+            except Exception as _ce:
+                app.logger.warning(f"v3.8 自动创建学员档案失败 UID={luogu_uid}: {_ce}")
+                return
+
+        # 档案存在 → 检查空字段并 UPDATE
+        updates: dict[str, str] = {}
+        if not (existing.get("city") or "").strip() and city:
+            updates["city"] = city
+        if not (existing.get("school") or "").strip() and school:
+            updates["school"] = school
+        if not (existing.get("province") or "").strip() and province:
+            updates["province"] = province
+        if not (existing.get("grade") or "").strip() and grade:
+            updates["grade"] = grade
+        if not (existing.get("real_name") or "").strip() and name:
+            updates["real_name"] = name
+        if not (existing.get("gender") or "").strip() and gender in ("M", "F"):
+            updates["gender"] = gender
+
+        if not updates:
+            return
+
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            set_clauses = ", ".join(f"{k} = ?" for k in updates.keys())
+            values = list(updates.values()) + [int(existing["id"])]
+            conn.execute(f"UPDATE students SET {set_clauses} WHERE id = ?", values)
+            conn.commit()
+            app.logger.info(
+                f"v3.8 自动补全学员档案 UID={luogu_uid} (sid={existing['id']}): 补全字段 {list(updates.keys())}"
+            )
+        except Exception as _ue:
+            app.logger.warning(f"v3.8 自动补全学员档案失败 UID={luogu_uid}: {_ue}")
+        finally:
+            conn.close()
+    except Exception as _e:
+        app.logger.warning(f"v3.8 _auto_upsert_student_profile 异常 UID={luogu_uid}: {_e}")
+
+
+def _purge_report_files_from_task(task: dict) -> int:
+    """v3.8 · 物理删除一条任务关联的 html / pdf / md 文件，返回实际删除的文件数
+
+    Args:
+        task: task_store.get_task 返回的字典（含 html/pdf/md 字段 · 形如 /reports/xxx/yyy.html?v=1）
+
+    安全：
+        - 仅删除项目根 / reports 目录下的文件
+        - 自动剥除 /reports/ 前缀 + ?v=xxx 后缀
+        - 缺失/越界文件跳过
+    """
+    if not task:
+        return 0
+    reports_root = (_ROOT / "reports")
+    if not reports_root.exists():
+        return 0
+    deleted = 0
+    for key in ("html", "pdf", "md"):
+        raw = str(task.get(key) or "").strip()
+        if not raw or not raw.startswith("/"):
+            continue
+        # 去掉 ?v=xxx
+        rel = raw.split("?", 1)[0].lstrip("/")
+        # 去掉 /reports/ 前缀（task 字段存的是 /reports/xxx/yyy.html）
+        if rel.startswith("reports/"):
+            rel = rel[len("reports/"):]
+        if not rel or ".." in rel:
+            continue
+        try:
+            target = (reports_root / rel).resolve()
+            target.relative_to(reports_root.resolve())  # 防越界
+        except Exception:
+            continue
+        try:
+            if target.is_file():
+                target.unlink()
+                deleted += 1
+        except Exception as _e:
+            app.logger.warning(f"删除报告文件失败 {target}: {_e}")
+    return deleted
+
+
+@app.route("/admin/reports/<task_id>/delete", methods=["POST"])
+def admin_delete_report(task_id: str):
+    """v3.8 · admin 强制删除一条历史报告（DB + 磁盘文件），用于绕过 24h 限流或清理脏数据"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return redirect(url_for("admin_page", notice="任务 ID 缺失", notice_type="error"))
+    # 1. 读取任务（拿到 html/pdf/md 路径）
+    try:
+        from task_store import get_task as _get_task
+        task = _get_task(task_id)
+    except Exception as _e:
+        app.logger.warning(f"admin_delete_report · get_task 失败: {_e}")
+        task = None
+    # 2. 删磁盘文件
+    files_deleted = _purge_report_files_from_task(task or {})
+    # 3. 删 DB
+    try:
+        from task_store import delete_task as _delete_task
+        db_deleted = _delete_task(task_id)
+    except Exception as _e:
+        app.logger.error(f"admin_delete_report · delete_task 失败: {_e}")
+        return redirect(url_for("admin_page", notice=f"DB 删除失败: {_e}", notice_type="error"))
+    if not db_deleted and not files_deleted:
+        return redirect(url_for("admin_page", notice=f"任务 {task_id} 不存在", notice_type="error"))
+    msg = f"已删除任务 {task_id[:8]}...（DB 1 条 + 磁盘 {files_deleted} 个文件）。该学员 24h 限流已解除。"
+    return redirect(url_for("admin_page", notice=msg, notice_type="success"))
 
 
 @app.route("/admin/rebuild-html/<task_id>", methods=["POST"])
@@ -2684,6 +3390,8 @@ def admin_students_new():
                 real_name=str(request.form.get("real_name", "") or "").strip() or None,
                 school=str(request.form.get("school", "") or "").strip() or None,
                 grade=str(request.form.get("grade", "") or "").strip() or None,
+                city=str(request.form.get("city", "") or "").strip() or None,  # v3.8 · 城市
+                province=str(request.form.get("province", "") or "").strip() or None,  # v3.8 · 省份
                 is_minor=request.form.get("is_minor") == "1",
                 note=str(request.form.get("note", "") or "").strip() or None,
             )
@@ -2743,15 +3451,49 @@ def admin_students_delete(student_id: int):
 def _collect_report_data(student: dict) -> dict:
     """共享报告数据生成器（v3.5.2 · 同一份洛谷数据 + AI 分析 → 3 套 UI）"""
     sid = int(student.get("id") or 0)
+    luogu_uid = str(student.get("luogu_uid") or "").strip()
+    student_name = (student.get("real_name") or "").strip()
     progress = _admin_students.get_student_gesp_progress(sid) or {}
-    # 错题本（demo 用 stub · 真实从 luogu_evaluator 抽）
-    mistake_count = 0
+    # v3.8 · 错题本：优先从最新 AI 报告的 export.json.failed_items 抽取（未通过题目 + 标签）
+    mistakes: list[dict] = []
     try:
-        from mistake_book import list_mistakes
-        mistakes = list_mistakes(sid) or []
-        mistake_count = len(mistakes)
-    except Exception:
-        mistakes = []
+        latest = _find_latest_report_dir(luogu_uid, student_name)
+        if latest:
+            export_json = latest / "export.json"
+            if export_json.exists():
+                import json as _json
+                _exp = _json.loads(export_json.read_text(encoding="utf-8", errors="replace"))
+                for fi in (_exp.get("failed_items") or []):
+                    p = fi.get("problem") or {}
+                    if not isinstance(p, dict):
+                        continue
+                    pid = (p.get("pid") or "").strip()
+                    if not pid:
+                        continue
+                    # tags 可能是 tag_id 列表，尝试通过 tag_by_id 查名字（若有）
+                    tag_name = ""
+                    tag_ids = p.get("tags") or []
+                    if isinstance(tag_ids, list) and tag_ids:
+                        # 第一个 tag 作为主分类
+                        first = tag_ids[0]
+                        tag_name = str(first) if isinstance(first, str) else ""
+                    mistakes.append({
+                        "problem_id": pid,
+                        "pid": pid,
+                        "title": p.get("title") or "未命名题目",
+                        "tag": tag_name or "未分类",
+                        "difficulty": p.get("difficulty"),
+                    })
+    except Exception as _e:
+        app.logger.warning(f"_collect_report_data 抽取 failed_items 失败: {_e}")
+    # 兜底：若 AI 报告没抽到错题，回退到 mistake_book（保持旧逻辑可用）
+    if not mistakes:
+        try:
+            from mistake_book import list_mistakes
+            mistakes = list_mistakes(sid) or []
+        except Exception:
+            mistakes = []
+    mistake_count = len(mistakes)
     # 政策匹配
     try:
         from task_store import match_school_for_student
@@ -2759,7 +3501,10 @@ def _collect_report_data(student: dict) -> dict:
     except Exception:
         policy_match = {"stage": "unknown", "matches": []}
     # 年龄 & 免初赛
-    from docs.gesp_estimator import is_csp_age_eligible, compute_exemptions
+    try:
+        from docs.gesp_estimator import is_csp_age_eligible, compute_exemptions
+    except Exception:
+        from gesp_estimator import is_csp_age_eligible, compute_exemptions
     from datetime import date as _date
     gesp_level = int(student.get("gesp_highest_passed") or 0)
     gesp_score = int(student.get("gesp_latest_score") or 0)
@@ -2776,6 +3521,44 @@ def _collect_report_data(student: dict) -> dict:
         "next_level": int(student.get("gesp_next_eligible_level") or 1),
         "report_year": 2026,
     }
+
+
+def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: int = 10) -> list[dict]:
+    """v3.8 · 列出学员最近 N 份 HTML 报告（按 mtime 倒序）
+
+    返回：[{dir_name, html_url, mtime_display, share_url, has_poster, size_kb}, ...]
+    """
+    items: list[dict] = []
+    try:
+        reports_root = (ROOT / "reports") if (ROOT / "reports").exists() else (ROOT / "data" / "reports")
+        if not reports_root.exists():
+            return []
+        # 报告目录命名规则：<name>_<uid>_<YYYYMMDD-HHMMSS>
+        for d in reports_root.iterdir():
+            if not d.is_dir():
+                continue
+            html_p = d / "report.html"
+            if not html_p.exists():
+                continue
+            dir_name = d.name
+            # 校验目录与该 uid 相关
+            if luogu_uid and str(luogu_uid) not in dir_name:
+                continue
+            stat = html_p.stat()
+            mtime = datetime.fromtimestamp(stat.st_mtime)
+            items.append({
+                "dir_name": dir_name,
+                "html_url": f"/reports/{dir_name}/report.html",
+                "mtime_display": mtime.strftime("%Y-%m-%d %H:%M"),
+                "share_url": f"/me/{luogu_uid}/share-card.png",
+                "has_poster": (d / "share-card.png").exists(),
+                "size_kb": round(stat.st_size / 1024, 1),
+            })
+        items.sort(key=lambda x: x["mtime_display"], reverse=True)
+        return items[:limit]
+    except Exception as _e:
+        app.logger.warning(f"_list_student_report_htmls failed: {_e}")
+        return []
 
 
 @app.route("/report/student/<luogu_uid>")
@@ -2804,7 +3587,13 @@ def report_student(luogu_uid: str):
         has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
     except Exception:
         has_parent_sub = False
-    return render_template_string(STUDENT_REPORT_HTML, **data, has_parent_sub=has_parent_sub, luogu_uid=luogu_uid)
+    return render_template_string(
+        STUDENT_REPORT_HTML,
+        **data,
+        has_parent_sub=has_parent_sub,
+        luogu_uid=luogu_uid,
+        report_htmls=_list_student_report_htmls(luogu_uid, data["student"].get("real_name") or "", limit=8),
+    )
 
 
 @app.route("/report/parent/<token>")
@@ -2906,7 +3695,7 @@ STUDENT_REPORT_HTML = """
                          onerror="this.alt='海报生成失败 · 请刷新重试'; this.style.display='none';" />
                 </div>
                 <div class="flex flex-wrap items-center gap-2 justify-center">
-                    <a href="/me/{{ luogu_uid }}/share-card.png" download="我家孩子位置图_{{ student.real_name or luogu_uid }}.png"
+                    <a id="shareCardDownload" href="/me/{{ luogu_uid }}/share-card.png" download="我家孩子位置图_{{ student.real_name or luogu_uid }}.png"
                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700">
                         💾 保存图片
                     </a>
@@ -2920,6 +3709,40 @@ STUDENT_REPORT_HTML = """
         </div>
     </div>
 
+    <!-- v3.8 · 历史报告 HTML（直接展示，📤 图标触发分享模态框） -->
+    <div class="bg-white rounded-2xl card-shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-bold text-gray-800">📄 历史报告（HTML）</h2>
+            <span class="text-xs text-gray-400">共 {{ report_htmls|length }} 份</span>
+        </div>
+        {% if report_htmls %}
+        <div class="space-y-2">
+            {% for r in report_htmls %}
+            <div class="flex items-center justify-between border border-gray-200 rounded-lg p-3 hover:bg-gray-50">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
+                        {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
+                        {% if r.has_poster %}<span class="text-[10px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">海报已生成</span>{% endif %}
+                    </div>
+                    <div class="text-[11px] text-gray-400 mt-0.5 truncate">{{ r.dir_name }} · {{ r.size_kb }} KB</div>
+                </div>
+                <div class="flex items-center gap-1.5 ml-2">
+                    <a href="{{ r.html_url }}" target="_blank"
+                       class="px-2.5 py-1.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🔍 查看</a>
+                    <button type="button" onclick="openSharePosterByUrl('{{ r.share_url }}', '{{ r.dir_name }}')"
+                            class="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-pink-500 text-white text-sm shadow hover:shadow-md hover:scale-105 transition flex items-center justify-center"
+                            title="分享此版本报告（生成海报）">📤</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <p class="text-[10px] text-gray-400 mt-3">💡 点击 📤 重新生成该版本的海报（5-15 秒，生成后自动下载）</p>
+        {% else %}
+        <div class="text-center py-4 text-sm text-gray-400">🌱 暂无历史报告</div>
+        {% endif %}
+    </div>
+
     <!-- 错题本卡片（游戏化） -->
     <div class="bg-white rounded-2xl card-shadow p-5">
         <div class="flex items-center justify-between mb-3">
@@ -2928,26 +3751,42 @@ STUDENT_REPORT_HTML = """
         </div>
         {% if mistakes %}
         <div class="space-y-2">
-            {% for m in mistakes[:5] %}
-            <div class="flex items-center justify-between border border-gray-200 rounded-lg p-2 hover:bg-gray-50">
-                <div class="text-sm">
-                    <span class="font-mono text-xs text-gray-400">{{ m.problem_id or m.pid or '—' }}</span>
-                    <span class="ml-2">{{ m.title or m.problem_title or '未命名题目' }}</span>
+            {% for m in mistakes[:8] %}
+            <div class="flex items-center justify-between border border-gray-200 rounded-lg p-2.5 hover:bg-gray-50">
+                <div class="text-sm flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono text-xs text-gray-400">{{ m.problem_id or m.pid or '—' }}</span>
+                        <span class="truncate">{{ m.title or m.problem_title or '未命名题目' }}</span>
+                    </div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                        <span class="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">{{ m.tag or m.algorithm_tag or '未分类' }}</span>
+                        {% if m.difficulty %}<span class="text-[10px] text-gray-400">难度 {{ m.difficulty }}</span>{% endif %}
+                    </div>
                 </div>
-                <span class="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded">{{ m.tag or m.algorithm_tag or '未分类' }}</span>
+                <!-- v3.8 · 每题独立 AI 讲题入口（直跳 aijiangti.com，题目已直传） -->
+                <a href="https://www.aijiangti.com/?pid={{ m.problem_id or m.pid }}&from=luogu_ai_report"
+                   target="_blank" rel="noopener"
+                   class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
+                   title="跳到 aijiangti.com 查看 AI 讲题（题目已传入）">
+                    🤖 AI 讲题
+                </a>
             </div>
             {% endfor %}
+            {% if mistakes|length > 8 %}
+            <div class="text-center text-xs text-gray-400 pt-1">…还有 {{ mistakes|length - 8 }} 道</div>
+            {% endif %}
         </div>
+        <p class="text-[10px] text-gray-400 mt-2">💡 数据来源：最新 AI 报告 · export.json 的未通过题目</p>
         {% else %}
-        <div class="text-center py-4 text-sm text-gray-400">🌱 暂无错题 · <a href="/me/{{ luogu_uid }}" class="text-emerald-600 hover:underline">查看错题本</a></div>
+        <div class="text-center py-4 text-sm text-gray-400">🎉 太棒了 · 暂无未通过题目</div>
         {% endif %}
-        <!-- AI 讲题按钮（家长订阅门控） -->
+        <!-- AI 讲题批量入口（家长订阅门控 · 走 StudyMate 批量讲解） -->
         <div class="mt-3 pt-3 border-t border-gray-100">
             {% if has_parent_sub %}
-            <a href="/studymate/dashboard" class="block w-full text-center py-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold text-sm hover:from-blue-600 hover:to-cyan-600">🤖 一键 AI 讲题（StudyMate）</a>
+            <a href="/studymate/dashboard" class="block w-full text-center py-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold text-sm hover:from-blue-600 hover:to-cyan-600">🤖 一键 AI 讲题（StudyMate 批量）</a>
             {% else %}
-            <button disabled class="w-full py-2.5 rounded-lg bg-gray-100 text-gray-400 font-bold text-sm cursor-not-allowed">🤖 AI 讲题 🔒（需家长订阅）</button>
-            <p class="text-center text-xs text-amber-600 mt-1">💡 让家长加 V 兑换码 <code class="bg-amber-50 px-1 rounded">PS-XXXXXXXX</code> 解锁</p>
+            <button disabled class="w-full py-2.5 rounded-lg bg-gray-100 text-gray-400 font-bold text-sm cursor-not-allowed">🤖 批量 AI 讲题 🔒（需家长订阅）</button>
+            <p class="text-center text-xs text-amber-600 mt-1">💡 单题 AI 讲题免费 · 批量讲题需家长加 V 兑换码 <code class="bg-amber-50 px-1 rounded">PS-XXXXXXXX</code> 解锁</p>
             {% endif %}
         </div>
     </div>
@@ -2993,6 +3832,25 @@ STUDENT_REPORT_HTML = """
 
     <p class="text-center text-xs text-gray-400">v3.5.2 · 学员版报告 · 同一份数据 3 套渲染</p>
 </div>
+<script>
+// v3.8 · 历史报告行的 📤 分享按钮：复用 shareModal，注入指定版本的 share-card.png
+function openSharePosterByUrl(shareUrl, dirName) {
+    var m = document.getElementById('shareModal');
+    var img = document.getElementById('shareCardImg');
+    if (!m || !img) return;
+    var url = shareUrl + '?v=' + encodeURIComponent(dirName) + '&t=' + Date.now();
+    img.src = url;
+    img.style.display = '';
+    img.alt = '分享海报 · ' + dirName;
+    m.classList.remove('hidden');
+    // 修改下载按钮
+    var dl = document.getElementById('shareCardDownload');
+    if (dl) {
+        dl.setAttribute('href', url);
+        dl.setAttribute('download', '分享海报_' + dirName + '.png');
+    }
+}
+</script>
 </body>
 </html>
 """
@@ -3960,14 +4818,32 @@ def generate_form():
 
     一次性填写：洛谷 Cookies + 报告信息（UID/姓名/学校/年级/城市）+
     选手信息（性别/出生日期/手机）+ OpenAI 配置 + PIPL 同意
+
+    v3.8 · 已登录学员：自动从 session 回填 form（无需重新输入 UID/姓名等）
     """
+    form = _load_student_form_from_session()
     return render_template_string(
         GENERATE_FORM_HTML,
-        form={},
+        form=form,
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=request.args.get("validation_result"),
     )
+
+
+@app.route("/logout", methods=["GET", "POST"])
+def student_logout():
+    """v3.8 · 清除学员会话（"退出登录" 按钮）"""
+    try:
+        for _k in ("student_uid", "student_sid", "student_name", "student_login_at"):
+            session.pop(_k, None)
+    except Exception:
+        pass
+    next_url = request.args.get("next") or "/generate-form"
+    # 防止开放重定向
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = "/generate-form"
+    return redirect(next_url)
 
 
 @app.route("/validate-cookies-v352", methods=["POST"])
@@ -4012,6 +4888,38 @@ def generate_form_submit():
             error="UID 必须是 6-10 位数字",
         ), 400
 
+    # v3.8 · 每日 1 次限流：最近 24 小时内该 UID 已生成过报告，则引导到 /me/<uid>
+    try:
+        from task_store import get_latest_done_task_for_uid
+        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24)
+        if existing:
+            from flask import url_for as _uf
+            me_url = _uf("student_me", luogu_uid=luogu_uid)
+            # 计算剩余等待时间（精确到分钟）
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                last = _dt.strptime(existing.get("created_at") or "", "%Y-%m-%d %H:%M:%S")
+                next_at = last + _td(hours=24)
+                remain = next_at - _dt.now()
+                remain_min = max(1, int(remain.total_seconds() // 60))
+                remain_txt = f"约 {remain_min // 60} 小时 {remain_min % 60} 分钟后可重新生成"
+            except Exception:
+                remain_txt = "明天再来生成新报告"
+            return render_template_string(
+                GENERATE_FORM_HTML,
+                form=form,
+                server_key_hint=_get_server_key_hint(),
+                gesp_default_year=date.today().year,
+                error=None,
+                info=(
+                    f"⚠️ UID {luogu_uid} 在最近 24 小时内已生成过报告（{remain_txt}）。"
+                    f"请前往「个人中心」查看已生成的报告。"
+                ),
+                info_me_url=me_url,
+            ), 429
+    except Exception as _rate_e:
+        app.logger.warning(f"每日限流检查失败: {_rate_e}")
+
     # PIPL 同意
     if not form.get("agree"):
         return render_template_string(
@@ -4055,6 +4963,7 @@ def generate_form_submit():
                 luogu_uid=luogu_uid,
                 real_name=(form.get("real_name") or "").strip(),
                 city=(form.get("city") or "").strip(),
+                province=(form.get("province") or "").strip(),  # v3.8 · 省份
                 grade=(form.get("grade") or "").strip(),
                 gender=(form.get("gender") or "").strip() or None,
                 school=(form.get("school") or "").strip() or None,
@@ -4121,6 +5030,12 @@ def generate_form_submit():
     if _award_log:
         app.logger.info(f"[self_register] uid={luogu_uid} 同步录入: {'; '.join(_award_log)}")
 
+    # v3.8 · 写入学员会话（180 天）· 后续访问 /generate-form 自动回填
+    try:
+        _set_student_session(luogu_uid, int(sid), (form.get("real_name") or "").strip())
+    except Exception as _e:
+        app.logger.warning(f"[self_register] _set_student_session 失败: {_e}")
+
     # 2) 触发 v1 报告生成（复用现有 run_generation → 跳 /status/<task_id> 看进度）
     try:
         import json as _json
@@ -4138,7 +5053,7 @@ def generate_form_submit():
             "grade": (form.get("grade") or "").strip(),
         }
         with TASKS_LOCK:
-            insert_task(task_id, status="queued", message="排队中...")
+            insert_task(task_id, status="queued", message="排队中...", luogu_uid=luogu_uid)
             update_task(
                 task_id,
                 student_name=v1_form["student_name"] or "未知选手",
@@ -4190,8 +5105,32 @@ GENERATE_FORM_HTML = """
         <p class="text-sm text-gray-500 mt-1">一次性填写 · 3 分钟出报告 · 3 版本报告 + 错题本 + 段位</p>
     </div>
 
+    {% if form.get('_from_session') %}
+    <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+        <div class="flex items-center gap-2 text-sm">
+            <span class="text-2xl">👋</span>
+            <div>
+                <div class="font-bold text-emerald-800">已登录为 {{ form.get('_student_name') or '选手' }}（UID {{ form.get('uid','') }}）</div>
+                <div class="text-[11px] text-emerald-600">🎉 选手信息已自动回填 · 如需换号请点"换号登录"</div>
+            </div>
+        </div>
+        <a href="/logout?next=/generate-form" class="text-xs px-3 py-1.5 rounded-md bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 font-semibold">换号登录</a>
+    </div>
+    {% endif %}
+
     {% if error %}
     <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{{ error }}</div>
+    {% endif %}
+
+    {% if info %}
+    <div class="bg-amber-50 border border-amber-300 rounded-lg p-4 text-sm text-amber-800">
+        <p class="font-semibold mb-2">⏰ {{ info }}</p>
+        {% if info_me_url %}
+        <a href="{{ info_me_url }}" class="inline-block mt-1 px-4 py-2 rounded-md bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+            👉 查看已生成的报告
+        </a>
+        {% endif %}
+    </div>
     {% endif %}
 
     <form action="/generate-form" method="post" class="bg-white rounded-2xl card-shadow p-6 space-y-5">
@@ -4282,7 +5221,35 @@ GENERATE_FORM_HTML = """
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div>
                     <label class="app-label">所在城市 <span class="text-red-500">*</span></label>
-                    <input type="text" name="city" required value="{{ form.get('city','') }}" class="app-input mt-1" placeholder="如：杭州（用于本地科技特长生匹配）">
+                    <!-- v3.8 · 改为「省+市」二级联动（折叠） -->
+                    <details class="bg-emerald-50/40 border border-emerald-200 rounded-lg p-2.5 mt-1" open>
+                        <summary class="cursor-pointer select-none text-xs font-bold text-emerald-800 flex items-center gap-1">
+                            📍 选择所在省份/城市
+                            <span class="text-[10px] text-gray-500 font-normal">（点击折叠）</span>
+                        </summary>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                            <div>
+                                <label class="app-label text-[11px]">省份 *</label>
+                                <select name="province" id="province-select" required class="app-select mt-0.5 text-sm">
+                                    <option value="">请选择省份</option>
+                                    {% for r in region_options['regions'] %}
+                                    <option value="{{ r.name }}" {% if form.get('province','') == r.name %}selected{% endif %}>{{ r.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="app-label text-[11px]">城市 *</label>
+                                <select name="city" id="city-select" required class="app-select mt-0.5 text-sm">
+                                    <option value="">请先选省份</option>
+                                </select>
+                            </div>
+                        </div>
+                        {% if form.get('city','') and not form.get('province','') %}
+                        <input type="hidden" name="city_legacy" value="{{ form.get('city','') }}">
+                        <p class="text-[10px] text-amber-600 mt-1">⚠️ 检测到旧版数据"{{ form.get('city','') }}"，请重新选择</p>
+                        {% endif %}
+                        <p class="text-[10px] text-gray-500 mt-1">💡 用于匹配本地科技特长生中学 / 强基大学 / 自招高中</p>
+                    </details>
                 </div>
                 <div>
                     <label class="app-label">年级 <span class="text-red-500">*</span></label>
@@ -4342,7 +5309,8 @@ GENERATE_FORM_HTML = """
 
             <!-- v3.7 · 自录历史奖项（表单内直接录入，提交时同步写入数据库，避免新用户被引导到「未注册」页） -->
             <div class="mt-4 pt-4 border-t border-gray-200">
-                <p class="text-xs font-bold text-gray-700 mb-2">📥 自录历史奖项（可选 · 留空 = 跳过）</p>
+                <p class="text-xs font-bold text-gray-700 mb-2">🏆 填写最高奖项（可选 · 留空 = 跳过）</p>
+                <p class="text-[10px] text-gray-500 mb-2">💡 只需填**最高**的那一项 GESP / CSP / NOIP / NOI；多个等级的同学，AI 会以最高档分析升学路径</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <!-- GESP 真考 · 表单内输入区 -->
                     <div class="bg-green-50 border border-green-200 rounded-lg p-3">
@@ -4398,7 +5366,16 @@ GENERATE_FORM_HTML = """
                             <input type="number" name="csp_award_year" min="2015" max="2030" placeholder="年份" class="app-input text-xs" value="{{ gesp_default_year }}">
                             <input type="number" name="csp_score" min="0" max="600" placeholder="分数（可选）" class="app-input text-xs" value="{{ form.get('csp_score','') }}">
                         </div>
-                        <input type="text" name="csp_province" placeholder="省份（可选）" class="app-input text-xs mt-2" value="{{ form.get('csp_province','') }}">
+                        <!-- v3.8 · CSP 省份改为下拉（折叠），便于本地政策匹配 -->
+                        <details class="mt-2">
+                            <summary class="text-[10px] text-gray-500 cursor-pointer select-none hover:text-emerald-700">📍 CSP 比赛省份（可选 · 点击选择）</summary>
+                            <select name="csp_province" class="app-select text-xs mt-1">
+                                <option value="">-- 请选择省赛省份 --</option>
+                                {% for r in region_options['regions'] %}
+                                <option value="{{ r.name }}" {% if form.get('csp_province','') == r.name %}selected{% endif %}>{{ r.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </details>
                     </div>
                 </div>
                 <p class="text-[10px] text-gray-400 mt-2 text-center">
@@ -4469,6 +5446,37 @@ GENERATE_FORM_HTML = """
             if (el) el.addEventListener('input', refresh);
         });
         refresh();
+    })();
+
+    // v3.8 · 省市二级联动
+    (function(){
+        var REGIONS = {{ region_options | tojson }};
+        var $p = document.getElementById('province-select');
+        var $c = document.getElementById('city-select');
+        if (!$p || !$c) return;
+        var initProvince = {{ (form.get('province','') or '') | tojson }};
+        var initCity = {{ (form.get('city','') or '') | tojson }};
+        function syncCities(provName, selCity) {
+            $c.innerHTML = '';
+            var opt0 = document.createElement('option');
+            opt0.value = '';
+            opt0.textContent = '请选择城市';
+            $c.appendChild(opt0);
+            var region = REGIONS.regions.find(function(r){ return r.name === provName; });
+            if (!region) return;
+            (region.cities || []).forEach(function(city){
+                var opt = document.createElement('option');
+                opt.value = city;
+                opt.textContent = city;
+                if (city === selCity) opt.selected = true;
+                $c.appendChild(opt);
+            });
+        }
+        $p.addEventListener('change', function(){ syncCities($p.value, ''); });
+        if (initProvince) {
+            $p.value = initProvince;
+            syncCities(initProvince, initCity);
+        }
     })();
 </script>
 </body>
@@ -5740,6 +6748,7 @@ def register_student():
             real_name=form["real_name"],
             grade=form["grade"],
             city=form["city"],
+            province=form.get("province", ""),  # v3.8 · 省份
             gender=form["gender"],
             birth_date=form["birth_date"] or None,
             is_minor=is_minor,
@@ -6631,9 +7640,40 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
       · asof: "最后更新" 日期
     """
     from datetime import date as _date
-    from docs.gesp_estimator import compute_exemptions
+    try:
+        from docs.gesp_estimator import compute_exemptions
+    except Exception:
+        from gesp_estimator import compute_exemptions
 
     student = _admin_students.get_student_by_uid(luogu_uid)
+
+    # v3.8 · 海报兜底：学员档案不存在时，从 reports/<uid> 找 export_data.json
+    # 反查姓名 + city/school，避免老用户/匿名报告生成时海报直接失败
+    if not student:
+        try:
+            report_dir = _find_latest_report_dir(luogu_uid, "")
+            if report_dir is not None:
+                export_json = report_dir / "export_data.json"
+                if export_json.exists():
+                    export_data = json.loads(export_json.read_text(encoding="utf-8"))
+                    export_meta = (export_data.get("meta") or {})
+                    student = {
+                        "id": 0,  # 虚拟 ID（不参与 DB 写入）
+                        "luogu_uid": luogu_uid,
+                        "real_name": export_meta.get("student_name") or "学员",
+                        "city": export_meta.get("city") or "",
+                        "province": export_meta.get("province") or "",
+                        "school": export_meta.get("school") or "",
+                        "gesp_highest_passed": 0,
+                        "gesp_latest_score": 0,
+                        "_from_export": True,  # 标记，避免后续写 DB
+                    }
+                    app.logger.info(
+                        f"v3.8 海报兜底: UID {luogu_uid} 学员档案不存在, 从 {export_json} 取姓名={student.get('real_name')}"
+                    )
+        except Exception as _e:
+            app.logger.warning(f"v3.8 海报兜底读取 export_data.json 失败: {_e}")
+
     if not student:
         return None
 
@@ -6824,8 +7864,33 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, Circle
     import matplotlib.patheffects as pe
-    import qrcode
-    from qrcode.image.pure import PyPNGImage
+    # v3.8 · qrcode + PIL 缺失时降级（不抛 500），QR 位置显示纯文字 URL
+    # 优先用 pillow 后端（PilImage），失败再回退 PyPNGImage（需 pypng 库）
+    _HAS_QRCODE = False
+    _QR_FACTORY = None
+    try:
+        import qrcode  # type: ignore
+        from PIL import Image as _PILImage  # type: ignore
+        try:
+            # 优先：pillow 后端（pillow 已装就能用）
+            from qrcode.image.pil import PilImage as _QR_FACTORY  # type: ignore
+            _HAS_QRCODE = True
+        except Exception:
+            # 回退：PyPNG 后端（需要 pypng）
+            try:
+                from qrcode.image.pure import PyPNGImage as _QR_FACTORY  # type: ignore
+                _HAS_QRCODE = True
+            except Exception as _e2:
+                app.logger.warning(
+                    f"v3.8 海报二维码降级（qrcode + pillow 装了但 pypng 没装: {_e2}），"
+                    f"建议 pip install pypng"
+                )
+                _PILImage = None  # type: ignore
+    except Exception as _qr_e:
+        app.logger.warning(
+            f"v3.8 海报二维码降级（qrcode/PIL 未安装: {_qr_e}），将仅显示 URL 文字"
+        )
+        _PILImage = None  # type: ignore
 
     # 中文字体（Windows 优先；其他平台降级）
     # 注意：matplotlib 渲染 emoji 会失败（普通 TrueType 字体不含 emoji 字形）
@@ -7125,28 +8190,40 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
             ha="center", va="center", fontsize=8, color=COLOR_TEXT_XL, style="italic")
 
     # ── QR 码 + URL ──────────────
-    qr = qrcode.QRCode(version=2, box_size=8, border=2, image_factory=PyPNGImage)
-    qr.add_data(qr_url)
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_buf = io.BytesIO()
-    qr_img.save(qr_buf, "PNG")
-    qr_buf.seek(0)
+    # v3.8 · qrcode 缺失时降级：QR 白底 + URL 文字仍渲染，但不显示二维码图
+    qr_rendered = False
+    if _HAS_QRCODE and _QR_FACTORY is not None:
+        try:
+            qr = qrcode.QRCode(version=2, box_size=8, border=2, image_factory=_QR_FACTORY)
+            qr.add_data(qr_url)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            qr_buf = io.BytesIO()
+            qr_img.save(qr_buf, "PNG")
+            qr_buf.seek(0)
 
-    from PIL import Image as _PILImage
-    qr_pil = _PILImage.open(qr_buf).convert("RGBA")
-    qr_target = 1.5
-    # 用 ax.imshow 直接以 ax 数据坐标定位（不受 figure 边距影响）
-    # 居中于 QR 白底 (5.55, 0.40, 2.85, 2.10) — 中心 (6.975, 1.45)
-    qr_left = 6.975 - qr_target / 2
-    qr_bottom = 1.45 - qr_target / 2
-    ax.imshow(qr_pil, extent=[qr_left, qr_left + qr_target,
-                                qr_bottom, qr_bottom + qr_target],
-              aspect="equal", zorder=3, interpolation="nearest")
+            qr_pil = _PILImage.open(qr_buf).convert("RGBA")
+            qr_target = 1.5
+            # 用 ax.imshow 直接以 ax 数据坐标定位（不受 figure 边距影响）
+            # 居中于 QR 白底 (5.55, 0.40, 2.85, 2.10) — 中心 (6.975, 1.45)
+            qr_left = 6.975 - qr_target / 2
+            qr_bottom = 1.45 - qr_target / 2
+            ax.imshow(qr_pil, extent=[qr_left, qr_left + qr_target,
+                                       qr_bottom, qr_bottom + qr_target],
+                      aspect="equal", zorder=3, interpolation="nearest")
+            qr_rendered = True
+        except Exception as _qr_e:
+            app.logger.warning(f"v3.8 海报二维码生成失败（不影响主流程）: {_qr_e}")
 
     # QR 白底（与左侧文字同高，QR 码居中）
     ax.add_patch(_rounded(5.55, 0.40, 2.85, 2.10, COLOR_CARD,
                           ec=COLOR_CARD_EDGE, lw=1, r=0.20))
+    # 若二维码未生成，在白底中央显示一个 "⚠" 占位 + "扫码暂不可用" 提示
+    if not qr_rendered:
+        ax.text(6.975, 1.55, "⚠", ha="center", va="center",
+                fontsize=32, color=COLOR_AMBER)
+        ax.text(6.975, 1.00, "扫码暂不可用", ha="center", va="center",
+                fontsize=10, color=COLOR_TEXT_LT)
     # 左侧文字（与 QR 白底顶部对齐；脚注 y=2.30，"扫码..." y=2.00 距脚注 0.30）
     # 用紫色方块代替 📱 emoji
     ax.add_patch(_rounded(0.50, 1.89, 0.22, 0.22, COLOR_PRIMARY, r=0.05))
@@ -7172,7 +8249,22 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
 
 @app.route("/me/<luogu_uid>/share-card.png", methods=["GET"])
 def share_card_png(luogu_uid: str):
-    """v3.5.2 传播期 · 位置图 PNG（学员自助中心"生成"按钮所调）"""
+    """v3.5.2 传播期 · 位置图 PNG（学员自助中心"生成"按钮所调）
+
+    v3.8 · 优先读取报告生成时已预渲染的 PNG（v3.8 异步任务产物），
+    缺失时再走现场 matplotlib 渲染（兜底）。
+    """
+    # 1) 优先从最新 report 目录读取已预渲染的 PNG
+    student = _admin_students.get_student_by_uid(luogu_uid)
+    if student:
+        report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+        if report_dir:
+            cached = report_dir / "share-card.png"
+            if cached.exists():
+                resp = send_file(str(cached), mimetype="image/png", conditional=True)
+                resp.headers["Cache-Control"] = "public, max-age=600"
+                return resp
+    # 2) 兜底：现场渲染（5-15s）
     data = _build_share_card_data(luogu_uid)
     if not data:
         return "UID 未注册", 404
@@ -7335,7 +8427,10 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
     """组装家长订阅版所需的全部数据：5 维度"""
     import json as _json
     from datetime import date as _date
-    from docs.gesp_estimator import compute_exemptions, next_eligible_gesp_level
+    try:
+        from docs.gesp_estimator import compute_exemptions, next_eligible_gesp_level
+    except Exception:
+        from gesp_estimator import compute_exemptions, next_eligible_gesp_level
 
     sid = int(student.get("id") or 0)
     student_d = dict(student)
@@ -7525,10 +8620,12 @@ def start_parent_subscribe(luogu_uid: str):
     4. 写到 report_dir/parent_subscribe.md
     5. 渲染成 HTML 写到 report_dir/parent_subscribe.html
     6. 跳转到 /status/<task_id>
+
+    v3.8 · 家长订阅版的"生成"动作不再被 _HIDE_COMMERCE 总开关拦截。
+    _HIDE_COMMERCE 只控制商业化页面的展示/订阅入口（AI 讲题/冲刺营等），
+    但 "已经为某位用户生成家长版" 是技术功能，不应被此开关拒绝。
     """
-    # v3.5.2 传播期：商业化暂不开放
-    if _HIDE_COMMERCE:
-        return render_template_string(COMMERCE_PAUSED_HTML), 503
+    # v3.8 · 此处不再拦截 _HIDE_COMMERCE。生成动作属于"已购用户的技术服务"，不归商业化展示开关管。
     student = _admin_students.get_student_by_uid(luogu_uid)
     if not student:
         return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
@@ -7600,7 +8697,7 @@ def start_parent_subscribe(luogu_uid: str):
 
     task_id = str(uuid.uuid4())
     with TASKS_LOCK:
-        insert_task(task_id, status="running", message="正在生成家长订阅版...")
+        insert_task(task_id, status="running", message="正在生成家长订阅版...", luogu_uid=luogu_uid)
         update_task(
             task_id,
             stage="生成家长订阅版",
@@ -7790,6 +8887,7 @@ def _run_parent_subscribe(
             api_key=api_key,
             base_url=base_url,
             model_name=model_name,
+            luogu_uid=luogu_uid,  # v3.8 · 拉取学籍 + GESP/CSP 奖项 + 当地政策匹配
         )
         if not ps_md or not ps_md.strip():
             raise ValueError("AI 返回空内容")
@@ -8395,15 +9493,26 @@ STUDENT_ME_HTML = """
             {% endif %}
         </div>
 
-        <!-- v3.5.2 传播期 · 位置图分享入口（v3.6 头部已加分享图标按钮，底部保留简化版仅作 anchor / 详情） -->
-        <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl shadow p-4 mb-4 text-center">
-            <p class="text-sm text-gray-700 mb-2">
-                📌 想分享给家长群 / 朋友圈？<strong>点击页面顶部的 📤 分享按钮</strong>即可生成一张 GESP 段位 + 9 月免初赛 + 关键赛事倒计时的位置图。
-            </p>
-            <a href="javascript:void(0)" onclick="document.getElementById('shareModal').classList.remove('hidden')"
-               class="inline-block px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700">
-                📤 立即生成位置图
-            </a>
+        <!-- v3.8 · 直接展示已生成的位置图（不需点按钮现场渲染，预渲染缓存命中即读 PNG） -->
+        <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl shadow p-4 mb-4">
+            <h3 class="text-base font-bold text-gray-800 mb-1 text-center">📤 学习报告位置图</h3>
+            <p class="text-xs text-gray-500 text-center mb-3">长按图片即可保存到相册 / 转发到家长群 / 朋友圈</p>
+            <div class="flex justify-center bg-white border border-gray-200 rounded-lg p-2 mb-3">
+                <img src="/me/{{ luogu_uid }}/share-card.png" alt="学习报告位置图"
+                     class="max-w-full h-auto rounded shadow"
+                     onerror="this.alt='海报生成失败 · 请刷新重试'; this.style.display='none';" />
+            </div>
+            <div class="flex flex-wrap items-center gap-2 justify-center">
+                <a href="/me/{{ luogu_uid }}/share-card.png" download="学习报告位置图_{{ student.real_name or luogu_uid }}.png"
+                   class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700">
+                    💾 保存图片
+                </a>
+                <a href="/me/{{ luogu_uid }}/share-card.png" target="_blank"
+                   class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-emerald-600 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-50">
+                    🔗 在新窗口打开
+                </a>
+                <span class="text-xs text-gray-400 ml-2">PNG · 约 200 KB</span>
+            </div>
             <details class="text-xs text-gray-600 mt-3 text-left">
                 <summary class="cursor-pointer hover:text-gray-800 font-medium">📐 图里有什么？</summary>
                 <ul class="mt-2 list-disc list-inside space-y-1 pl-2">
@@ -8416,30 +9525,6 @@ STUDENT_ME_HTML = """
                     <li>水印：AI 估算 · 不替代真考 · 最后更新日期</li>
                 </ul>
             </details>
-        </div>
-
-        <!-- v3.7 PDF 下载（暂未开放 · 灰显 · 引导用海报分享） -->
-        <div class="bg-white rounded-2xl shadow p-5 mb-4">
-            <h2 class="text-lg font-bold text-gray-800 mb-3">📄 下载报告 PDF（v3.7 暂未开放）</h2>
-            <div class="space-y-2">
-                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
-                    <div class="text-sm text-gray-500">🔒 完整版 · report.pdf</div>
-                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
-                </div>
-                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
-                    <div class="text-sm text-gray-500">🔒 选手版 · me.pdf</div>
-                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
-                </div>
-                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
-                    <div class="text-sm text-gray-500">🔒 家长版 · parent.pdf</div>
-                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
-                </div>
-                <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg opacity-60 cursor-not-allowed" title="v3.7 PDF 暂未开放 · 请用海报分享 · 用 📤 海报代替">
-                    <div class="text-sm text-gray-500">🔒 教练版 · coach.pdf</div>
-                    <span class="text-xs px-2 py-1 bg-gray-200 text-gray-500 rounded">未开放</span>
-                </div>
-            </div>
-            <p class="text-xs text-gray-500 mt-3">💡 v3.7 PDF 暂未开放 · 请用海报分享给家长群/朋友圈</p>
         </div>
 
         <div class="{% if has_parent_sub %}bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200{% else %}bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200{% endif %} rounded-2xl shadow p-5 mb-4">
@@ -8716,7 +9801,10 @@ def parent_panel_index(token: str):
     reports = _weekly_reports.list_weekly_reports(int(g["student_id"]), limit=10)
     # v3.5.1: 出生日期按 grade 推断（CSP 12 岁门槛所需）
     # demo 学员 grade 缺省 2024 → 推断 2014-05-01（CSP 2026 刚好满足）
-    from docs.gesp_estimator import is_csp_age_eligible
+    try:
+        from docs.gesp_estimator import is_csp_age_eligible
+    except Exception:
+        from gesp_estimator import is_csp_age_eligible
     # v3.5.3: 优先用学员真实 birth_date，没有再兜底
     student_dict = dict(student)
     real_birth = student_dict.get("birth_date")
