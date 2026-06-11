@@ -151,6 +151,28 @@ def _init_report_hides_table() -> None:
         conn.close()
 
 
+def _record_hide_pdf(task_id: str) -> None:
+    """v3.7 · 报告生成后写入 hide_pdf=1 标记（不抛异常）。"""
+    if not task_id:
+        return
+    try:
+        _init_report_hides_table()
+        conn = _get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO report_hides (task_id, hide_pdf, updated_at)
+                   VALUES (?, 1, datetime('now'))
+                   ON CONFLICT(task_id) DO UPDATE SET
+                     hide_pdf=1, updated_at=datetime('now')""",
+                (str(task_id).strip(),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as _e:
+        print(f"[v3.7] _record_hide_pdf warning: {_e}")
+
+
 app = Flask(__name__)
 app.secret_key = (
     os.environ.get("ADMIN_SESSION_SECRET")
