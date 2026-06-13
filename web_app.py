@@ -219,10 +219,10 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
         return True, ""
 
 
-# v3.9.5 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
+# v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.5"
-APP_VERSION_BUILD = "20260614_v3p9p5"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.6"
+APP_VERSION_BUILD = "20260614_v3p9p6"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -238,8 +238,8 @@ app.secret_key = (
 app.permanent_session_lifetime = timedelta(days=180)
 
 
-# v3.9.5 · 版本探针（给云端部署的健康检查用，每次部署完必看）
-# 用法：curl -fsS http://server/api/version  →  {"version":"v3.9.5", "build":"...", "git":"abc1234", "ts":"..."}
+# v3.9.6 · 版本探针（给云端部署的健康检查用，每次部署完必看）
+# 用法：curl -fsS http://server/api/version  →  {"version":"v3.9.6", "build":"...", "git":"abc1234", "ts":"..."}
 @app.route("/api/version")
 def _api_version():
     import json as _json, datetime as _dt
@@ -9198,6 +9198,13 @@ def _extract_achievements_from_report(report_md: str) -> dict:
     v3.9 · 兼容新报告生成器的格式：
       - 6 维表：旧 `| **基础算法** | **72** |` / 新 `| 基础算法 | 72 |` 都能匹配
       - 错题：旧 `**Pxx**` 包裹 / 新 `| Pxx [xx] 标题 | 次数 | 未 AC |` 都能匹配
+
+    v3.9.6 · 重大修复：实际报告用 `**B2026**` 这种 **加粗** + **B/P 两种题号**前缀
+      + 章节 10.1+ 用 `### 10.1 B2026 标题` 格式，老正则全 miss。
+      修了：
+        1. pattern A 支持 `**` 加粗标记 + `[BPUV]\\d{4,6}` 全部洛谷题号
+        2. pattern C 章节标题解析支持 B/P/U/V 全部前缀
+        3. **新增来源 D**：从 `export_data.json.failed_items` 兜底（最权威，数据源）
     """
     import re as _re
     out = {
@@ -9242,17 +9249,19 @@ def _extract_achievements_from_report(report_md: str) -> dict:
         else:
             out["ai_score_label"] = "🔴 待提升"
 
-    # 3) 错题本：兼容两种来源
-    #    来源 A: "死磕题目 TOP" 表（v3.9 新报告主用此源）
-    #            `| P1204 [USACO1.2] Milking Cows | 10 | 未 AC | 区间合并...`
+    # 3) 错题本：兼容多种来源
+    #    来源 A: v3.9 新报告 "死磕题目 TOP" 表（**B2026** 加粗 + 4 列：题目/次数/状态/分析）
+    #            `| **B2026** 计算浮点数相除的余 | 4 | 未AC（语法错误 ×1，WA ×3） | <p...>...`
     #    来源 B: v3.7 旧格式 `| **P11229** | [CSP-J 2024] 小木棍 | ... | **24次** | 未AC | <原因>`
-    #    来源 C: 锚点 "未通过题目" 段（v3.6 旧报告）
+    #    来源 C: v3.6 旧报告 "未通过题目" 段（### 10.1 B2026 标题）
+    #    来源 D: v3.9.6 新增 · export_data.json.failed_items（最权威，兜底）
     seen_pids: set = set()  # 避免重复
+    pid_re = r"[BPUV]\d{4,6}"  # v3.9.6 · 洛谷题号：P=普通 / B=入门 / U=Universal / V=？
 
-    # 来源 A（新报告主源）
+    # 来源 A（新报告主源 · 已兼容 ** 加粗 + B/P 前缀）
     pat_a = _re.compile(
-        r"\|\s*(P\d{4,6})\s*(\[[^\]]+\])?\s*([^\|]*?)\s*\|\s*\d+\s*\|\s*"
-        r"(?:未\s*AC|未AC|WA)\s*\|\s*([^|\n]+?)(?:\s*\||\s*$)",
+        r"\|\s*\*+\s*(" + pid_re + r")\s*\*+\s*([^\|]*?)\s*\|\s*\d+\s*\|\s*"
+        r"(?:未\s*AC|未AC|WA|未通过|未\s*通过)[^|]*\|\s*([^|\n]+?)(?:\s*\||\s*$)",
         _re.M,
     )
     idx = 0
@@ -9262,9 +9271,15 @@ def _extract_achievements_from_report(report_md: str) -> dict:
         if problem_id in seen_pids:
             continue
         seen_pids.add(problem_id)
-        source = (m.group(2) or "").strip("[]").strip()
-        title = m.group(3).strip()
-        summary = m.group(4).strip()
+        # 第 2 段是题目标题（可能带 [来源]）
+        title_full = m.group(2).strip()
+        sm = _re.match(r"\[([^\]]+)\]\s*(.+)", title_full)
+        if sm:
+            source, title = sm.group(1).strip(), sm.group(2).strip()
+        else:
+            source, title = "", title_full or problem_id
+        # 第 3 段是 AI 分析（可能带 HTML 标签）
+        summary = _re.sub(r"<[^>]+>", "", m.group(3) or "").strip()[:200]
         out["mistakes"].append({
             "idx": idx,
             "problem_id": problem_id,
@@ -9273,13 +9288,13 @@ def _extract_achievements_from_report(report_md: str) -> dict:
             "summary": summary,
         })
 
-    # 来源 B（v3.7 旧报告）
+    # 来源 B（v3.7 旧报告 · 同样兼容 B/P 前缀）
     if not out["mistakes"]:
         pat_b = _re.compile(
-            r"\|\s*\*\*\s*(P\d+)\s*\*\*\s*\|\s*"
+            r"\|\s*\*\*\s*(" + pid_re + r")\s*\*\*\s*\|\s*"
             r"(?:\[[^\]]+\]\s*)?([^\|]+?)\s*\|\s*"
             r"[^\|]+?\s*\|\s*\*\*\s*\d+\s*次\s*\*\*\s*\|\s*"
-            r"(?:未AC|未\s*AC|WA)\s*\|\s*([^|\n]+?)(?:\s*\||\s*$)",
+            r"(?:未AC|未\s*AC|WA|未通过)\s*\|\s*([^|\n]+?)(?:\s*\||\s*$)",
             _re.M,
         )
         for m in pat_b.finditer(report_md):
@@ -9303,20 +9318,20 @@ def _extract_achievements_from_report(report_md: str) -> dict:
                 "summary": summary,
             })
 
-    # 来源 C（v3.6 旧报告：未通过题目章节）
+    # 来源 C（v3.6 旧报告：未通过题目章节 · 兼容 B/P 前缀）
     if not out["mistakes"]:
         anchor = _re.search(r"^#{2,4}\s*10[.、]?\s*[【\[]?未通过题目.*?$", report_md, _re.M)
         if anchor:
             section = report_md[anchor.end():]
-            # 找所有 #### N. xxx 块
+            # 找所有 ### 10.N 标题 块
             blocks = _re.split(r"^#{3,4}\s*(\d+)\.\s*(.+?)$", section, flags=_re.M)
             i = 1
             while i + 2 < len(blocks):
-                idx_s = blocks[i].strip()
                 title_line = blocks[i + 1].strip()
                 body = blocks[i + 2]
                 i += 3
-                mp = _re.match(r"(P\d{4,6})\s*(?:\[([^\]]+)\])?\s*(.+)", title_line)
+                # v3.9.6 · 支持 P/B/U/V 题号 + 可选 [来源]
+                mp = _re.match(r"(" + pid_re + r")\s*(?:\[([^\]]+)\])?\s*(.+)", title_line)
                 if not mp:
                     continue
                 pid = mp.group(1)
@@ -9395,6 +9410,43 @@ def report_preview(luogu_uid: str):
         achievements = _extract_achievements_from_report(report_md) or empty_achievements
         ai_summary = _extract_ai_summary(report_md) or ""
         suggestions = _extract_top_suggestions(report_md) or []
+
+        # v3.9.6 · 来源 D 兜底：report.md 正则没抓到错题时，从 export_data.json.failed_items 拿
+        # 这是数据源本身，最权威。report.md 是 AI 生成的衍生品，可能格式漂移。
+        if not achievements.get("mistakes"):
+            try:
+                import json as _json
+                _exp_path = latest / "export_data.json"
+                if _exp_path.exists():
+                    _exp = _json.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
+                    _fi = _exp.get("failed_items") or []
+                    if _fi:
+                        _mistakes = []
+                        for k, fi in enumerate(_fi, start=1):
+                            p = fi.get("problem") or {}
+                            if not isinstance(p, dict):
+                                continue
+                            _pid = (p.get("pid") or "").strip()
+                            if not _pid:
+                                continue
+                            _title = (p.get("title") or "未命名题目").strip()
+                            _tag_ids = p.get("tags") or []
+                            _tag = str(_tag_ids[0]) if (_tag_ids and isinstance(_tag_ids[0], str)) else ""
+                            _mistakes.append({
+                                "idx": k,
+                                "problem_id": _pid,
+                                "title": _title,
+                                "source": _tag,
+                                "summary": "",
+                            })
+                        if _mistakes:
+                            achievements = dict(achievements)
+                            achievements["mistakes"] = _mistakes
+                            app.logger.info(
+                                f"[v3.9.6 /r/{luogu_uid}] 来源 D 兜底：export_data.json → {len(_mistakes)} 道错题"
+                            )
+            except Exception as _de:
+                app.logger.warning(f"[v3.9.6 /r/{luogu_uid}] 来源 D 兜底失败: {_de}")
     except Exception:
         return render_template_string(
             REPORT_PREVIEW_HTML,
