@@ -1260,6 +1260,9 @@ INDEX_HTML = """
 
 <main class="max-w-4xl mx-auto px-4 pt-8 pb-12 space-y-5">
 
+    {# v3.9.6 · 已登录学员横幅：避免每次重新输入 UID #}
+    {{ logged_in_banner|safe }}
+
     <!-- flash 消息 -->
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -1293,10 +1296,29 @@ INDEX_HTML = """
         <!-- v3.8 · 醒目的 QQ 交流群入口（替代原底栏的 build/QQ 提示） -->
         <div class="qq-banner rise d3" role="group" aria-label="QQ 交流群">
             <span class="qq-banner-icon" aria-hidden="true">
-                {# v3.9.4 · QQ 真实 logo (从 mat1.gtimg.com 官方 CDN 下载) #}
-                <img src="/static/qq_logo.png" width="32" height="32" alt="QQ"
-                     style="display:block;border-radius:6px;object-fit:contain;"
-                     onerror="this.outerHTML='<svg viewBox=&quot;0 0 32 32&quot; width=&quot;32&quot; height=&quot;32&quot;><circle cx=&quot;16&quot; cy=&quot;16&quot; r=&quot;15&quot; fill=&quot;#27C7A2&quot;/><path d=&quot;M6 19 Q16 23 26 19 L25 22 Q16 26 7 22 Z&quot; fill=&quot;#E84C3D&quot;/><ellipse cx=&quot;16&quot; cy=&quot;13.5&quot; rx=&quot;8&quot; ry=&quot;7.5&quot; fill=&quot;#fff&quot;/></svg>'">
+                {# v3.9.7 · QQ 企鹅图标（inline SVG，避免外部资源错误） #}
+                <svg viewBox="0 0 64 64" width="32" height="32" xmlns="http://www.w3.org/2000/svg" aria-label="QQ 企鹅">
+                    <!-- 身体（白肚） -->
+                    <ellipse cx="32" cy="44" rx="20" ry="18" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="1.5"/>
+                    <!-- 头部（黑） -->
+                    <ellipse cx="32" cy="24" rx="16" ry="14" fill="#0A0A0A"/>
+                    <!-- 眼睛（白色眼白） -->
+                    <circle cx="26" cy="22" r="4.5" fill="#FFFFFF"/>
+                    <circle cx="38" cy="22" r="4.5" fill="#FFFFFF"/>
+                    <!-- 瞳孔（黑） -->
+                    <circle cx="27" cy="23" r="2" fill="#0A0A0A"/>
+                    <circle cx="39" cy="23" r="2" fill="#0A0A0A"/>
+                    <!-- 嘴巴（橙色喙） -->
+                    <ellipse cx="32" cy="29" rx="3" ry="2" fill="#F5A623" stroke="#0A0A0A" stroke-width="0.6"/>
+                    <!-- 围巾（红） -->
+                    <path d="M14 30 Q32 38 50 30 L48 35 Q32 42 16 35 Z" fill="#E84C3D" stroke="#A03327" stroke-width="0.8"/>
+                    <!-- 翅膀/手臂（黑） -->
+                    <ellipse cx="14" cy="42" rx="5" ry="9" fill="#0A0A0A"/>
+                    <ellipse cx="50" cy="42" rx="5" ry="9" fill="#0A0A0A"/>
+                    <!-- 脚（橙色） -->
+                    <ellipse cx="26" cy="60" rx="5" ry="2.5" fill="#F5A623" stroke="#0A0A0A" stroke-width="0.6"/>
+                    <ellipse cx="38" cy="60" rx="5" ry="2.5" fill="#F5A623" stroke="#0A0A0A" stroke-width="0.6"/>
+                </svg>
             </span>
             <div class="qq-banner-text">
                 <span class="qq-banner-label">QQ 交流群</span>
@@ -1418,23 +1440,14 @@ INDEX_HTML = """
             ] %}
             {% for s in qiangji_schools %}
             <span class="school-chip" title="{{ s[1] }} · {{ s[4] }}">
-                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
-                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-                {# v3.9 · 默认占位：彩色圆圈 + 校名缩写（PNG 缺失时显示） #}
-                <span class="school-badge" style="background:{{ s[2] }}" aria-label="{{ s[1] }} 校徽占位">
-                    <span class="school-badge-text">{{ s[3] }}</span>
-                </span>
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy">
                 <span class="school-name">{{ s[1] }}</span>
             </span>
             {% endfor %}
             {# 复制一份用于无缝循环滚动 #}
             {% for s in qiangji_schools %}
             <span class="school-chip" title="{{ s[1] }} · {{ s[4] }}" aria-hidden="true">
-                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy"
-                     onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-                <span class="school-badge" style="background:{{ s[2] }}">
-                    <span class="school-badge-text">{{ s[3] }}</span>
-                </span>
+                <img class="school-img" src="/static/schools/{{ s[0] }}.png" alt="{{ s[1] }}" loading="lazy">
                 <span class="school-name">{{ s[1] }}</span>
             </span>
             {% endfor %}
@@ -1685,12 +1698,27 @@ def render_index(form: dict | None = None, validation_result: dict | None = None
         server_key_hint = f"已检测到服务端 {key_source.split(':', 1)[1]}，可留空使用服务端默认。"
     else:
         server_key_hint = "未检测到服务端 OpenAI Key（可在服务端设置 OPENAI_API_KEY / OPENAI_ADMIN_KEY）。"
+    # v3.9.6 · 已登录学员：在首页顶部加一个 "已登录为 XX" 横幅 + 直达个人中心
+    logged_in_banner = ""
+    try:
+        _uid = str(session.get("student_uid") or "").strip()
+        _name = str(session.get("student_name") or "").strip()
+        if _uid and _uid.isdigit():
+            logged_in_banner = (
+                f'<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4 flex items-center justify-between gap-3">'
+                f'<div class="text-sm text-emerald-800">✅ 已识别身份：<strong>{_name or "学员"}</strong>（UID {_uid}）</div>'
+                f'<a href="/me/{_uid}" class="app-btn app-btn-primary text-xs">🎓 回我的个人中心 →</a>'
+                f'</div>'
+            )
+    except Exception:
+        pass
     return render_template_string(
         INDEX_HTML,
         form_values=build_form_values(form),
         validation_result=validation_result,
         server_key_hint=server_key_hint,
         commerce_hidden=_HIDE_COMMERCE,
+        logged_in_banner=logged_in_banner,
     )
 
 
@@ -2350,7 +2378,9 @@ def run_generation(task_id: str, form: dict):
             "student_info": {
                 "name": student_name,
                 "school": school,
-                "grade": grade,
+                # v3.9.7 · 中文年级（不再显示 PRIMARY_6 这种 enum 值）
+                "grade": _grade_to_label(grade) or grade,
+                "grade_zh": _grade_to_label(grade) or grade,
                 "eval_time": (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
             },
             "solved_count": len(all_passed),
@@ -2513,8 +2543,8 @@ STATUS_HTML = """
             </div>
         </div>
         {% if status == 'done' %}
-        <a href="{{ ps_html }}" target="_blank" class="app-btn app-btn-amber mb-2">📨 查看家长订阅版（AI 真生成）</a>
-        <a href="{{ ps_md }}" target="_blank" class="app-btn app-btn-secondary mb-2">查看 Markdown 原文</a>
+        {# v3.9.6 · 去掉 Markdown 原文按钮（家长不应直接看源码）；重命名"AI 真生成" → "AI 决策支持" #}
+        <a href="{{ ps_html }}" target="_blank" class="app-btn app-btn-amber mb-2">📨 查看家长订阅版（AI 决策支持）</a>
         <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-secondary">↩ 返回家长订阅版页</a>
         {% elif status == 'error' %}
         <a href="/me/{{ luogu_uid }}/parent-subscribe" class="app-btn app-btn-primary">返回重试</a>
@@ -2529,6 +2559,14 @@ STATUS_HTML = """
                 <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
             </div>
             {% if me_url %}
+            {# v3.9.6 · 智能门控：已生成过家长订阅版 → 直接显示"查看"，不再每次让家长重输邀请码 #}
+            {% if has_parent_sub_html %}
+                <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <p class="text-sm text-emerald-800">✅ 您家孩子的家长订阅版已生成</p>
+                    <a href="{{ ps_html_url }}" target="_blank" class="app-btn app-btn-amber mt-2 block text-center">📨 查看家长订阅版（AI 决策支持）</a>
+                    <a href="/me/{{ me_url.split('/')[-1] }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
+                </div>
+            {% else %}
             {# v3.9 · 家长订阅版：邀请码门控（获取方式 = 加微信） #}
             <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block">
                 <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
@@ -2555,6 +2593,7 @@ STATUS_HTML = """
                 </button>
                 <p class="text-[10px] text-gray-500 text-center mt-1">💡 使用服务端环境变量 OPENAI_API_KEY 直接生成（约 1-2 分钟）</p>
             </form>
+            {% endif %}
             {% endif %}
         </div>
 
@@ -2706,6 +2745,22 @@ def status_page(task_id):
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
     luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "")
     me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
+
+    # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
+    # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
+    has_parent_sub_html = False
+    ps_html_url = ""
+    if luogu_uid and luogu_uid.isdigit():
+        try:
+            _stu = _admin_students.get_student_by_uid(luogu_uid)
+            _stu_name = (_stu.get("real_name") or "") if _stu else ""
+            _latest = _find_latest_report_dir(luogu_uid, _stu_name)
+            if _latest and (_latest / "parent_subscribe.html").exists():
+                has_parent_sub_html = True
+                ps_html_url = f"/reports/{_latest.name}/parent_subscribe.html"
+        except Exception as _e:
+            app.logger.debug(f"[status_page] has_parent_sub check failed: {_e}")
+
     return render_template_string(
         STATUS_HTML,
         status=task.get("status", "unknown"),
@@ -2726,6 +2781,9 @@ def status_page(task_id):
         retry_url=url_for("retry_task", task_id=task_id),
         me_url=me_url,
         luogu_uid=luogu_uid,
+        # v3.9.6 · 新增：智能门控用
+        has_parent_sub_html=has_parent_sub_html,
+        ps_html_url=ps_html_url,
     )
 
 
@@ -3987,37 +4045,8 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
 
 @app.route("/report/student/<luogu_uid>")
 def report_student(luogu_uid: str):
-    """v3.5.2 学员版报告（游戏化 · 段位 + 错题本 + AI 讲题）"""
-    student = _admin_students.get_student_by_uid(luogu_uid)
-    if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
-    data = _collect_report_data(student)
-    # 检查家长订阅（AI 讲题）
-    has_parent_sub = False
-    try:
-        from task_store import _get_conn
-        conn = _get_conn()
-        try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM activation_codes ac "
-                "JOIN students s ON s.id = ac.student_id "
-                "WHERE ac.sku = 'parent_sub' AND s.luogu_uid = ? "
-                "AND ac.redeemed_at IS NOT NULL "
-                "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
-                (str(luogu_uid).strip(),),
-            ).fetchone()
-        finally:
-            conn.close()
-        has_parent_sub = bool(row and dict(row).get("n", 0) > 0)
-    except Exception:
-        has_parent_sub = False
-    return render_template_string(
-        STUDENT_REPORT_HTML,
-        **data,
-        has_parent_sub=has_parent_sub,
-        luogu_uid=luogu_uid,
-        report_htmls=_list_student_report_htmls(luogu_uid, data["student"].get("real_name") or "", limit=8),
-    )
+    """v3.9.7 · 学员版报告已合并到个人中心 → 统一跳转 /me/<uid>（保留旧链接以免外部引用 404）"""
+    return redirect(url_for("student_me", luogu_uid=luogu_uid), code=301)
 
 
 @app.route("/report/parent/<token>")
@@ -4600,11 +4629,11 @@ PARENT_SUBSCRIBE_HTML = """
         </div>
     </div>
 
-    <!-- 触发 AI 真生成表单（仅当已生成基础报告、且还没有家长订阅版时显示） -->
+    <!-- 触发 AI 决策支持生成表单（仅当已生成基础报告、且还没有家长订阅版时显示） -->
     {% if has_report %}
     <div class="bg-gradient-to-r from-amber-50 to-rose-50 rounded-2xl card-shadow p-6 border-2 border-amber-200">
-        <h2 class="text-lg font-bold text-gray-800">🚀 触发生成 AI 家长深度报告</h2>
-        <p class="text-xs text-gray-600 mt-1">基于同账号的报告 {{ report_dir_name }} 让 AI 重新写一份"家长视角"的深度分析（约 1-2 分钟）</p>
+        <h2 class="text-lg font-bold text-gray-800">🚀 触发生成 AI 家长决策支持报告</h2>
+        <p class="text-xs text-gray-600 mt-1">基于同账号的报告 {{ report_dir_name }} 让 AI 写一份"家长视角"的决策支持分析（约 1-2 分钟）</p>
         {% if error_msg %}
         <div class="mt-3 bg-rose-100 border border-rose-300 text-rose-800 text-sm p-3 rounded">❌ {{ error_msg }}</div>
         {% endif %}
@@ -4627,7 +4656,7 @@ PARENT_SUBSCRIBE_HTML = """
             </div>
             {% endif %}
             <button type="submit" class="w-full bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white font-bold py-3 rounded-md transition">
-                📨 开始 AI 真生成 · 约 1-2 分钟
+                📨 开始 AI 决策支持生成 · 约 1-2 分钟
             </button>
         </form>
     </div>
@@ -7606,6 +7635,12 @@ def register_student():
     except Exception as e:  # noqa: BLE001
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error=f"注册失败：{e}", form=form)
 
+    # v3.9.6 · 注册成功立即写会话（180 天）· 后续访问 /me、/ 首页自动识别身份
+    try:
+        _set_student_session(form["luogu_uid"], int(sid), form["real_name"])
+    except Exception as _se:
+        app.logger.warning(f"[register_student] _set_student_session 失败: {_se}")
+
     flash(f"✅ 学员 {form['real_name']} 注册成功（id={sid}）")
     return redirect(url_for("student_me", luogu_uid=form["luogu_uid"]))
 
@@ -7659,6 +7694,18 @@ _ME_PICKER_HTML = """
 
 
 @app.route("/me", methods=["GET"])
+def me_root():
+    """v3.9.6 · /me（无 UID）智能入口：session 有已登录学员 → 自动跳 /me/<uid>；
+    否则跳到 /me/ 输入中转页。"""
+    try:
+        session_uid = str(session.get("student_uid") or "").strip()
+        if session_uid and session_uid.isdigit():
+            return redirect(url_for("student_me", luogu_uid=session_uid))
+    except Exception:
+        pass
+    return redirect(url_for("me_picker"))
+
+
 @app.route("/studymate/ai-tutor", methods=["GET", "POST"])
 def studymate_ai_tutor():
     """v3.6 · StudyMate AI 讲题入口
@@ -7856,7 +7903,17 @@ STUDYMATE_TUTOR_HTML = r"""
 
 @app.route("/me/", methods=["GET"])
 def me_picker():
-    """无 UID 的 /me 入口 → UID 输入中转页（避免 404 误判系统故障）"""
+    """无 UID 的 /me 入口 → UID 输入中转页（避免 404 误判系统故障）
+
+    v3.9.6 · 增强：若 session 里有已登录学员（180 天 cookie）→ 自动跳到 /me/<uid>，
+    免去用户每次重新输入 UID 的麻烦。
+    """
+    try:
+        session_uid = str(session.get("student_uid") or "").strip()
+        if session_uid and session_uid.isdigit():
+            return redirect(url_for("student_me", luogu_uid=session_uid))
+    except Exception:
+        pass
     return _ME_PICKER_HTML
 
 
@@ -7869,11 +7926,32 @@ def student_me(luogu_uid: str):
 
     v3.6 · fallback：未注册但有 report.md → 渲染「轻量版个人中心」（仅展示 UID +
     6 维评分 + 错题集 + AI 讲题入口），不再 404。这让老用户「凭 UID 看错题」成为可能。
+
+    v3.9.6 · 自动续期会话：每次进入都刷新 student_uid / student_name session，
+    保证 180 天内不会"掉登录"。
     """
     import sys
     print(f"[DEBUG student_me] uid={luogu_uid!r}", file=sys.stderr, flush=True)
     student = _admin_students.get_student_by_uid(luogu_uid)
     print(f"[DEBUG student_me] get_student_by_uid result: {student is not None}, keys={list(student.keys()) if student else None}", file=sys.stderr, flush=True)
+
+    # v3.9.6 · 同步会话：UID 匹配上 → 续期 session
+    if student:
+        try:
+            _existing_uid = str(session.get("student_uid") or "").strip()
+            if _existing_uid != str(luogu_uid).strip():
+                # UID 切换了 → 重新写 session
+                _set_student_session(
+                    str(luogu_uid).strip(),
+                    int(student["id"]),
+                    (student.get("real_name") or "").strip(),
+                )
+            else:
+                # 同 UID 只刷新时间（保持 180 天活跃）
+                session.permanent = True
+        except Exception as _se:
+            app.logger.debug(f"[student_me] session refresh: {_se}")
+
     if not student:
         # v3.6 fallback：扫 reports/ 看有没有该 UID 的报告
         from pathlib import Path as _P_fb
@@ -7958,6 +8036,8 @@ def student_me(luogu_uid: str):
         commerce_hidden=_HIDE_COMMERCE,
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
+        # v3.9.7 · 历史报告列表（从原 /report/student 页面合并过来）
+        report_htmls=_list_student_report_htmls(luogu_uid, (student.get("real_name") or "") if student else "", limit=8),
     )
 
 
@@ -9618,7 +9698,7 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
 
 @app.route("/me/<luogu_uid>/parent-subscribe", methods=["GET", "POST"])
 def parent_subscribe(luogu_uid: str):
-    """v3.9 · 家长订阅版（真 AI 二次生成）
+    """v3.9 · 家长订阅版（AI 决策支持）
 
     GET 行为：
       - 学员已存在 + 已有 parent_subscribe.html → 渲染 AI 生成版
@@ -9699,34 +9779,56 @@ def start_parent_subscribe(luogu_uid: str):
     # v3.9 · 邀请码校验（在 404 之后、找 report 之前）
     # v3.9.2 · 改为查数据库 admin.activation_codes 表（sku='parent_invite'），
     #         admin 可在 /admin/codes 后台生成/管理；不再用环境变量
+    # v3.9.8 · 用户反馈：邀请码验证后必须失效（一次性使用）
+    #         - 拒绝已 redeemed 的码
+    #         - 验证通过后立即写 redeemed_at + student_id（与 /redeem 流程一致）
     form = request.form.to_dict() if request.method == "POST" else {}
     submitted_code = (form.get("invite_code") or "").strip()
     invite_ok = False
+    already_used = False
+    inviter_code_id = None
     if submitted_code:
         try:
             from task_store import _get_conn as _invite_conn
             _ic = _invite_conn()
-            row = _ic.execute(
-                "SELECT 1 FROM activation_codes WHERE code = ? AND sku = 'parent_invite' LIMIT 1",
-                (submitted_code,),
-            ).fetchone()
-            _ic.close()
-            invite_ok = row is not None
+            try:
+                row = _ic.execute(
+                    "SELECT id, redeemed_at, student_id FROM activation_codes "
+                    "WHERE code = ? AND sku = 'parent_invite' LIMIT 1",
+                    (submitted_code,),
+                ).fetchone()
+            finally:
+                _ic.close()
+            if row is not None:
+                row_d = dict(row)
+                inviter_code_id = row_d.get("id")
+                if row_d.get("redeemed_at") is not None:
+                    # 已被使用过 → 拒绝（防止"一个码重复用"）
+                    already_used = True
+                else:
+                    invite_ok = True
         except Exception as _ie:
             invite_ok = False
     if not invite_ok:
         gesp_level = int(student.get("gesp_highest_passed") or 0)
         gesp_score = int(student.get("gesp_latest_score") or 0)
+        if already_used:
+            error_msg = (
+                f"❌ 邀请码 {submitted_code} 已被使用（每个邀请码仅可使用一次）。"
+                " 请联系客服重新派发新码。"
+            )
+        else:
+            error_msg = (
+                "❌ 邀请码无效或为空。请扫码添加微信（微信号见页面右下角二维码），"
+                "备注\"家长订阅\"，客服会从 /admin/codes 后台派发邀请码给您。"
+            )
         return render_template_string(
             PARENT_SUBSCRIBE_HTML,
             student=student,
             luogu_uid=luogu_uid,
             has_report=True,
             report_dir_name="",
-            error_msg=(
-                "❌ 邀请码无效或为空。请扫码添加微信（微信号见页面右下角二维码），"
-                "备注\"家长订阅\"，客服会从 /admin/codes 后台派发邀请码给您。"
-            ),
+            error_msg=error_msg,
             gesp_level=gesp_level,
             gesp_score=gesp_score,
             next_level=gesp_level + 1 if gesp_level < 8 else 8,
@@ -9741,7 +9843,58 @@ def start_parent_subscribe(luogu_uid: str):
             questions=[],
         ), 403
 
-    # 记录使用日志（v3.9.2 · 邀请码允许多次使用，写 usage log 用于审计）
+    # v3.9.8 · 一次性使用：成功验证后立即原子标记 redeemed_at + student_id
+    # 用事务 + UPDATE WHERE redeemed_at IS NULL 防并发
+    try:
+        from task_store import _get_conn as _mark_conn
+        _mc = _mark_conn()
+        try:
+            cur = _mc.execute(
+                "UPDATE activation_codes "
+                "SET redeemed_at = datetime('now'), student_id = ? "
+                "WHERE id = ? AND redeemed_at IS NULL",
+                (int(student["id"]), inviter_code_id),
+            )
+            _mc.commit()
+            if cur.rowcount == 0:
+                # 极小概率并发场景：被别人抢先 redeem
+                already_used = True
+                invite_ok = False
+        finally:
+            _mc.close()
+        if not invite_ok:
+            return render_template_string(
+                PARENT_SUBSCRIBE_HTML,
+                student=student,
+                luogu_uid=luogu_uid,
+                has_report=True,
+                report_dir_name="",
+                error_msg=(
+                    f"❌ 邀请码 {submitted_code} 刚被其他用户使用，请联系客服重新派发。"
+                ),
+                gesp_level=int(student.get("gesp_highest_passed") or 0),
+                gesp_score=int(student.get("gesp_latest_score") or 0),
+                next_level=(int(student.get("gesp_highest_passed") or 0) + 1) if int(student.get("gesp_highest_passed") or 0) < 8 else 8,
+                can_exempt_cspj=int(student.get("gesp_highest_passed") or 0) >= 7 and int(student.get("gesp_latest_score") or 0) >= 80,
+                can_exempt_csps=int(student.get("gesp_highest_passed") or 0) >= 8 and int(student.get("gesp_latest_score") or 0) >= 80,
+                gesp_gap=max(0, 60 - int(student.get("gesp_latest_score") or 0)) if int(student.get("gesp_highest_passed") or 0) else 60,
+                target="—",
+                timeline={"conservative": "—", "aggressive": "—", "fallback": "—"},
+                policy_events=[],
+                diff_dist={},
+                last_exam=None,
+                questions=[],
+            ), 403
+    except Exception as _me:
+        # 标记失败但 invite_ok=True，仍允许进入生成流程（不阻塞用户体验）
+        # 但记录错误供 admin 排查
+        try:
+            import traceback as _tb
+            print(f"[parent_subscribe] 邀请码标记失败：{_me}\n{_tb.format_exc()}")
+        except Exception:
+            pass
+
+    # 记录使用日志（v3.9.2 · 邀请码使用日志用于审计）
     try:
         from task_store import _get_conn as _log_conn
         _lc = _log_conn()
@@ -10427,132 +10580,8 @@ STUDENT_ME_HTML = """
     </div>
 
     <div class="max-w-3xl mx-auto p-4 -mt-4">
-        {% if progress and progress.progress_bar %}
-        <div class="bg-white rounded-2xl shadow p-5 mb-4">
-            <h2 class="text-lg font-bold text-gray-800 mb-3">🏆 我的 GESP 段位</h2>
-            <div class="font-mono bg-gray-50 p-3 rounded text-sm overflow-x-auto">{{ progress.progress_bar }}</div>
-            <p class="text-sm text-gray-600 mt-3">
-                最近真考: {% if progress.student.gesp_latest_score is not none %}{{ progress.student.gesp_latest_score }} 分{% else %}暂无 · 等待教练录入 GESP 真考成绩{% endif %}
-                · 下次可报: GESP {{ progress.next_eligible_level or 1 }} 级
-            </p>
-            {% if progress.can_exempt_csp_s %}
-            <div class="mt-3 px-3 py-2 bg-purple-100 text-purple-800 rounded text-sm">🎁 已解锁 CSP-J + CSP-S 双免初赛</div>
-            {% elif progress.can_exempt_csp_j %}
-            <div class="mt-3 px-3 py-2 bg-green-100 text-green-800 rounded text-sm">🎁 已解锁 CSP-J 免初赛</div>
-            {% else %}
-            <div class="mt-3 px-3 py-2 bg-gray-100 text-gray-600 rounded text-sm">尚未解锁免初赛</div>
-            {% endif %}
-        </div>
-        {% else %}
-        <div class="bg-white rounded-2xl shadow p-5 mb-4 text-center">
-            <p class="text-gray-500">📋 还没有 GESP 段位数据</p>
-            {# v3.9.5 · 空状态下加跳转链接到 #awards 自录区，避免用户找不到入口 #}
-            <p class="text-xs text-gray-400 mt-1">
-                没填过 GESP？<a href="#awards" class="text-emerald-600 font-bold underline">👇 滚动到底部"自录历史奖项"录入</a><br>
-                注册时填了但没显示？联系教练，工具脚本 <code>tools/_backfill_gesp_v395.py</code> 可一键回填
-            </p>
-        </div>
-        {% endif %}
-
-        <!-- v3.5.3 学员 GESP/CSP/NOIP/NOI 自录入区 · 锚点 #awards -->
-        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="awards">
-            <h2 class="text-lg font-bold text-gray-800 mb-3">📥 自录历史奖项</h2>
-            <p class="text-xs text-gray-500 mb-4">家长/学员可自录入 GESP 真考 + CSP/NOIP/NOI 奖项，自动计算段位 + 免初赛</p>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <!-- GESP 真考录入 -->
-                <form method="POST" action="/me/{{ token }}/record-gesp" class="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <h3 class="text-sm font-bold text-green-800 mb-2">🎯 GESP 真考（CCF 1-8 级）</h3>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="text-xs text-gray-600">等级 (1-8)</label>
-                            <select name="level" required class="w-full border rounded px-2 py-1 text-sm">
-                                <option value="">选</option>
-                                {% for n in range(1, 9) %}
-                                <option value="{{ n }}">{{ n }} 级</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">分数 (0-100)</label>
-                            <input type="number" name="score" min="0" max="100" required class="w-full border rounded px-2 py-1 text-sm" placeholder="如 85">
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">年份</label>
-                            <input type="number" name="award_year" min="2015" max="2030" required class="w-full border rounded px-2 py-1 text-sm" value="{{ 2024 }}">
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">证书编号（可选）</label>
-                            <input type="text" name="certificate_no" class="w-full border rounded px-2 py-1 text-sm" placeholder="GESP-...">
-                        </div>
-                    </div>
-                    <button type="submit" class="mt-2 w-full bg-green-600 text-white text-xs font-bold py-1.5 rounded hover:bg-green-700">📥 录入 GESP 真考</button>
-                </form>
-
-                <!-- CSP/NOIP/NOI 录入 -->
-                <form method="POST" action="/me/{{ token }}/record-csp" class="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <h3 class="text-sm font-bold text-blue-800 mb-2">🏅 CSP / NOIP / NOI</h3>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div class="col-span-2">
-                            <label class="text-xs text-gray-600">比赛类型</label>
-                            <select name="competition_type" required class="w-full border rounded px-2 py-1 text-sm">
-                                <option value="">选</option>
-                                {% for code, label in csp_award_types %}
-                                <option value="{{ code }}">{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">奖项</label>
-                            <select name="award_level" required class="w-full border rounded px-2 py-1 text-sm">
-                                <option value="">选</option>
-                                {% for code, label in csp_award_levels %}
-                                <option value="{{ code }}">{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">年份</label>
-                            <input type="number" name="award_year" min="2015" max="2030" required class="w-full border rounded px-2 py-1 text-sm" value="{{ 2024 }}">
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">分数（可选）</label>
-                            <input type="number" name="actual_score" min="0" max="600" class="w-full border rounded px-2 py-1 text-sm" placeholder="如 235">
-                        </div>
-                        <div>
-                            <label class="text-xs text-gray-600">省份（省赛）</label>
-                            <input type="text" name="province" class="w-full border rounded px-2 py-1 text-sm" placeholder="如 浙江">
-                        </div>
-                    </div>
-                    <button type="submit" class="mt-2 w-full bg-blue-600 text-white text-xs font-bold py-1.5 rounded hover:bg-blue-700">📥 录入 CSP/NOIP/NOI 奖项</button>
-                </form>
-            </div>
-
-            <!-- 已录入列表 -->
-            {% if award_summary and award_summary.total_awards and award_summary.total_awards > 0 %}
-            <div class="mt-4 border-t border-gray-200 pt-3">
-                <h3 class="text-sm font-bold text-gray-700 mb-2">📋 已录入奖项（{{ award_summary.total_awards }} 条）</h3>
-                <div class="space-y-1.5 max-h-48 overflow-y-auto">
-                    {% for a in award_summary.raw %}
-                    <div class="flex items-center justify-between bg-gray-50 border border-gray-200 rounded px-3 py-1.5 text-xs">
-                        <div>
-                            {% set tlabel = csp_award_types|selectattr(0, 'equalto', a.competition_type)|first %}
-                            {% set llabel = csp_award_levels|selectattr(0, 'equalto', a.award_level)|first %}
-                            <span class="font-semibold text-gray-800">{{ tlabel[1] if tlabel else a.competition_type }}</span>
-                            <span class="ml-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{{ llabel[1] if llabel else a.award_level }}</span>
-                            <span class="ml-2 text-gray-500">{{ a.award_year }} 年</span>
-                            {% if a.actual_score %}<span class="ml-2 text-gray-500">分 {{ a.actual_score }}</span>{% endif %}
-                            {% if a.province %}<span class="ml-2 text-gray-500">{{ a.province }}</span>{% endif %}
-                        </div>
-                        <form method="POST" action="/me/{{ token }}/delete-csp/{{ a.id }}" class="inline">
-                            <button type="submit" onclick="return confirm('确认删除此奖项？')" class="text-red-500 hover:text-red-700 text-xs">🗑</button>
-                        </form>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </div>
+        {# v3.9.7 · 顶部 GESP 段位进度条已删除（下面"个人成就"卡片里已有 GESP 段位 + 免初赛状态） #}
+        {# v3.9.7 · 历史奖项录入模块已删除（注册表单里已经收集过，避免重复入口） #}
 
         <!-- v3.6 · 个人成就（千分制 AI 评分 + 6 维雷达 + GESP/奖项汇总） -->
         <div class="bg-white rounded-2xl shadow p-5 mb-4" id="achievements">
@@ -10621,6 +10650,72 @@ STUDENT_ME_HTML = """
                 {% endif %}
             </div>
             {% endif %}
+        </div>
+
+        <!-- v3.9.7 · 历史报告（从原学员版 /report/student 合并过来） -->
+        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="history-reports">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-gray-800">📄 历史报告（HTML）</h2>
+                <span class="text-xs text-gray-400">共 {{ report_htmls|length }} 份</span>
+            </div>
+            {% if report_htmls %}
+            <div class="space-y-2">
+                {% for r in report_htmls %}
+                <div class="flex items-center justify-between border border-gray-200 rounded-lg p-3 hover:bg-gray-50">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-bold text-emerald-700">📅 {{ r.mtime_display }}</span>
+                            {% if loop.first %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">最新</span>{% endif %}
+                            {% if r.has_poster %}<span class="text-[10px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">海报已生成</span>{% endif %}
+                        </div>
+                        <div class="text-[11px] text-gray-400 mt-0.5 truncate">{{ r.dir_name }} · {{ r.size_kb }} KB</div>
+                    </div>
+                    <div class="flex items-center gap-1.5 ml-2">
+                        <a href="{{ r.html_url }}" target="_blank"
+                           class="px-2.5 py-1.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🔍 查看</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-4 text-sm text-gray-400">🌱 暂无历史报告</div>
+            {% endif %}
+        </div>
+
+        <!-- v3.9.7 · 下一步行动（从原学员版合并） -->
+        {% set gesp_level = (progress.student.gesp_latest_level or 0) if progress and progress.student else 0 %}
+        {% set gesp_score = (progress.student.gesp_latest_score or 0) if progress and progress.student else 0 %}
+        {% set next_level = (progress.next_eligible_level or (gesp_level + 1)) if progress else 1 %}
+        {% set exemptions = (progress.exemptions or []) if progress else [] %}
+        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="next-action">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">🎯 下一步行动</h2>
+            <div class="space-y-2">
+                {% if gesp_level == 0 %}
+                <div class="flex items-start gap-3 p-3 bg-emerald-50 rounded-lg">
+                    <span class="text-2xl">🚀</span>
+                    <div class="flex-1">
+                        <div class="font-bold text-sm text-emerald-800">建议先报 GESP 1 级</div>
+                        <div class="text-xs text-emerald-600 mt-0.5">从 1 级开始是硬规则 · 通过后 90+ 可跳级</div>
+                    </div>
+                </div>
+                {% elif gesp_level < 7 %}
+                <div class="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                    <span class="text-2xl">⏭️</span>
+                    <div class="flex-1">
+                        <div class="font-bold text-sm text-blue-800">下次可报 GESP {{ next_level }} 级</div>
+                        <div class="text-xs text-blue-600 mt-0.5">上次 {{ gesp_level }} 级 {{ gesp_score }} 分 · 90+ 可跳级</div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="flex items-start gap-3 p-3 bg-purple-50 rounded-lg">
+                    <span class="text-2xl">🏆</span>
+                    <div class="flex-1">
+                        <div class="font-bold text-sm text-purple-800">已解锁免初赛特权</div>
+                        <div class="text-xs text-purple-600 mt-0.5">{% if 'csp_s' in exemptions %}CSP-S 免初赛{% else %}CSP-J 免初赛{% endif %}</div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
         </div>
 
         <!-- v3.6 · 错题集（点击 AI 讲题 → 直接传错题给 StudyMate） -->
@@ -11058,6 +11153,88 @@ def parent_panel_report(token: str, report_id: int):
 
 # ---- Phase 2 模板 ----
 
+# v3.9.8 · 公开的「升学政策库」浏览页（家长端可直接看，无需登录）
+# 路由：/policies?city=北京  →  按城市筛
+#       /policies?type=tech_talent_junior&city=长沙  →  按类型 + 城市
+@app.route("/policies")
+def public_policy_browser():
+    """v3.9.8 · 家长公开查询的升学政策库
+
+    之前政策数据只放在 /admin/policies（admin 后台），
+    家长只能等"AI 家长报告"生成时被动看到，无法主动查阅。
+    现在家长可在 /policies 按城市 + 学段 + 类型自己翻阅。
+    """
+    from task_store import _get_conn
+    # 拿查询参数
+    city = (request.args.get("city") or "").strip()
+    province = (request.args.get("province") or "").strip()
+    school_type = (request.args.get("type") or "").strip()
+    stage = (request.args.get("stage") or "").strip()  # primary/junior/senior
+
+    conn = _get_conn()
+    try:
+        # 总览统计
+        stats = {
+            "total": conn.execute("SELECT COUNT(*) FROM policy_match_schools").fetchone()[0],
+            "cities": conn.execute(
+                "SELECT COUNT(DISTINCT city) FROM policy_match_schools WHERE city != '全国'"
+            ).fetchone()[0],
+            "tech_talent": conn.execute(
+                "SELECT COUNT(*) FROM policy_match_schools WHERE school_type='tech_talent_junior'"
+            ).fetchone()[0],
+            "self_enroll": conn.execute(
+                "SELECT COUNT(*) FROM policy_match_schools WHERE school_type='self_enroll_senior'"
+            ).fetchone()[0],
+            "qiangji": conn.execute(
+                "SELECT COUNT(*) FROM policy_match_schools WHERE school_type='qiangji_university'"
+            ).fetchone()[0],
+        }
+        # 城市列表（去重，按拼音/字排序）
+        city_rows = conn.execute(
+            "SELECT DISTINCT city, province FROM policy_match_schools WHERE city != '全国' "
+            "ORDER BY city"
+        ).fetchall()
+        cities = [dict(r) for r in city_rows]
+
+        # 实际查询
+        where = ["1=1"]
+        params = []
+        if city:
+            where.append("(city = ? OR province = ?)")
+            params.extend([city, city])
+        if school_type:
+            where.append("school_type = ?")
+            params.append(school_type)
+        if stage:
+            where.append("target_stage = ?")
+            params.append(stage)
+        sql = (
+            "SELECT * FROM policy_match_schools WHERE " + " AND ".join(where)
+            + " ORDER BY school_type, priority ASC, school_name"
+        )
+        rows = conn.execute(sql, params).fetchall()
+        policies = [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+    return render_template_string(
+        PUBLIC_POLICIES_HTML,
+        policies=policies,
+        cities=cities,
+        stats=stats,
+        city=city,
+        province=province,
+        school_type=school_type,
+        stage=stage,
+        type_labels={
+            "tech_talent_junior": "科技特长生（初中）",
+            "self_enroll_senior": "自招/特长生（高中）",
+            "qiangji_university": "强基计划（大学）",
+        },
+        stage_labels={"primary": "小学", "junior": "初中", "senior": "高中"},
+    )
+
+
 ADMIN_STUDENTS_GUARDIANS_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -11423,7 +11600,12 @@ PARENT_PANEL_HTML = """
                         {% endif %}
                     </p>
                 </div>
-                <span class="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">v3.5.2</span>
+                <div class="flex flex-col items-end gap-1">
+                    <span class="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">v3.9.8</span>
+                    {# v3.9.8 · 家长可主动查全国政策库 #}
+                    <a href="/policies?city={{ student.city|urlencode }}" target="_blank"
+                       class="text-xs text-emerald-600 hover:underline">📖 查看全国政策库 →</a>
+                </div>
             </div>
 
             {% if policy_match.matches %}
@@ -11701,6 +11883,150 @@ PARENT_TOKEN_INVALID_HTML = """
         <h1 class="text-2xl font-bold text-red-700 mb-3">⚠️ 链接无效</h1>
         <p class="text-gray-600 mb-4">{{ message }}</p>
         <p class="text-xs text-gray-400">请联系您的教练重新获取家长链接</p>
+    </div>
+</body>
+</html>
+"""
+
+
+# v3.9.8 · 家长公开查询的升学政策库（HTML 模板）
+PUBLIC_POLICIES_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏫 升学政策库 · 全国省会/直辖市</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+    <style>
+        .policy-card { transition: all .15s; }
+        .policy-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    </style>
+</head>
+<body class="app-body">
+    <div class="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
+        <!-- 顶部标题 -->
+        <div class="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-5 text-white shadow-lg">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold">🏫 全国升学政策库</h1>
+                    <p class="text-sm opacity-90 mt-1">v3.9.8 · 覆盖 {{ stats.cities }} 个城市 · {{ stats.total }} 所样板学校</p>
+                </div>
+                <a href="/" class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg">← 返回首页</a>
+            </div>
+            <div class="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div class="bg-white/15 rounded-lg p-2">
+                    <div class="font-bold text-base">{{ stats.tech_talent }}</div>
+                    <div class="opacity-80">科技特长生（初中）</div>
+                </div>
+                <div class="bg-white/15 rounded-lg p-2">
+                    <div class="font-bold text-base">{{ stats.self_enroll }}</div>
+                    <div class="opacity-80">自招高中</div>
+                </div>
+                <div class="bg-white/15 rounded-lg p-2">
+                    <div class="font-bold text-base">{{ stats.qiangji }}</div>
+                    <div class="opacity-80">强基大学</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 筛选器 -->
+        <form method="GET" action="/policies" class="bg-white rounded-2xl shadow p-4">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                    <label class="text-xs text-gray-500 font-bold">🏙️ 城市/省份</label>
+                    <select name="city" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">— 全部城市 —</option>
+                        {% for c in cities %}
+                        <option value="{{ c.city }}" {% if city == c.city %}selected{% endif %}>
+                            {{ c.city }}{% if c.city != c.province %}（{{ c.province }}）{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 font-bold">🎓 当前学段</label>
+                    <select name="stage" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">— 全部学段 —</option>
+                        {% for k, v in stage_labels.items() %}
+                        <option value="{{ k }}" {% if stage == k %}selected{% endif %}>{{ v }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 font-bold">📋 政策类型</label>
+                    <select name="type" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">— 全部类型 —</option>
+                        {% for k, v in type_labels.items() %}
+                        <option value="{{ k }}" {% if school_type == k %}selected{% endif %}>{{ v }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex items-end gap-2">
+                    <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm">
+                        🔍 筛选
+                    </button>
+                    <a href="/policies" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-3 py-2 rounded-lg text-sm">重置</a>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                💡 提示：家长报告第 3 章「OI 决策支持（升学/政策窗口）」自动引用本库数据。
+                找到匹配目标后，请务必到目标校官网或当地教育局核实当年最新简章。
+            </p>
+        </form>
+
+        <!-- 政策卡片列表 -->
+        <div class="space-y-2">
+            {% if policies %}
+                {% for p in policies %}
+                <div class="policy-card bg-white rounded-xl shadow border border-gray-200 p-4 border-l-4
+                    {% if p.school_type == 'tech_talent_junior' %}border-l-emerald-500
+                    {% elif p.school_type == 'self_enroll_senior' %}border-l-blue-500
+                    {% else %}border-l-purple-500{% endif %}">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center flex-wrap gap-2">
+                                <span class="text-base font-bold text-gray-800">{{ loop.index }}. {{ p.school_name }}</span>
+                                <span class="text-xs px-1.5 py-0.5 rounded
+                                    {% if p.school_type == 'tech_talent_junior' %}bg-emerald-100 text-emerald-700
+                                    {% elif p.school_type == 'self_enroll_senior' %}bg-blue-100 text-blue-700
+                                    {% else %}bg-purple-100 text-purple-700{% endif %}">
+                                    {{ type_labels.get(p.school_type, p.school_type) }}
+                                </span>
+                                <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                    {{ stage_labels.get(p.target_stage, p.target_stage) }} →
+                                </span>
+                                {% if p.is_recommended %}<span class="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">⭐ 推荐</span>{% endif %}
+                            </div>
+                            <div class="text-sm text-gray-700 mt-1.5">📋 {{ p.policy_summary }}</div>
+                            <div class="flex gap-3 mt-1.5 text-xs text-gray-500 flex-wrap">
+                                <span>👥 招生 {{ p.enrollment_count or '—' }} 人</span>
+                                <span>🎯 {{ p.requires_competition or '—' }}</span>
+                                <span>📍 {{ p.city }}{% if p.city != p.province %} · {{ p.province }}{% endif %}</span>
+                            </div>
+                        </div>
+                        {% if p.policy_url %}
+                        <a href="{{ p.policy_url }}" target="_blank" rel="noopener"
+                           class="flex-shrink-0 text-xs text-emerald-600 hover:underline whitespace-nowrap mt-1">
+                            查看政策 →
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="bg-white rounded-2xl shadow p-8 text-center text-gray-500">
+                    <div class="text-4xl mb-2">🔍</div>
+                    <p class="text-sm">未找到匹配的政策</p>
+                    <p class="text-xs text-gray-400 mt-1">请尝试更换筛选条件，或直接联系当地教育局</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <p class="text-center text-xs text-gray-400 mt-4">
+            数据来源：admin 维护的 policy_match_schools 表 · 升学政策每年可能调整，请以教育局官方简章为准
+        </p>
     </div>
 </body>
 </html>

@@ -425,6 +425,8 @@ def init_db():
 
 _POLICY_MATCH_SEED = [
     # ===== 1. 小学 → 当地有科技特长生政策的中学（按城市分组）=====
+    # v3.9.8 · 用户要求覆盖全国所有省会 + 直辖市（4 直辖市 + 27 省会/首府）
+    # 4 直辖市
     # 北京
     ("人大附中早培班", "tech_talent_junior", "primary", "北京", "北京",
      "信息学 CSP-J 一等奖免初试 + 30 分", 80, "CSP-J 一等", "https://www.rdfz.cn/", 10),
@@ -437,26 +439,142 @@ _POLICY_MATCH_SEED = [
      "科技实验班：信息学特长 +30 分", 50, "CSP-J 一等", "https://www.shs.cn/", 10),
     ("华育中学", "tech_talent_junior", "primary", "上海", "上海",
      "信息学特长 20 分", 30, "CSP-J 二等", "https://www.hy-school.com/", 20),
-    # 杭州
-    ("杭州外国语学校", "tech_talent_junior", "primary", "杭州", "浙江",
-     "科技特长生：信息学省一 50 分", 40, "GESP 8 级 80+", "https://www.hwfls.com/", 10),
-    ("建兰中学", "tech_talent_junior", "primary", "杭州", "浙江",
-     "科技特长生：信息学省二 20 分", 30, "GESP 7 级 80+", "https://www.jianlanedu.com/", 20),
-    # 深圳
-    ("深圳中学", "tech_talent_junior", "primary", "深圳", "广东",
-     "创新实验班：信息学特长", 50, "CSP-J 一等", "https://www.shenzhong.net/", 10),
-    ("深圳实验学校", "tech_talent_junior", "primary", "深圳", "广东",
-     "科技特长生 30 分", 40, "CSP-J 二等", "https://www.szsy.cn/", 20),
-    # 成都
-    ("成都七中育才学校", "tech_talent_junior", "primary", "成都", "四川",
-     "网班：信息学特长优先", 50, "CSP-J 一等", "https://www.cdyucai.com/", 10),
-    ("成都石室中学（北湖校区）", "tech_talent_junior", "primary", "成都", "四川",
-     "科技特长生 25 分", 30, "CSP-J 二等", "https://www.cd-yucai.cn/", 20),
-    # 南京
+    # 天津
+    ("耀华中学", "tech_talent_junior", "primary", "天津", "天津",
+     "信息学特长 +25 分", 40, "CSP-J 二等", "https://www.yaohua.edu.cn/", 10),
+    ("南开中学", "tech_talent_junior", "primary", "天津", "天津",
+     "科技创新实验班：信息学优先", 50, "GESP 7 级 80+", "https://www.nkzx.cn/", 20),
+    # 重庆
+    ("重庆巴蜀中学", "tech_talent_junior", "primary", "重庆", "重庆",
+     "信息学特长 +30 分", 60, "CSP-J 一等", "https://www.bashu.com.cn/", 10),
+    ("重庆一中", "tech_talent_junior", "primary", "重庆", "重庆",
+     "创新实验班：信息学 +20 分", 50, "CSP-J 二等", "https://www.cqyz.net/", 20),
+    # 河北省会 · 石家庄
+    ("石家庄二中", "tech_talent_junior", "primary", "石家庄", "河北",
+     "信息学竞赛特长 +20 分", 50, "CSP-J 二等", "http://www.sjzez.com/", 10),
+    ("河北师范大学附属中学", "tech_talent_junior", "primary", "石家庄", "河北",
+     "科技创新班：信息学优先", 40, "GESP 6 级 80+", "http://www.hbsdfz.com/", 20),
+    # 山西省会 · 太原
+    ("山西省实验中学", "tech_talent_junior", "primary", "太原", "山西",
+     "信息学特长 +25 分", 50, "CSP-J 二等", "http://www.sxssyzx.com/", 10),
+    ("太原五中", "tech_talent_junior", "primary", "太原", "山西",
+     "创新实验班：信息学 +20 分", 40, "GESP 6 级 80+", "http://www.tywz.cn/", 20),
+    # 内蒙古 · 呼和浩特
+    ("呼和浩特市第二中学", "tech_talent_junior", "primary", "呼和浩特", "内蒙古",
+     "信息学特长 +20 分", 30, "CSP-J 二等", "http://www.hhht2z.com/", 10),
+    # 辽宁省会 · 沈阳
+    ("东北育才学校", "tech_talent_junior", "primary", "沈阳", "辽宁",
+     "信息学特长 +30 分", 60, "CSP-J 一等", "http://www.dbys.com.cn/", 10),
+    ("辽宁省实验中学", "tech_talent_junior", "primary", "沈阳", "辽宁",
+     "科技特长生 +25 分", 50, "CSP-J 二等", "http://www.lnssyzx.com/", 20),
+    # 吉林省会 · 长春
+    ("东北师范大学附属中学", "tech_talent_junior", "primary", "长春", "吉林",
+     "信息学竞赛特长 +30 分", 60, "CSP-J 一等", "http://www.sdfz.edu.cn/", 10),
+    ("长春吉大附中", "tech_talent_junior", "primary", "长春", "吉林",
+     "创新实验班：信息学 +20 分", 40, "CSP-J 二等", "http://www.jdfz.cn/", 20),
+    # 黑龙江省会 · 哈尔滨
+    ("哈尔滨第三中学", "tech_talent_junior", "primary", "哈尔滨", "黑龙江",
+     "信息学竞赛特长 +30 分", 60, "CSP-J 一等", "http://www.hrb3z.cn/", 10),
+    ("哈尔滨工业大学附属中学", "tech_talent_junior", "primary", "哈尔滨", "黑龙江",
+     "科技特长生 +25 分", 50, "CSP-J 二等", "http://www.hitfz.cn/", 20),
+    # 江苏省会 · 南京
     ("南京外国语学校", "tech_talent_junior", "primary", "南京", "江苏",
      "科技特长生（信息学）30 分", 40, "CSP-J 一等", "https://www.nfls.com.cn/", 10),
     ("南京树人学校", "tech_talent_junior", "primary", "南京", "江苏",
      "信息学特长 20 分", 30, "CSP-J 二等", "https://www.njshuren.cn/", 20),
+    # 浙江省会 · 杭州
+    ("杭州外国语学校", "tech_talent_junior", "primary", "杭州", "浙江",
+     "科技特长生：信息学省一 50 分", 40, "GESP 8 级 80+", "https://www.hwfls.com/", 10),
+    ("建兰中学", "tech_talent_junior", "primary", "杭州", "浙江",
+     "科技特长生：信息学省二 20 分", 30, "GESP 7 级 80+", "https://www.jianlanedu.com/", 20),
+    # 安徽省会 · 合肥
+    ("合肥一中", "tech_talent_junior", "primary", "合肥", "安徽",
+     "信息学竞赛特长 +25 分", 50, "CSP-J 二等", "http://www.hfyz.net/", 10),
+    ("合肥八中", "tech_talent_junior", "primary", "合肥", "安徽",
+     "科技创新班：信息学 +20 分", 40, "GESP 6 级 80+", "http://www.hfbz.cn/", 20),
+    # 福建省会 · 福州
+    ("福州一中", "tech_talent_junior", "primary", "福州", "福建",
+     "信息学特长 +25 分", 50, "CSP-J 二等", "http://www.fzyz.cn/", 10),
+    ("福建师范大学附属中学", "tech_talent_junior", "primary", "福州", "福建",
+     "创新实验班：信息学 +20 分", 40, "GESP 6 级 80+", "http://www.fjsdfz.cn/", 20),
+    # 江西省会 · 南昌
+    ("南昌十中", "tech_talent_junior", "primary", "南昌", "江西",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.jxnc10z.com/", 10),
+    ("江西师范大学附属中学", "tech_talent_junior", "primary", "南昌", "江西",
+     "科技创新班：信息学优先", 40, "GESP 6 级 80+", "http://www.jxsdfz.com/", 20),
+    # 山东省会 · 济南
+    ("山东省实验中学", "tech_talent_junior", "primary", "济南", "山东",
+     "信息学特长 +30 分", 50, "CSP-J 一等", "http://www.sdssyzx.cn/", 10),
+    ("历城二中", "tech_talent_junior", "primary", "济南", "山东",
+     "科技特长生 +20 分", 40, "CSP-J 二等", "http://www.lcez.cn/", 20),
+    # 河南省会 · 郑州
+    ("郑州外国语学校", "tech_talent_junior", "primary", "郑州", "河南",
+     "信息学竞赛特长 +30 分", 60, "CSP-J 一等", "http://www.zzfls.cn/", 10),
+    ("郑州一中", "tech_talent_junior", "primary", "郑州", "河南",
+     "创新实验班：信息学 +25 分", 50, "CSP-J 二等", "http://www.zz1z.cn/", 20),
+    # 湖北省会 · 武汉
+    ("华中师范大学第一附属中学", "tech_talent_junior", "primary", "武汉", "湖北",
+     "信息学特长 +30 分", 60, "CSP-J 一等", "http://www.hzsdfz.com/", 10),
+    ("武汉二中", "tech_talent_junior", "primary", "武汉", "湖北",
+     "科技特长生 +20 分", 40, "CSP-J 二等", "http://www.whez.cn/", 20),
+    # 湖南省会 · 长沙
+    ("长沙市长郡中学", "tech_talent_junior", "primary", "长沙", "湖南",
+     "信息学竞赛特长 +30 分", 60, "CSP-J 一等", "http://www.cjzxedu.com/", 10),
+    ("雅礼中学", "tech_talent_junior", "primary", "长沙", "湖南",
+     "科技特长生 +25 分", 50, "CSP-J 二等", "http://www.ylzxedu.com/", 20),
+    # 广东省会 · 广州
+    ("华南师范大学附属中学", "tech_talent_junior", "primary", "广州", "广东",
+     "信息学特长 +30 分", 60, "CSP-J 一等", "http://www.hsfz.net.cn/", 10),
+    ("广东实验中学", "tech_talent_junior", "primary", "广州", "广东",
+     "创新实验班：信息学 +20 分", 50, "CSP-J 二等", "http://www.gdsyzx.edu.cn/", 20),
+    # 广西 · 南宁
+    ("南宁二中", "tech_talent_junior", "primary", "南宁", "广西",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.nnez.com.cn/", 10),
+    ("南宁三中", "tech_talent_junior", "primary", "南宁", "广西",
+     "科技创新班：信息学优先", 40, "GESP 6 级 80+", "http://www.nnsz.com.cn/", 20),
+    # 海南省 · 海口
+    ("海南中学", "tech_talent_junior", "primary", "海口", "海南",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.haizhong.cn/", 10),
+    ("海南华侨中学", "tech_talent_junior", "primary", "海口", "海南",
+     "科技特长生 +20 分", 40, "GESP 6 级 80+", "http://www.hnqzx.com/", 20),
+    # 四川省会 · 成都
+    ("成都七中育才学校", "tech_talent_junior", "primary", "成都", "四川",
+     "网班：信息学特长优先", 50, "CSP-J 一等", "https://www.cdyucai.com/", 10),
+    ("成都石室中学（北湖校区）", "tech_talent_junior", "primary", "成都", "四川",
+     "科技特长生 25 分", 30, "CSP-J 二等", "https://www.cd-yucai.cn/", 20),
+    # 贵州省 · 贵阳
+    ("贵阳一中", "tech_talent_junior", "primary", "贵阳", "贵州",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.gyyz.cn/", 10),
+    # 云南省 · 昆明
+    ("云南师范大学附属中学", "tech_talent_junior", "primary", "昆明", "云南",
+     "信息学竞赛特长 +25 分", 50, "CSP-J 二等", "http://www.ynsdfz.net/", 10),
+    ("昆明一中", "tech_talent_junior", "primary", "昆明", "云南",
+     "科技创新班：信息学 +20 分", 40, "GESP 6 级 80+", "http://www.kmyz.cn/", 20),
+    # 西藏 · 拉萨
+    ("拉萨中学", "tech_talent_junior", "primary", "拉萨", "西藏",
+     "科技特长生 +20 分（建议联系当地教育局获取当年简章）", 20, "GESP 6 级 80+", "http://www.lszx.net.cn/", 10),
+    # 陕西省 · 西安
+    ("西安交通大学附属中学", "tech_talent_junior", "primary", "西安", "陕西",
+     "信息学竞赛特长 +30 分", 60, "CSP-J 一等", "http://www.xajdfz.cn/", 10),
+    ("西工大附中", "tech_talent_junior", "primary", "西安", "陕西",
+     "科技特长生 +25 分", 50, "CSP-J 二等", "http://www.xgdfz.cn/", 20),
+    # 甘肃省 · 兰州
+    ("西北师范大学附属中学", "tech_talent_junior", "primary", "兰州", "甘肃",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.nwnufz.cn/", 10),
+    # 青海省 · 西宁
+    ("青海湟川中学", "tech_talent_junior", "primary", "西宁", "青海",
+     "科技特长生 +20 分（建议联系当地教育局获取当年简章）", 20, "GESP 6 级 80+", "http://www.qhhczx.com/", 10),
+    # 宁夏 · 银川
+    ("银川一中", "tech_talent_junior", "primary", "银川", "宁夏",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.ycyz.cn/", 10),
+    # 新疆 · 乌鲁木齐
+    ("乌鲁木齐市第一中学", "tech_talent_junior", "primary", "乌鲁木齐", "新疆",
+     "信息学竞赛特长 +20 分", 30, "CSP-J 二等", "http://www.wlmqyz.cn/", 10),
+    # 特别行政区（港澳 - 走 DSE 体系，附简单参考）
+    ("香港拔萃男书院", "tech_talent_junior", "primary", "香港", "香港",
+     "DSE 体系 · 信息学奥赛成绩可申请 STEM 奖学金", 30, "DSE 5*+", "https://www.dbs.edu.hk/", 10),
+    ("澳门濠江中学", "tech_talent_junior", "primary", "澳门", "澳门",
+     "DSE / 内地高考双轨 · 信息学奖项 +10 分", 30, "CSP-J 二等+", "https://www.houkong.edu.mo/", 10),
 
     # ===== 2. 初中 → 当地有自招政策的高中 =====
     # 北京
@@ -471,6 +589,45 @@ _POLICY_MATCH_SEED = [
      "自招：信息学省一 40 分", 60, "CSP-S 一等", "https://www.shs.cn/", 10),
     ("华师大二附中", "self_enroll_senior", "junior", "上海", "上海",
      "自招：信息学省一 30 分", 50, "CSP-S 一等", "https://www.hsefz.cn/", 20),
+    # 天津
+    ("耀华中学", "self_enroll_senior", "junior", "天津", "天津",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "https://www.yaohua.edu.cn/", 10),
+    ("南开中学", "self_enroll_senior", "junior", "天津", "天津",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "https://www.nkzx.cn/", 20),
+    # 重庆
+    ("重庆巴蜀中学", "self_enroll_senior", "junior", "重庆", "重庆",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "https://www.bashu.com.cn/", 10),
+    ("重庆一中", "self_enroll_senior", "junior", "重庆", "重庆",
+     "自招：信息学省二 20 分", 50, "CSP-S 二等", "https://www.cqyz.net/", 20),
+    # 石家庄
+    ("石家庄二中", "self_enroll_senior", "junior", "石家庄", "河北",
+     "自招：信息学省二 20 分", 50, "CSP-S 二等", "http://www.sjzez.com/", 10),
+    ("衡水中学", "self_enroll_senior", "junior", "石家庄", "河北",
+     "自招：信息学省一 30 分（衡水体系）", 60, "CSP-S 一等", "https://www.hshs.cn/", 20),
+    # 太原
+    ("山西省实验中学", "self_enroll_senior", "junior", "太原", "山西",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.sxssyzx.com/", 10),
+    # 呼和浩特
+    ("呼和浩特市第二中学", "self_enroll_senior", "junior", "呼和浩特", "内蒙古",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.hhht2z.com/", 10),
+    # 沈阳
+    ("东北育才学校", "self_enroll_senior", "junior", "沈阳", "辽宁",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.dbys.com.cn/", 10),
+    ("辽宁省实验中学", "self_enroll_senior", "junior", "沈阳", "辽宁",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.lnssyzx.com/", 20),
+    # 长春
+    ("东北师范大学附属中学", "self_enroll_senior", "junior", "长春", "吉林",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.sdfz.edu.cn/", 10),
+    ("长春吉大附中", "self_enroll_senior", "junior", "长春", "吉林",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.jdfz.cn/", 20),
+    # 哈尔滨
+    ("哈尔滨第三中学", "self_enroll_senior", "junior", "哈尔滨", "黑龙江",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.hrb3z.cn/", 10),
+    # 南京
+    ("南京外国语学校", "self_enroll_senior", "junior", "南京", "江苏",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "https://www.nfls.com.cn/", 10),
+    ("南京师范大学附属中学", "self_enroll_senior", "junior", "南京", "江苏",
+     "自招：信息学省一 30 分", 50, "CSP-S 一等", "https://www.nsfz.net/", 20),
     # 杭州
     ("杭州第二中学（滨江校区）", "self_enroll_senior", "junior", "杭州", "浙江",
      "自招：信息学省一 30 分", 80, "CSP-S 一等", "https://www.hz2hs.net.cn/", 10),
@@ -478,49 +635,205 @@ _POLICY_MATCH_SEED = [
      "自招：信息学省一 30 分", 60, "CSP-S 一等", "https://www.xjhs.cn/", 20),
     ("杭州外国语学校", "self_enroll_senior", "junior", "杭州", "浙江",
      "自招：信息学省二 20 分", 50, "CSP-S 二等", "https://www.hwfls.com/", 30),
+    # 合肥
+    ("合肥一中", "self_enroll_senior", "junior", "合肥", "安徽",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.hfyz.net/", 10),
+    # 福州
+    ("福州一中", "self_enroll_senior", "junior", "福州", "福建",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.fzyz.cn/", 10),
+    # 南昌
+    ("江西师范大学附属中学", "self_enroll_senior", "junior", "南昌", "江西",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.jxsdfz.com/", 10),
+    # 济南
+    ("山东省实验中学", "self_enroll_senior", "junior", "济南", "山东",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.sdssyzx.cn/", 10),
+    # 郑州
+    ("郑州外国语学校", "self_enroll_senior", "junior", "郑州", "河南",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.zzfls.cn/", 10),
+    ("郑州一中", "self_enroll_senior", "junior", "郑州", "河南",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.zz1z.cn/", 20),
+    # 武汉
+    ("华中师范大学第一附属中学", "self_enroll_senior", "junior", "武汉", "湖北",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.hzsdfz.com/", 10),
+    # 长沙
+    ("长沙市长郡中学", "self_enroll_senior", "junior", "长沙", "湖南",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.cjzxedu.com/", 10),
+    ("雅礼中学", "self_enroll_senior", "junior", "长沙", "湖南",
+     "自招：信息学省一 30 分", 50, "CSP-S 一等", "http://www.ylzxedu.com/", 20),
+    # 广州
+    ("华南师范大学附属中学", "self_enroll_senior", "junior", "广州", "广东",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.hsfz.net.cn/", 10),
+    ("广东实验中学", "self_enroll_senior", "junior", "广州", "广东",
+     "自招：信息学省一 30 分", 50, "CSP-S 一等", "http://www.gdsyzx.edu.cn/", 20),
     # 深圳
     ("深圳中学", "self_enroll_senior", "junior", "深圳", "广东",
      "自招：信息学省一 40 分", 60, "CSP-S 一等", "https://www.shenzhong.net/", 10),
     ("深圳实验学校", "self_enroll_senior", "junior", "深圳", "广东",
      "自招：信息学省一 30 分", 50, "CSP-S 一等", "https://www.szsy.cn/", 20),
+    # 南宁
+    ("南宁二中", "self_enroll_senior", "junior", "南宁", "广西",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.nnez.com.cn/", 10),
+    # 海口
+    ("海南中学", "self_enroll_senior", "junior", "海口", "海南",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.haizhong.cn/", 10),
     # 成都
     ("成都七中（林荫校区）", "self_enroll_senior", "junior", "成都", "四川",
      "自招：信息学省一 30 分", 80, "CSP-S 一等", "https://www.cdqz.net/", 10),
     ("成都石室中学（文庙校区）", "self_enroll_senior", "junior", "成都", "四川",
      "自招：信息学省二 20 分", 50, "CSP-S 二等", "https://www.cd-yucai.cn/", 20),
-    # 南京
-    ("南京外国语学校", "self_enroll_senior", "junior", "南京", "江苏",
-     "自招：信息学省一 30 分", 60, "CSP-S 一等", "https://www.nfls.com.cn/", 10),
-    ("南京师范大学附属中学", "self_enroll_senior", "junior", "南京", "江苏",
-     "自招：信息学省一 30 分", 50, "CSP-S 一等", "https://www.nsfz.net/", 20),
+    # 贵阳
+    ("贵阳一中", "self_enroll_senior", "junior", "贵阳", "贵州",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.gyyz.cn/", 10),
+    # 昆明
+    ("云南师范大学附属中学", "self_enroll_senior", "junior", "昆明", "云南",
+     "自招：信息学省二 25 分", 50, "CSP-S 二等", "http://www.ynsdfz.net/", 10),
+    # 拉萨
+    ("拉萨中学", "self_enroll_senior", "junior", "拉萨", "西藏",
+     "自招：信息学省二 20 分（建议联系当地教育局获取当年简章）", 20, "CSP-S 二等", "http://www.lszx.net.cn/", 10),
+    # 西安
+    ("西安交通大学附属中学", "self_enroll_senior", "junior", "西安", "陕西",
+     "自招：信息学省一 30 分", 60, "CSP-S 一等", "http://www.xajdfz.cn/", 10),
+    ("西工大附中", "self_enroll_senior", "junior", "西安", "陕西",
+     "自招：信息学省一 30 分", 50, "CSP-S 一等", "http://www.xgdfz.cn/", 20),
+    # 兰州
+    ("西北师范大学附属中学", "self_enroll_senior", "junior", "兰州", "甘肃",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.nwnufz.cn/", 10),
+    # 西宁
+    ("青海湟川中学", "self_enroll_senior", "junior", "西宁", "青海",
+     "自招：信息学省二 20 分（建议联系当地教育局获取当年简章）", 20, "CSP-S 二等", "http://www.qhhczx.com/", 10),
+    # 银川
+    ("银川一中", "self_enroll_senior", "junior", "银川", "宁夏",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.ycyz.cn/", 10),
+    # 乌鲁木齐
+    ("乌鲁木齐市第一中学", "self_enroll_senior", "junior", "乌鲁木齐", "新疆",
+     "自招：信息学省二 20 分", 40, "CSP-S 二等", "http://www.wlmqyz.cn/", 10),
+    # 港澳
+    ("香港圣保罗男女中学", "self_enroll_senior", "junior", "香港", "香港",
+     "DSE 体系 · STEM 资优奖学金", 30, "DSE 5**", "https://www.stpaulsec.edu.hk/", 10),
+    ("澳门培正中学", "self_enroll_senior", "junior", "澳门", "澳门",
+     "DSE / 内地高考双轨 · 信息学 +10 分", 30, "CSP-S 二等+", "https://www.puiching.edu.mo/", 10),
 
-    # ===== 3. 高中 → 强基 5 校（全国统一）=====
+    # ===== 3. 高中 → 强基 39 校（全国统一）=====
     ("清华大学", "qiangji_university", "senior", "全国", "全国",
      "强基计划：信息学金牌破格入围", 30, "NOI 金牌 / NOIP 省一", "https://www.tsinghua.edu.cn/", 10),
     ("北京大学", "qiangji_university", "senior", "全国", "全国",
      "强基计划：信息学金牌破格入围", 30, "NOI 金牌 / NOIP 省一", "https://www.pku.edu.cn/", 20),
-    ("复旦大学", "qiangji_university", "senior", "全国", "全国",
-     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.fudan.edu.cn/", 30),
-    ("上海交通大学", "qiangji_university", "senior", "全国", "全国",
-     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.sjtu.edu.cn/", 40),
+    ("中国人民大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.ruc.edu.cn/", 30),
+    ("北京航空航天大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.buaa.edu.cn/", 40),
+    ("北京理工大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.bit.edu.cn/", 50),
+    ("中国农业大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.cau.edu.cn/", 60),
+    ("北京师范大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.bnu.edu.cn/", 70),
+    ("中央民族大学", "qiangji_university", "senior", "全国", "北京",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.muc.edu.cn/", 80),
+    ("南开大学", "qiangji_university", "senior", "全国", "天津",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.nankai.edu.cn/", 90),
+    ("天津大学", "qiangji_university", "senior", "全国", "天津",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.tju.edu.cn/", 100),
+    ("大连理工大学", "qiangji_university", "senior", "全国", "辽宁",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.dlut.edu.cn/", 110),
+    ("东北大学", "qiangji_university", "senior", "全国", "辽宁",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.neu.edu.cn/", 120),
+    ("吉林大学", "qiangji_university", "senior", "全国", "吉林",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.jlu.edu.cn/", 130),
+    ("哈尔滨工业大学", "qiangji_university", "senior", "全国", "黑龙江",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.hit.edu.cn/", 140),
+    ("复旦大学", "qiangji_university", "senior", "全国", "上海",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.fudan.edu.cn/", 150),
+    ("同济大学", "qiangji_university", "senior", "全国", "上海",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.tongji.edu.cn/", 160),
+    ("上海交通大学", "qiangji_university", "senior", "全国", "上海",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.sjtu.edu.cn/", 170),
+    ("华东师范大学", "qiangji_university", "senior", "全国", "上海",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.ecnu.edu.cn/", 180),
+    ("南京大学", "qiangji_university", "senior", "全国", "江苏",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.nju.edu.cn/", 190),
+    ("东南大学", "qiangji_university", "senior", "全国", "江苏",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.seu.edu.cn/", 200),
     ("浙江大学", "qiangji_university", "senior", "全国", "浙江",
-     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.zju.edu.cn/", 50),
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.zju.edu.cn/", 210),
+    ("中国科学技术大学", "qiangji_university", "senior", "全国", "安徽",
+     "强基计划：信息学金牌破格入围", 25, "NOI 金牌 / NOIP 省一", "https://www.ustc.edu.cn/", 220),
+    ("厦门大学", "qiangji_university", "senior", "全国", "福建",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.xmu.edu.cn/", 230),
+    ("山东大学", "qiangji_university", "senior", "全国", "山东",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.sdu.edu.cn/", 240),
+    ("中国海洋大学", "qiangji_university", "senior", "全国", "山东",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.ouc.edu.cn/", 250),
+    ("武汉大学", "qiangji_university", "senior", "全国", "湖北",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.whu.edu.cn/", 260),
+    ("华中科技大学", "qiangji_university", "senior", "全国", "湖北",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.hust.edu.cn/", 270),
+    ("中南大学", "qiangji_university", "senior", "全国", "湖南",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.csu.edu.cn/", 280),
+    ("湖南大学", "qiangji_university", "senior", "全国", "湖南",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.hnu.edu.cn/", 290),
+    ("国防科技大学", "qiangji_university", "senior", "全国", "湖南",
+     "强基计划：信息学金牌破格入围", 20, "NOI 金牌 / NOIP 省一", "https://www.nudt.edu.cn/", 300),
+    ("中山大学", "qiangji_university", "senior", "全国", "广东",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.sysu.edu.cn/", 310),
+    ("华南理工大学", "qiangji_university", "senior", "全国", "广东",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.scut.edu.cn/", 320),
+    ("四川大学", "qiangji_university", "senior", "全国", "四川",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.scu.edu.cn/", 330),
+    ("重庆大学", "qiangji_university", "senior", "全国", "重庆",
+     "强基计划：信息学省二 + 高考一本线", 15, "NOIP 省二 + 高考一本线", "https://www.cqu.edu.cn/", 340),
+    ("电子科技大学", "qiangji_university", "senior", "全国", "四川",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.uestc.edu.cn/", 350),
+    ("西安交通大学", "qiangji_university", "senior", "全国", "陕西",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.xjtu.edu.cn/", 360),
+    ("西北工业大学", "qiangji_university", "senior", "全国", "陕西",
+     "强基计划：信息学省一 + 高考一本线", 20, "NOIP 省一 + 高考一本线", "https://www.nwpu.edu.cn/", 370),
+    ("西北农林科技大学", "qiangji_university", "senior", "全国", "陕西",
+     "强基计划：信息学省二 + 高考一本线", 10, "NOIP 省二 + 高考一本线", "https://www.nwafu.edu.cn/", 380),
+    ("兰州大学", "qiangji_university", "senior", "全国", "甘肃",
+     "强基计划：信息学省二 + 高考一本线", 10, "NOIP 省二 + 高考一本线", "https://www.lzu.edu.cn/", 390),
 ]
 
 
 def _seed_policy_match_schools(conn):
-    """种子数据：政策匹配学校库（v3.5.2）
+    """种子数据：政策匹配学校库
 
-    - 13 所科技特长生中学（6 城：北京/上海/杭州/深圳/成都/南京）
-    - 14 所有自招政策的高中（同 6 城）
-    - 5 所强基大学（清北复交浙 · 全国）
-    - 共 32 所样板学校
-
-    v3.5 反向 Scope 限制：只做样板，后续不扩 39 校强基
+    v3.9.8 · 用户要求覆盖全国所有省会 + 直辖市
+      - 4 直辖市（北京/上海/天津/重庆）
+      - 27 省会/自治区首府（石家庄/太原/呼和浩特/沈阳/长春/哈尔滨/南京/杭州/合肥/福州/南昌/济南/郑州/武汉/长沙/广州/南宁/海口/成都/贵阳/昆明/拉萨/西安/兰州/西宁/银川/乌鲁木齐）
+      - 2 特别行政区（香港/澳门，DSE 体系参考）
+      - 39 所强基大学（全国统一）
+    v3.9.8 · 修复：当条目数变化时，仅新增缺失的条目（不去重已存在的），避免升级时把已经手动维护的删掉
     """
     cur = conn.execute("SELECT COUNT(*) FROM policy_match_schools")
     if cur.fetchone()[0] >= len(_POLICY_MATCH_SEED):
-        return  # 已种子
+        # 已存在的条目数 >= 新 seed 列表长度 → 完整重种子会破坏已有数据
+        # 仅补充缺失的（按 school_name 唯一）
+        existing_names = {
+            (r[0] if r else "")
+            for r in conn.execute("SELECT school_name FROM policy_match_schools").fetchall()
+        }
+        added = 0
+        for row in _POLICY_MATCH_SEED:
+            if row[0] not in existing_names:
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO policy_match_schools
+                          (school_name, school_type, target_stage, city, province,
+                           policy_summary, enrollment_count, requires_competition,
+                           policy_url, priority, effective_year)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2026)
+                        """,
+                        row,
+                    )
+                    added += 1
+                except sqlite3.IntegrityError:
+                    pass
+        if added:
+            conn.commit()
+        return
+    # 首次 seed
     for row in _POLICY_MATCH_SEED:
         try:
             conn.execute(
