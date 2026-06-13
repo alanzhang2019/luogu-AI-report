@@ -219,10 +219,10 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
         return True, ""
 
 
-# v3.9.4 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
+# v3.9.5 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.4"
-APP_VERSION_BUILD = "20260614_v3p9p4"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.5"
+APP_VERSION_BUILD = "20260614_v3p9p5"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -238,8 +238,8 @@ app.secret_key = (
 app.permanent_session_lifetime = timedelta(days=180)
 
 
-# v3.9.4 · 版本探针（给云端部署的健康检查用，每次部署完必看）
-# 用法：curl -fsS http://server/api/version  →  {"version":"v3.9.4", "build":"...", "git":"abc1234", "ts":"..."}
+# v3.9.5 · 版本探针（给云端部署的健康检查用，每次部署完必看）
+# 用法：curl -fsS http://server/api/version  →  {"version":"v3.9.5", "build":"...", "git":"abc1234", "ts":"..."}
 @app.route("/api/version")
 def _api_version():
     import json as _json, datetime as _dt
@@ -251,7 +251,7 @@ def _api_version():
     }, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
 
 
-# v3.9.4 · 模板全局变量（页脚 / 家长报告页头显示版本号）
+# v3.9.5 · 模板全局变量（页脚 / 家长报告页头显示版本号）
 @app.context_processor
 def _inject_app_version():
     return {
@@ -1573,6 +1573,19 @@ RETRY_FORM_FIELDS = (
     "grade",
     "max_passed",
     "max_failed",
+    # v3.9.5 · GESP 自录奖项持久化：之前没存到 retry_form_json，导致学员
+    # "明明填了 GESP 却没看到段位" 时无法回放/恢复。
+    # 加上这 4 个字段后，_backfill_gesp_v395 就能从历史 task 里找回 GESP 数据。
+    "gesp_level",
+    "gesp_score",
+    "gesp_year",
+    "gesp_certificate_no",
+    # v3.9.5 · CSP/NOIP/NOI 自录奖项持久化（同样原因）
+    "csp_competition_type",
+    "csp_award_level",
+    "csp_award_year",
+    "csp_score",
+    "csp_province",
 )
 
 
@@ -5409,24 +5422,55 @@ def generate_form_submit():
         ), 500
 
     # 1.5) v3.7 · 自录历史奖项（学员在表单内直填，提交时同步入库；新用户无需跳转 /me/<uid>）
+    # v3.9.5 · 严格校验 + 失败显式日志（之前 try/except 静默吞错，导致 "填了 GESP 却不显示" 找不到原因）
     _award_log: list[str] = []
     try:
-        _gl = (form.get("gesp_level") or "").strip()
-        _gs = (form.get("gesp_score") or "").strip()
-        _gy = (form.get("gesp_year") or "").strip()
-        if _gl and _gs and _gy:
-            _admin_students.add_gesp_exam(
-                sid,
-                None,  # 触发 add_gesp_exam 按 year+level 自动查/建 competition
-                int(_gl),
-                int(_gs),
-                certificate_no=(form.get("gesp_certificate_no") or "").strip() or None,
-                award_year=int(_gy),
-                recorded_by="self_register",
-            )
-            _award_log.append(f"GESP L{_gl}/{_gy}={_gs}分")
+        _gl_raw = (form.get("gesp_level") or "").strip()
+        _gs_raw = (form.get("gesp_score") or "").strip()
+        _gy_raw = (form.get("gesp_year") or "").strip()
+        if _gl_raw and _gs_raw and _gy_raw:
+            # 校验
+            try:
+                _gl = int(_gl_raw)
+                _gs = int(_gs_raw)
+                _gy = int(_gy_raw)
+            except (TypeError, ValueError) as _ve:
+                app.logger.warning(
+                    f"[self_register] GESP 字段类型错误 uid={luogu_uid} "
+                    f"level={_gl_raw!r} score={_gs_raw!r} year={_gy_raw!r}: {_ve}"
+                )
+            else:
+                if not (1 <= _gl <= 8):
+                    app.logger.warning(f"[self_register] GESP 等级越界 uid={luogu_uid} level={_gl}")
+                elif not (0 <= _gs <= 100):
+                    app.logger.warning(f"[self_register] GESP 分数越界 uid={luogu_uid} score={_gs}")
+                elif not (2015 <= _gy <= date.today().year + 1):
+                    app.logger.warning(f"[self_register] GESP 年份越界 uid={luogu_uid} year={_gy}")
+                else:
+                    try:
+                        _admin_students.add_gesp_exam(
+                            sid,
+                            None,  # 触发 add_gesp_exam 按 year+level 自动查/建 competition
+                            _gl,
+                            _gs,
+                            certificate_no=(form.get("gesp_certificate_no") or "").strip() or None,
+                            award_year=_gy,
+                            recorded_by="self_register",
+                        )
+                        _award_log.append(f"GESP L{_gl}/{_gy}={_gs}分")
+                        app.logger.info(
+                            f"[self_register] GESP 录入成功 uid={luogu_uid} sid={sid} "
+                            f"L{_gl}/{_gy}={_gs}分"
+                        )
+                    except Exception as _ae:
+                        # v3.9.5 · 不再静默：记 ERROR 级别，运维可直接看到
+                        app.logger.error(
+                            f"[self_register] GESP 写入数据库失败 uid={luogu_uid} sid={sid} "
+                            f"L{_gl}/{_gy}={_gs}分: {_ae}",
+                            exc_info=True,
+                        )
     except Exception as _e:
-        app.logger.warning(f"[self_register] GESP 录入失败: {_e}")
+        app.logger.error(f"[self_register] GESP 处理外层异常: {_e}", exc_info=True)
 
     try:
         _ct = (form.get("csp_competition_type") or "").strip()
@@ -10350,7 +10394,11 @@ STUDENT_ME_HTML = """
         {% else %}
         <div class="bg-white rounded-2xl shadow p-5 mb-4 text-center">
             <p class="text-gray-500">📋 还没有 GESP 段位数据</p>
-            <p class="text-xs text-gray-400 mt-1">请联系您的教练录入首次 GESP 真考成绩</p>
+            {# v3.9.5 · 空状态下加跳转链接到 #awards 自录区，避免用户找不到入口 #}
+            <p class="text-xs text-gray-400 mt-1">
+                没填过 GESP？<a href="#awards" class="text-emerald-600 font-bold underline">👇 滚动到底部"自录历史奖项"录入</a><br>
+                注册时填了但没显示？联系教练，工具脚本 <code>tools/_backfill_gesp_v395.py</code> 可一键回填
+            </p>
         </div>
         {% endif %}
 
