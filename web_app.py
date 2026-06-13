@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.9"
-APP_VERSION_BUILD = "20260614_v3p9p9"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.10"
+APP_VERSION_BUILD = "20260614_v3p9p10"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -2689,7 +2689,7 @@ STATUS_HTML = """
         })();
         </script>
         {% elif status == 'error' %}
-        <a href="{{ retry_url }}" class="app-btn app-btn-primary mt-4">返回重试</a>
+        <a href="{{ retry_url }}" class="app-btn app-btn-primary mt-4">🔁 返回表单（已自动回填）</a>
         {% if me_url %}
         {# 错误状态也用 POST 表单，确保点击直接重试 #}
         <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block mt-2">
@@ -2789,17 +2789,69 @@ def status_page(task_id):
 
 @app.route("/retry/<task_id>")
 def retry_task(task_id):
+    """v3.9.10 · 报告生成失败的重试入口（保留缓存，直接回到表单页）
+
+    行为变化：
+      旧：redirect → 首页 INDEX_HTML → 用户需再次点「立即生成」→ 才看到空表
+      新：直接渲染 v3.5.2 表单页 GENERATE_FORM_HTML，且自动回填上次填过的
+          client_id / uid / c3vk / api_key / 姓名 / 学校 / 年级 / 城市
+          用户不用重新输入，调整后直接点「立即生成」即可
+
+    字段映射：
+      - snapshot.student_name → form.real_name
+      - form.city 从 students 表兜底
+      - form.resume_task_id 标记为「可从 AI 阶段恢复」
+    """
     task = get_task(task_id) or {}
     snapshot = load_retry_form_snapshot(task)
-    # 即使 snapshot 为空（cookies 等未缓存），也至少把学生基础字段回填并提示
     if not snapshot:
-        return redirect("/")
+        # 兜底：完全没有快照（旧 task / 链接错误），回到空表单让用户重填
+        flash("未找到上次填写的表单数据，请重新填写后提交。", "warning")
+        return redirect("/generate-form")
+
+    # 字段映射：snapshot 用 student_name，v3.5.2 表单字段名是 real_name
+    if not snapshot.get("real_name") and snapshot.get("student_name"):
+        snapshot["real_name"] = str(snapshot.pop("student_name") or "").strip()
+    elif snapshot.get("real_name") and snapshot.get("student_name"):
+        # 两者都存在时优先 real_name，删掉 student_name 避免 form 渲染到不存在的字段
+        snapshot.pop("student_name", None)
+
+    # 兜底：city 从学生档案获取
+    if not str(snapshot.get("city") or "").strip():
+        uid = str(task.get("luogu_uid") or snapshot.get("uid") or "").strip()
+        if uid:
+            try:
+                student = _admin_students.get_student_by_uid(uid)
+                if student and student.get("city"):
+                    snapshot["city"] = str(student.get("city") or "").strip()
+            except Exception:
+                pass
+
+    # AI 阶段恢复标识（让 run_generation 跳过抓取，直接从 AI 接口继续）
     if can_resume_from_ai_stage(task):
         snapshot["resume_task_id"] = task_id
-    # 兜底：若没有完整 retry_form_json（老 task 缺 cookies 缓存），flash 提示
+
+    # 提示
     if not str(task.get("retry_form_json", "") or "").strip():
-        flash("已自动回填「姓名 / 学校 / 年级」，Cookies / API Key 仍需补全后再生成。", "warning")
-    return render_index(form=snapshot)
+        flash(
+            "已自动回填「姓名 / 学校 / 年级」，Cookies / API Key 仍需补全后再生成。",
+            "warning",
+        )
+    else:
+        flash(
+            f"✅ 已自动回填上次填写的表单（共 {len([k for k,v in snapshot.items() if v])} 项）"
+            "，请检查后点击「立即生成我的学习报告」重试。",
+            "success",
+        )
+
+    # 关键改动：渲染 v3.5.2 表单页（而非首页 INDEX_HTML）→ 用户看到的是「已填好的表」
+    return render_template_string(
+        GENERATE_FORM_HTML,
+        form=snapshot,
+        server_key_hint=_get_server_key_hint(),
+        gesp_default_year=date.today().year,
+        validation_result=None,
+    )
 
 
 @app.route("/static/<path:filename>")
@@ -5625,6 +5677,19 @@ GENERATE_FORM_HTML = """
         {% endif %}
     </div>
     {% endif %}
+
+    {# v3.9.10 · 重试提示：报告生成失败时回到这里显示「已自动回填表单，请直接重提」 #}
+    {% with _flashed = get_flashed_messages(with_categories=true) %}
+    {% if _flashed %}
+    <div class="space-y-2">
+        {% for _cat, _msg in _flashed %}
+        <div class="rounded-lg p-3 text-sm border {% if _cat == 'warning' %}bg-amber-50 border-amber-300 text-amber-800{% elif _cat == 'error' %}bg-rose-50 border-rose-300 text-rose-800{% elif _cat == 'success' %}bg-emerald-50 border-emerald-300 text-emerald-800{% else %}bg-indigo-50 border-indigo-300 text-indigo-800{% endif %}">
+            <span class="font-semibold">[{{ _cat|upper }}]</span> {{ _msg }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
 
     <form action="/generate-form" method="post" class="bg-white rounded-2xl card-shadow p-6 space-y-5">
 
