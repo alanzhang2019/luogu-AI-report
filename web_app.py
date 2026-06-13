@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.11"
-APP_VERSION_BUILD = "20260614_v3p9p11"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.12"
+APP_VERSION_BUILD = "20260614_v3p9p12"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -2546,14 +2546,14 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
-        {# v3.9.11 · 401 错误专项提示：让用户知道是 Key 的问题、不是 cookies / 网络的问题 #}
+        {# v3.9.12 · AI 服务拒绝请求的通用提示（不再假设是 Key 问题） #}
         {% if is_401_api_key %}
-        <div class="mb-4 rounded-lg border-2 border-rose-300 bg-rose-50 p-4 text-left text-sm">
-            <p class="font-bold text-rose-800 mb-1">🔑 错误原因：OpenAI 拒绝请求（HTTP 401 invalid api key）</p>
-            <ul class="text-rose-700 text-xs space-y-1 list-disc list-inside">
-                <li>您的 API Key 已被 OpenAI 拒绝（key 删除 / 余额耗尽 / 复制漏字符）</li>
-                <li>👉 点击下方「返回表单」后，页面会自动滚到「API Key」输入框并用红色高亮</li>
-                <li>改完后直接点「立即生成」即可，cookies / 姓名等都已自动回填</li>
+        <div class="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-left text-sm">
+            <p class="font-bold text-amber-800 mb-1">⚠️ AI 服务返回 401（拒绝请求）</p>
+            <ul class="text-amber-700 text-xs space-y-1 list-disc list-inside">
+                <li>可能原因：API Key / Base URL / 模型名 任一不匹配 · 临时限流 · 该模型当下不可用</li>
+                <li>👉 点击下方「返回表单」后检查 12 项字段（已自动回填）</li>
+                <li>可先点「立即生成」重试一次，**401 多为临时问题**，重试通常可解决</li>
             </ul>
         </div>
         {% endif %}
@@ -2867,14 +2867,12 @@ def retry_task(task_id):
             "warning",
         )
     elif is_401:
-        # v3.9.11 · 401 专项引导：清空 api_key + 顶部红色提示 + 跳锚点
-        snapshot["api_key"] = ""  # 强制让用户重填
+        # v3.9.12 · 柔化 401 提示：不再假设 Key 有问题 / 不再清空 api_key / 不再 auto-focus
         flash(
-            "🔑 您的 OpenAI API Key 已被 OpenAI 拒绝（401 invalid api key）。\n"
-            "· 请检查 Key 是否已删除 / 余额不足 / 复制时漏字符\n"
-            "· 修正后，页面会自动滚动到「API Key」输入框并高亮等待填入\n"
-            "· Cookies / 姓名 / 学校等已自动回填，不用重新输入",
-            "error",
+            "⚠️ AI 服务返回 401（拒绝请求）。可能是 Key/Base URL/模型 任一不匹配，"
+            "或临时限流 / 该模型当下不可用。表单已自动回填，"
+            "**多数情况重试一次即可**。如反复失败再检查配置。",
+            "warning",
         )
     else:
         flash(
@@ -2884,14 +2882,14 @@ def retry_task(task_id):
         )
 
     # 关键改动：渲染 v3.5.2 表单页（而非首页 INDEX_HTML）→ 用户看到的是「已填好的表」
+    # v3.9.12 · 401 不再 auto-focus 到 api_key（不假设是 Key 的问题）
     return render_template_string(
         GENERATE_FORM_HTML,
         form=snapshot,
         server_key_hint=_get_server_key_hint(),
         gesp_default_year=date.today().year,
         validation_result=None,
-        # v3.9.11 · 401 时表单自动滚动到 api_key 字段 + 自动获得焦点
-        focus_api_key=is_401,
+        focus_api_key=False,
     )
 
 
