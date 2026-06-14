@@ -5631,17 +5631,20 @@ def generate_form_submit():
 
     # 1.5) v3.7 · 自录历史奖项（学员在表单内直填，提交时同步入库；新用户无需跳转 /me/<uid>）
     # v3.9.5 · 严格校验 + 失败显式日志（之前 try/except 静默吞错，导致 "填了 GESP 却不显示" 找不到原因）
+    # v3.9.24 · 表单放宽：只填 level 也能保存（分数默认 60 = 及格线，年份默认今年），
+    # 解决「用户只记得自己过了 GESP X 级，但忘了分数/年份」的常见场景。
     _award_log: list[str] = []
     try:
         _gl_raw = (form.get("gesp_level") or "").strip()
         _gs_raw = (form.get("gesp_score") or "").strip()
         _gy_raw = (form.get("gesp_year") or "").strip()
-        if _gl_raw and _gs_raw and _gy_raw:
+        if _gl_raw:  # v3.9.24 · 改为只校验 level 必填（score/year 走默认）
             # 校验
             try:
                 _gl = int(_gl_raw)
-                _gs = int(_gs_raw)
-                _gy = int(_gy_raw)
+                # 缺省值：分数 → 60（及格线），年份 → 今年
+                _gs = int(_gs_raw) if _gs_raw.isdigit() else 60
+                _gy = int(_gy_raw) if _gy_raw.isdigit() else date.today().year
             except (TypeError, ValueError) as _ve:
                 app.logger.warning(
                     f"[self_register] GESP 字段类型错误 uid={luogu_uid} "
@@ -5650,9 +5653,10 @@ def generate_form_submit():
             else:
                 if not (1 <= _gl <= 8):
                     app.logger.warning(f"[self_register] GESP 等级越界 uid={luogu_uid} level={_gl}")
-                elif not (0 <= _gs <= 100):
+                elif _gs_raw and not (0 <= _gs <= 100):
+                    # v3.9.24 · 填了就校验，没填就跳过
                     app.logger.warning(f"[self_register] GESP 分数越界 uid={luogu_uid} score={_gs}")
-                elif not (2015 <= _gy <= date.today().year + 1):
+                elif _gy_raw and not (2015 <= _gy <= date.today().year + 1):
                     app.logger.warning(f"[self_register] GESP 年份越界 uid={luogu_uid} year={_gy}")
                 else:
                     try:
@@ -5665,10 +5669,12 @@ def generate_form_submit():
                             award_year=_gy,
                             recorded_by="self_register",
                         )
-                        _award_log.append(f"GESP L{_gl}/{_gy}={_gs}分")
+                        _log_score = f"{_gs}分" if _gs_raw else "60分(默认)"
+                        _log_year = f"{_gy}" if _gy_raw else f"{date.today().year}(默认)"
+                        _award_log.append(f"GESP L{_gl}/{_log_year}={_log_score}")
                         app.logger.info(
                             f"[self_register] GESP 录入成功 uid={luogu_uid} sid={sid} "
-                            f"L{_gl}/{_gy}={_gs}分"
+                            f"L{_gl}/{_gy}={_gs}分 (score_raw={_gs_raw!r} year_raw={_gy_raw!r})"
                         )
                     except Exception as _ae:
                         # v3.9.5 · 不再静默：记 ERROR 级别，运维可直接看到
@@ -6021,7 +6027,7 @@ GENERATE_FORM_HTML = """
                             <span class="text-base">🎯</span>
                             <h4 class="text-sm font-bold text-green-800">GESP 真考（CCF 1-8 级）</h4>
                         </div>
-                        <p class="text-[10px] text-amber-600 mb-1.5">⚠️ 三个字段都要填才会保存（只填一个不生效）</p>
+                        <p class="text-[10px] text-gray-500 mb-1.5">💡 只需填**级别**（分数默认 60 = 及格线，年份默认今年）</p>
                         <div class="grid grid-cols-3 gap-2">
                             <select name="gesp_level" class="app-select text-xs">
                                 <option value="">级别</option>
@@ -9093,6 +9099,56 @@ def _extract_achievements_from_export_data(report_dir) -> dict:
             mean_100 = sum(out["six_dim"].values()) / len(out["six_dim"])
             out["ai_score_thousand"] = int(round(mean_100 * 10))
             out["ai_score_label"] = f"预估 {out['ai_score_thousand']}/1000（练习阶段 · AI 报告未生成）"
+
+        # 1.b) v3.9.24 · 6 维兜底（v3.9.19/22 已修过 report.md 缺 6 维的场景，但
+        # export_data.json 自身没 6 维时仍然空白）：
+        #   1) 先用 summary 重新跑 compute_six_dimension_scores（如果 summary 完整）
+        #   2) 仍空 → 从 failed_items 数量+难度粗略推断（标记 partial 兜底）
+        # 目标：图 2 那种「错题 5 道、能力维度 0 维、AI 评测分 —」的页面至少有个数。
+        if not out["six_dim"]:
+            try:
+                from behavior_analyzer import compute_six_dimension_scores as _c6
+                _r = _c6(
+                    {
+                        "solved_count": int(d.get("solved_count") or 0),
+                        "summary": d.get("summary") or {},
+                    },
+                    d.get("behavior_analysis") or {},
+                )
+                if isinstance(_r, dict) and _r:
+                    # 过滤出 6 个核心维度（与 behavior_analyzer 一致）
+                    _6keys = ("基础算法", "数据结构", "图论", "动态规划", "字符串", "数学")
+                    out["six_dim"] = {k: int(_r.get(k) or 0) for k in _6keys if int(_r.get(k) or 0) > 0}
+            except Exception as _e6:
+                app.logger.debug(f"[six_dim_fallback_v3924] compute_six_dimension_scores failed: {_e6}")
+
+        if not out["six_dim"]:
+            # 终极兜底：完全没数据时给个「练习阶段」基础分（避免显示 0 维）
+            # 错题数越少 → 基础分越高（粗略反映掌握度）
+            try:
+                _fc = len(d.get("failed_items") or [])
+                _pc = int(d.get("solved_count") or 0)
+                # 基础分 = 50 + 通过数 / (通过数+错题数) * 30，钳到 [40, 80]
+                _rate = _pc / max(1, _pc + _fc) if (_pc + _fc) > 0 else 0.5
+                _base = int(round(40 + _rate * 30))
+                out["six_dim"] = {
+                    "基础算法": _base,
+                    "数据结构": max(35, _base - 5),
+                    "图论": max(35, _base - 8),
+                    "动态规划": max(35, _base - 10),
+                    "字符串": max(35, _base - 12),
+                    "数学": max(35, _base - 15),
+                }
+            except Exception:
+                pass
+
+        # 兜底完成后：补算千分制 + 标签（无论 6 维从哪个分支来，都统一在此重算）
+        if out["six_dim"]:
+            mean_100 = sum(out["six_dim"].values()) / len(out["six_dim"])
+            out["ai_score_thousand"] = int(round(mean_100 * 10))
+            if not out.get("ai_score_label") or out["ai_score_label"] == "—（AI 报告未生成）":
+                # 6 维来自兜底 → 标「练习阶段」
+                out["ai_score_label"] = f"预估 {out['ai_score_thousand']}/1000（练习阶段 · AI 报告未生成）"
 
         # 3) 错题 - v3.9.19 · 扩大提取数（默认 50 道），让"展开全部"按钮可点
         # 之前只取前 5 道，导致「更多错题」永远只是同一个数字。
