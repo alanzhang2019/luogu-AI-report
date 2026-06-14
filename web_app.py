@@ -4143,8 +4143,23 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
             if not export_p.exists():
                 continue
             dir_name = d.name
-            # 校验目录与该 uid 相关
-            if luogu_uid and str(luogu_uid) not in dir_name:
+            # 校验目录与该 uid 相关（v3.9.17 · 优先侧车 luogu_uid.txt 精确匹配，回退到目录名包含）
+            _matches = False
+            if luogu_uid:
+                # 1) 侧车文件精确匹配（最可靠）
+                _sidecar = d / "luogu_uid.txt"
+                if _sidecar.exists():
+                    try:
+                        if _sidecar.read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
+                            _matches = True
+                    except Exception:
+                        pass
+                # 2) 旧式：目录名包含 luogu_uid
+                if not _matches and str(luogu_uid) in dir_name:
+                    _matches = True
+            else:
+                _matches = True
+            if not _matches:
                 continue
             # v3.9.17 · 状态分三种：
             #   - "complete": report.html 存在且非 0 字节
