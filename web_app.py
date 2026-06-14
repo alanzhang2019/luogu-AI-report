@@ -8422,7 +8422,7 @@ def student_me(luogu_uid: str):
                             _mean = sum(achievements["six_dim"].values()) / len(achievements["six_dim"])
                             achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
                         else:
-                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告 6 维 regex 未匹配，评分来自 export_data.json）"
                     # v3.9.25 · is_partial 改"只对纯 export_data 兜底"为 True。
                     # 6 维来自 report.md 时，即使 AI 评分是 export_data 兜底，也只是补缺，
                     # 不应触发「AI 报告未生成」这种误导性警示。
@@ -8670,7 +8670,7 @@ def _render_student_me_lite(luogu_uid: str):
                             _mean = sum(achievements["six_dim"].values()) / len(achievements["six_dim"])
                             achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
                         else:
-                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告 6 维 regex 未匹配，评分来自 export_data.json）"
                     # v3.9.25 · 与主路径一致：6 维 + 错题都缺才标 partial
                     if (not ext.get("six_dim") and not ext.get("mistakes")):
                         achievements["is_partial"] = True
@@ -8797,7 +8797,22 @@ STUDENT_ME_LITE_HTML = r"""
                     {% endfor %}
                 </div>
                 {% if achievements.report_dir %}
-                <div class="text-[10px] text-gray-400 mt-2">数据来源：{{ achievements.report_dir }} / report.md</div>
+                {# v3.9.28 · 「数据来源」动态显示（lite 版，与主模板一致） #}
+                {% set _src6 = achievements.six_dim_source or 'unknown' %}
+                {% set _src_ai = achievements.ai_score_source or 'unknown' %}
+                {% set _src_text = '' %}
+                {% if _src6 == 'report_md' and _src_ai == 'report_md' %}
+                    {% set _src_text = 'report.md' %}
+                {% elif _src6 == 'report_md' %}
+                    {% set _src_text = 'report.md（6 维）+ export_data.json（AI 评分）' %}
+                {% elif _src6 == 'export_data' and _src_ai == 'export_data' %}
+                    {% set _src_text = 'export_data.json（AI 报告 6 维未识别，回退到结构化数据）' %}
+                {% elif _src6 == 'export_data' %}
+                    {% set _src_text = 'export_data.json' %}
+                {% else %}
+                    {% set _src_text = 'report.md / export_data.json（混合）' %}
+                {% endif %}
+                <div class="text-[10px] text-gray-400 mt-2" title="6 维来源={{ _src6 }}，AI 评分来源={{ _src_ai }}">数据来源：{{ achievements.report_dir }} / {{ _src_text }}</div>
                 {% endif %}
             </div>
             {% endif %}
@@ -11489,7 +11504,12 @@ STUDENT_ME_HTML = """
             <!-- 6 维能力雷达（迷你条形版） -->
             {% if achievements.six_dim %}
             <div class="mt-4 border-t border-gray-100 pt-3">
+                {# v3.9.28 · 「来自最新 AI 报告」改为动态（与下面数据来源一致） #}
+                {% if achievements.six_dim_source == 'export_data' %}
+                <div class="text-xs text-gray-500 mb-2">📊 6 维能力评分（来自 export_data.json）</div>
+                {% else %}
                 <div class="text-xs text-gray-500 mb-2">📊 6 维能力评分（来自最新 AI 报告）</div>
+                {% endif %}
                 <div class="space-y-1.5">
                     {% for k, v in achievements.six_dim.items() %}
                     <div class="flex items-center gap-2 text-xs">
@@ -11510,7 +11530,25 @@ STUDENT_ME_HTML = """
                     {% endfor %}
                 </div>
                 {% if achievements.report_dir %}
-                <div class="text-[10px] text-gray-400 mt-2">数据来源：{{ achievements.report_dir }} / report.md</div>
+                {# v3.9.28 · 「数据来源」改为动态显示：之前硬编码永远写 report.md，
+                    但 6 维/AI 评分实际可能是从 report.md（regex 抽取） 或 export_data.json（结构化兜底） 来的。
+                    硬编码会误导用户（明明数据来自 export_data.json，UI 却说是 report.md）。
+                    现在的逻辑：six_dim_source / ai_score_source 告诉用户数据实际来源。 #}
+                {% set _src6 = achievements.six_dim_source or 'unknown' %}
+                {% set _src_ai = achievements.ai_score_source or 'unknown' %}
+                {% set _src_text = '' %}
+                {% if _src6 == 'report_md' and _src_ai == 'report_md' %}
+                    {% set _src_text = 'report.md' %}
+                {% elif _src6 == 'report_md' %}
+                    {% set _src_text = 'report.md（6 维）+ export_data.json（AI 评分）' %}
+                {% elif _src6 == 'export_data' and _src_ai == 'export_data' %}
+                    {% set _src_text = 'export_data.json（AI 报告 6 维未识别，回退到结构化数据）' %}
+                {% elif _src6 == 'export_data' %}
+                    {% set _src_text = 'export_data.json' %}
+                {% else %}
+                    {% set _src_text = 'report.md / export_data.json（混合）' %}
+                {% endif %}
+                <div class="text-[10px] text-gray-400 mt-2" title="6 维来源={{ _src6 }}，AI 评分来源={{ _src_ai }}">数据来源：{{ achievements.report_dir }} / {{ _src_text }}</div>
                 {% endif %}
             </div>
             {% endif %}
