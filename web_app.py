@@ -11511,72 +11511,30 @@ STUDENT_ME_HTML = """
             {% endif %}
         </div>
 
-        <!-- v3.8 · 直接展示已生成的位置图（不需点按钮现场渲染，预渲染缓存命中即读 PNG） -->
+        <!-- v3.9.21 · 简化为「查看海报」入口（点开才看大图），不再内嵌 200KB PNG 占首屏 -->
         <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl shadow p-4 mb-4">
-            <h3 class="text-base font-bold text-gray-800 mb-1 text-center">📤 学习报告位置图</h3>
-            <p class="text-xs text-gray-500 text-center mb-3">长按图片即可保存到相册 / 转发到家长群 / 朋友圈</p>
-            <div class="flex justify-center bg-white border border-gray-200 rounded-lg p-2 mb-3">
-                <img src="/me/{{ luogu_uid }}/share-card.png" alt="学习报告位置图"
-                     class="max-w-full h-auto rounded shadow"
-                     onerror="this.alt='海报生成失败 · 请刷新重试'; this.style.display='none';" />
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-2xl">🖼️</span>
+                    <div class="min-w-0">
+                        <div class="text-base font-bold text-gray-800 truncate">学习报告位置图</div>
+                        <div class="text-xs text-gray-500">海报 · 扫码直达你的位置图</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <a href="/me/{{ luogu_uid }}/share-card.png" target="_blank"
+                       class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 whitespace-nowrap">
+                        🔍 查看海报
+                    </a>
+                    <a href="/me/{{ luogu_uid }}/share-card.png" download="学习报告位置图_{{ student.real_name or luogu_uid }}.png"
+                       class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-emerald-600 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-50 whitespace-nowrap">
+                        💾 保存
+                    </a>
+                </div>
             </div>
-            <div class="flex flex-wrap items-center gap-2 justify-center">
-                <a href="/me/{{ luogu_uid }}/share-card.png" download="学习报告位置图_{{ student.real_name or luogu_uid }}.png"
-                   class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700">
-                    💾 保存图片
-                </a>
-                <a href="/me/{{ luogu_uid }}/share-card.png" target="_blank"
-                   class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-emerald-600 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-50">
-                    🔗 在新窗口打开
-                </a>
-                <span class="text-xs text-gray-400 ml-2">PNG · 约 200 KB</span>
-            </div>
-            <details class="text-xs text-gray-600 mt-3 text-left">
-                <summary class="cursor-pointer hover:text-gray-800 font-medium">📐 图里有什么？</summary>
-                <ul class="mt-2 list-disc list-inside space-y-1 pl-2">
-                    <li>标题：信息学AI测评结果 + 学员 UID / 姓名</li>
-                    <li>AI 定级 + 性格画像雷达图 + 高频算法标签图</li>
-                    <li>GESP 段位图（1✦ 2★ 3□ ... 8□）</li>
-                    <li>当前 GESP 等级 + 距免初赛差距</li>
-                    <li>2026 关键赛事倒计时（最多 4 场）</li>
-                    <li>底部二维码：扫码直达你的位置图</li>
-                    <li>水印：AI 估算 · 不替代真考 · 最后更新日期</li>
-                </ul>
-            </details>
         </div>
 
-        <div class="{% if has_parent_sub %}bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200{% else %}bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200{% endif %} rounded-2xl shadow p-5 mb-4">
-            <h2 class="text-lg font-bold text-gray-800 mb-2">
-                {% if has_parent_sub %}
-                💎 家长订阅已激活 · AI 讲题可用
-                {% else %}
-                💬 AI 讲题 · 需家长订阅
-                {% endif %}
-            </h2>
-            <ul class="text-sm text-gray-700 space-y-1 mb-3">
-                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 段位图（自动展示历次 GESP 真考）</li>
-                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 错题本（每周班级共性错题 + 自己的）</li>
-                <li>
-                    {% if has_parent_sub %}
-                    ✅ <strong class="text-blue-700">StudyMate AI 讲题（已解锁）</strong>
-                    {% else %}
-                    🔒 StudyMate AI 讲题 → <strong class="text-amber-700">需家长加 V 兑换码</strong>
-                    {% endif %}
-                </li>
-                <li>{% if has_parent_sub %}✅{% else %}☑️{% endif %} 倒推路径（强基 5 校 / CSP-J/S 倒计时）</li>
-            </ul>
-            {% if has_parent_sub %}
-            <p class="text-xs text-blue-700">🎁 家长已订阅 · AI 讲题无限制 · v3.5.2</p>
-            {% else %}
-            {% if not commerce_hidden %}
-            <div class="bg-white border border-amber-200 rounded-lg p-3 mt-2">
-                <p class="text-xs text-gray-700 mb-2">💡 家长加 V 兑换 <code class="font-mono">PARENT-SUB-XXXX</code> 后，<strong>AI 讲题自动解锁</strong>。这是"家长为孩子买"的家庭订阅模式。</p>
-                <a href="/redeem" class="inline-block text-xs px-3 py-1.5 bg-amber-500 text-white rounded hover:bg-amber-600">🎁 兑换家长订阅码</a>
-                <a href="/" class="inline-block text-xs px-3 py-1.5 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 ml-1">加 V 获取 →</a>
-            </div>
-            {% endif %}
-            {% endif %}
-        </div>
+        {# v3.9.21 · 已删除「AI 讲题·需家长订阅」整块（用户不需要营销模块）。 #}
 
         <div class="text-center text-xs text-gray-400 mt-6 mb-4">
             v3.5.2 学员 Pro 自助入口 · 基于洛谷 UID 直链（无密码模式）<br>
