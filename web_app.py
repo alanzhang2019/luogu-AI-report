@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.15"
-APP_VERSION_BUILD = "20260614_v3p9p15"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.16"
+APP_VERSION_BUILD = "20260614_v3p9p16"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -5955,6 +5955,7 @@ GENERATE_FORM_HTML = """
                             <span class="text-base">🎯</span>
                             <h4 class="text-sm font-bold text-green-800">GESP 真考（CCF 1-8 级）</h4>
                         </div>
+                        <p class="text-[10px] text-amber-600 mb-1.5">⚠️ 三个字段都要填才会保存（只填一个不生效）</p>
                         <div class="grid grid-cols-3 gap-2">
                             <select name="gesp_level" class="app-select text-xs">
                                 <option value="">级别</option>
@@ -6362,10 +6363,33 @@ function validateApiKeyFormat(input) {
     }
 }
 
-// v3.9.15 · 页面加载时立即校验一次（重试场景下表单已回填值）
+// v3.9.16 · 页面加载时立即校验一次（重试场景下表单已回填值）
 document.addEventListener('DOMContentLoaded', function() {
     var el = document.getElementById('api_key');
     if (el && el.value) validateApiKeyFormat(el);
+    // v3.9.16 · GESP 三字段都填了才标"已填好"，给用户视觉反馈
+    function updateGespState() {
+        var l = document.querySelector('[name="gesp_level"]');
+        var s = document.querySelector('[name="gesp_score"]');
+        var y = document.querySelector('[name="gesp_year"]');
+        if (!l || !s || !y) return;
+        var filled = l.value && s.value && y.value;
+        var gespDiv = l.closest('.bg-green-50');
+        if (gespDiv) {
+            if (filled) {
+                gespDiv.style.borderColor = '#10B981';  // 绿
+                gespDiv.style.borderWidth = '2px';
+            } else {
+                gespDiv.style.borderColor = '';
+                gespDiv.style.borderWidth = '';
+            }
+        }
+    }
+    ['gesp_level', 'gesp_score', 'gesp_year'].forEach(function(n) {
+        var e = document.querySelector('[name="' + n + '"]');
+        if (e) e.addEventListener('input', updateGespState);
+    });
+    updateGespState();
 });
 </script>
 </body>
@@ -8828,6 +8852,26 @@ def _build_share_card_data(luogu_uid: str) -> dict | None:
 
     gesp_level = int(student.get("gesp_highest_passed") or 0)
     gesp_score = int(student.get("gesp_latest_score") or 0)
+    # v3.9.16 · GESP 兜底：students 表 gesp_highest_passed 可能为 0（学员自录后未重算
+    # 或重算逻辑遗漏），但 gesp_exams 表可能已有记录。直接查 gesp_exams 兜底。
+    if not gesp_level and student.get("id"):
+        try:
+            from task_store import _get_conn as _get_conn_gesp
+            _c = _get_conn_gesp()
+            try:
+                _r = _c.execute(
+                    "SELECT MAX(registered_level) AS lvl, MAX(actual_score) AS sc "
+                    "FROM gesp_exams WHERE student_id=? AND passed=1",
+                    (int(student["id"]),),
+                ).fetchone()
+                if _r and _r["lvl"]:
+                    gesp_level = int(_r["lvl"])
+                    if int(_r["sc"] or 0) > gesp_score:
+                        gesp_score = int(_r["sc"])
+            finally:
+                _c.close()
+        except Exception:
+            pass
     name = (student.get("real_name") or "").strip() or "学员"
 
     def _mark(lv: int) -> str:
@@ -11126,7 +11170,7 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
 
   {% if achievements.mistakes %}
   <section class="mt-4 bg-white rounded-2xl shadow p-5">
-    <h2 class="text-sm font-bold text-gray-800 mb-3">🎯 错题本预览（Top {{ achievements.mistakes|length }}）</h2>
+    <h2 class="text-sm font-bold text-gray-800 mb-3">🎯 错题本预览（Top {{ achievements.mistakes[:3]|length }}）</h2>
     <div class="space-y-2">
       {% for m in achievements.mistakes[:3] %}
       <div class="border border-gray-200 rounded-lg p-2.5">
@@ -11137,6 +11181,15 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
           {% if m.source %}<span class="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
         </div>
         {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
+        {# v3.9.16 · /r/<uid> 预览区补 AI 讲题入口（之前只有主中心的 错题集 才有） #}
+        {% if m.problem_id %}
+        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
+           target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600"
+           title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
+          🤖 AI 讲题
+        </a>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
