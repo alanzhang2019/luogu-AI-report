@@ -5115,6 +5115,8 @@ ADMIN_STUDENTS_LIST_HTML = """
                             <th class="px-6 py-3">Luogu UID</th>
                             <th class="px-6 py-3">姓名/代号</th>
                             <th class="px-6 py-3">学校</th>
+                            {# v3.9.30 · 加城市/省份列，之前缺失 #}
+                            <th class="px-6 py-3">城市 / 省份</th>
                             <th class="px-6 py-3">GESP 最高</th>
                             <th class="px-6 py-3">免初赛</th>
                             <th class="px-6 py-3">下次可报</th>
@@ -5129,6 +5131,13 @@ ADMIN_STUDENTS_LIST_HTML = """
                             <td class="px-6 py-3 font-mono text-xs">{{ s.luogu_uid }}</td>
                             <td class="px-6 py-3">{{ s.real_name or ('UID-' + s.luogu_uid) }}{% if s.is_minor %} <span class="text-xs text-orange-500">(未成年)</span>{% endif %}</td>
                             <td class="px-6 py-3 text-gray-600">{{ s.school or '—' }}</td>
+                            <td class="px-6 py-3 text-gray-600">
+                                {% if s.city or s.province %}
+                                    {{ s.city or '—' }}{% if s.province %} <span class="text-xs text-gray-400">· {{ s.province }}</span>{% endif %}
+                                {% else %}
+                                    <span class="text-amber-600 text-xs">⚠ 未录</span>
+                                {% endif %}
+                            </td>
                             <td class="px-6 py-3 font-semibold text-blue-700">{% if s.gesp_highest_passed %}GESP {{ s.gesp_highest_passed }} 级{% else %}—{% endif %}</td>
                             <td class="px-6 py-3">
                                 {% if s.gesp_can_exempt_csp_s %}<span class="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded">J+S 免</span>
@@ -5267,7 +5276,22 @@ ADMIN_STUDENTS_DETAIL_HTML = """
                     <div class="flex"><dt class="w-24 text-gray-500">Luogu UID</dt><dd class="font-mono">{{ student.luogu_uid }}</dd></div>
                     <div class="flex"><dt class="w-24 text-gray-500">姓名</dt><dd>{{ student.real_name or '— 未填（未授权或已脱敏）—' }}</dd></div>
                     <div class="flex"><dt class="w-24 text-gray-500">学校</dt><dd>{{ student.school or '—' }}</dd></div>
+                    {# v3.9.30 · 城市/省份/性别/出生日期——之前缺失，家长说「录入了城市但看不到」 #}
+                    <div class="flex">
+                        <dt class="w-24 text-gray-500">城市 / 省份</dt>
+                        <dd>
+                            {% if student.city or student.province %}
+                                <span class="font-semibold text-emerald-700">{{ student.city or '—' }}{% if student.province %} · {{ student.province }}{% endif %}</span>
+                            {% else %}
+                                <span class="text-amber-600">⚠ 未录入</span>
+                            {% endif %}
+                        </dd>
+                    </div>
                     <div class="flex"><dt class="w-24 text-gray-500">年级</dt><dd>{{ student.grade or '—' }}</dd></div>
+                    <div class="flex"><dt class="w-24 text-gray-500">性别 / 出生</dt><dd>
+                        {% if student.gender %}{{ student.gender }}{% else %}—{% endif %}
+                        {% if student.birth_date %}· {{ student.birth_date }}{% endif %}
+                    </dd></div>
                     <div class="flex"><dt class="w-24 text-gray-500">未成年</dt><dd>{% if student.is_minor %}是{% else %}否{% endif %}</dd></div>
                     <div class="flex"><dt class="w-24 text-gray-500">家长授权</dt><dd>{{ student.guardian_consent_at or '未授权' }}</dd></div>
                     <div class="flex"><dt class="w-24 text-gray-500">备注</dt><dd>{{ student.note or '—' }}</dd></div>
@@ -10683,6 +10707,27 @@ def parent_subscribe(luogu_uid: str):
             mtime = _dt.fromtimestamp(ps_md.stat().st_mtime).strftime("%Y-%m-%d %H:%M") if ps_md and ps_md.exists() else "—"
         except Exception:
             mtime = "—"
+        # v3.9.30 · 家长报告静态 HTML 后处理：把 AI 报告里「您所在城市」「您城市」
+        # 这种占位文替换成学生档案里的真实城市 + 省份（深圳 / 广东）。
+        # 之前 AI 不知道准确城市（即使 _build_parent_subscribe_data 传了，
+        # 生成的 markdown 仍说「您所在城市」），现在在渲染时按学员档案改写。
+        _city = (student.get("city") or "").strip()
+        _province = (student.get("province") or "").strip()
+        if _city or _province:
+            _full = (_city or _province)
+            if _city and _province:
+                _full = f"{_city} / {_province}"
+            _city_replacements = [
+                ("您所在城市或目标初中的招生网站", f"{_full}或目标初中的招生网站"),
+                ("您所在城市或目标初中", f"{_full}或目标初中"),
+                ("您所在城市的", f"{_full}的"),
+                ("您所在城市", _full),
+                ("您城市的具体", f"{_full}的具体"),
+                ("您城市的", f"{_full}的"),
+                ("您城市", _full),
+            ]
+            for _old, _new in _city_replacements:
+                html_body = html_body.replace(_old, _new)
         return render_template_string(
             PARENT_SUBSCRIBE_RESULT_HTML,
             student_name=student.get("real_name") or "您家孩子",
