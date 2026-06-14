@@ -4384,10 +4384,10 @@ STUDENT_REPORT_HTML = """
                     </div>
                 </div>
                 <!-- v3.9.9 · 每题独立 AI 讲题入口（直跳 aijiangti.cn，题目已直传 + C++ 实现要求） -->
-                <a href="https://aijiangti.cn/?pid={{ m.problem_id or m.pid }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
+                <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id or m.pid }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
                    target="_blank" rel="noopener"
                    class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
-                   title="跳到 aijiangti.cn 生成 C++ 课件（题号/标题/来源已传入）">
+                   title="跳到 StudyMate AI 讲题（题号/标题/来源已传入）">
                     🤖 AI 讲题
                 </a>
             </div>
@@ -8354,6 +8354,9 @@ def student_me(luogu_uid: str):
         "mistakes": [],
         "report_dir": None,
         "is_partial": False,  # v3.9.17 · 标记是否"半完成"（export_data 完整，AI 报告未生成）
+        # v3.9.25 · 新增数据来源追踪（用于精细化 AI 评测分 label 警示语）
+        "six_dim_source": None,  # "report_md" / "export_data" / "computed"
+        "ai_score_source": None,  # "report_md" / "export_data" / "computed_mean"
     }
     # v3.9.3 · 把 name 传给 _find_latest_report_dir，让"目录名以 _姓名 结尾"兜底分支生效
     try:
@@ -8364,6 +8367,11 @@ def student_me(luogu_uid: str):
                 ext = _extract_achievements_from_report(report_md)
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
+                # v3.9.25 · 标记 6 维来源：先按 report.md 算
+                if ext.get("six_dim"):
+                    achievements["six_dim_source"] = "report_md"
+                if ext.get("ai_score_thousand"):
+                    achievements["ai_score_source"] = "report_md"
                 # v3.9.19 · report.md 读到了但 6 维/错题为空 → 兜底 export_data.json
                 # v3.9.22 · 改成"逐字段"补全：之前是"6 维+错题都空才触发"，但 report.md 经常
                 #   有错题没 6 维（或反之），导致漏 6 维时一直空白。
@@ -8373,14 +8381,25 @@ def student_me(luogu_uid: str):
                     # 只补缺失字段（已从 report.md 读到的优先保留）
                     if not ext.get("six_dim") and _ext_fb.get("six_dim"):
                         achievements["six_dim"] = _ext_fb["six_dim"]
+                        achievements["six_dim_source"] = "export_data"  # v3.9.25 · 标记兜底来源
                     if not ext.get("mistakes") and _ext_fb.get("mistakes"):
                         achievements["mistakes"] = _ext_fb["mistakes"]
                     if not ext.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
                         achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
-                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
-                    # 只要 fallback 触发过，就标 partial（影响标题/警示语）
-                    if (_ext_fb.get("six_dim") and not ext.get("six_dim")) or \
-                       (_ext_fb.get("mistakes") and not ext.get("mistakes")):
+                        achievements["ai_score_source"] = "export_data"  # v3.9.25 · 标记兜底来源
+                        # v3.9.25 · label 文案区分"6 维来源"：
+                        #   - 6 维来自 report.md → "AI 报告 6 维已抽取，AI 评分兜底（6 维均值 × 10）"
+                        #   - 6 维来自 export_data → "AI 报告 6 维未提取，AI 评分兜底自 export_data"
+                        if achievements["six_dim_source"] == "report_md":
+                            _mean = sum(achievements["six_dim"].values()) / len(achievements["six_dim"])
+                            achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
+                        else:
+                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                    # v3.9.25 · is_partial 改"只对纯 export_data 兜底"为 True。
+                    # 6 维来自 report.md 时，即使 AI 评分是 export_data 兜底，也只是补缺，
+                    # 不应触发「AI 报告未生成」这种误导性警示。
+                    if (not ext.get("six_dim") and not ext.get("mistakes")):
+                        # report.md 6 维 + 错题都缺 → AI 报告基本没数据 → 走纯 export_data
                         achievements["is_partial"] = True
             else:
                 # v3.9.17 · report.md 是 0 字节（AI 失败），从 export_data.json 兜底
@@ -8388,12 +8407,20 @@ def student_me(luogu_uid: str):
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
                 achievements["is_partial"] = True
+                if ext.get("six_dim"):
+                    achievements["six_dim_source"] = "export_data"
+                if ext.get("ai_score_thousand"):
+                    achievements["ai_score_source"] = "export_data"
         elif latest and (latest / "export_data.json").exists():
             # v3.9.17 · 没有 report.md 但有 export_data.json
             ext = _extract_achievements_from_export_data(latest)
             achievements.update(ext)
             achievements["report_dir"] = latest.name
             achievements["is_partial"] = True
+            if ext.get("six_dim"):
+                achievements["six_dim_source"] = "export_data"
+            if ext.get("ai_score_thousand"):
+                achievements["ai_score_source"] = "export_data"
     except Exception as _e:
         achievements["_err"] = str(_e)[:200]
 
@@ -8593,19 +8620,31 @@ def _render_student_me_lite(luogu_uid: str):
                 ext = _extract_achievements_from_report(report_md)
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
+                # v3.9.25 · 标记 6 维/AI 评分来源（与主路径保持一致）
+                if ext.get("six_dim"):
+                    achievements["six_dim_source"] = "report_md"
+                if ext.get("ai_score_thousand"):
+                    achievements["ai_score_source"] = "report_md"
                 # v3.9.22 · 逐字段补全（与主路径保持一致）：report.md 没提取到 6 维/错题时
                 # 用 export_data.json 兜底。
                 if (latest / "export_data.json").exists():
                     _ext_fb = _extract_achievements_from_export_data(latest)
                     if not ext.get("six_dim") and _ext_fb.get("six_dim"):
                         achievements["six_dim"] = _ext_fb["six_dim"]
+                        achievements["six_dim_source"] = "export_data"
                     if not ext.get("mistakes") and _ext_fb.get("mistakes"):
                         achievements["mistakes"] = _ext_fb["mistakes"]
                     if not ext.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
                         achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
-                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
-                    if (_ext_fb.get("six_dim") and not ext.get("six_dim")) or \
-                       (_ext_fb.get("mistakes") and not ext.get("mistakes")):
+                        achievements["ai_score_source"] = "export_data"
+                        # v3.9.25 · label 文案区分"6 维来源"
+                        if achievements["six_dim_source"] == "report_md":
+                            _mean = sum(achievements["six_dim"].values()) / len(achievements["six_dim"])
+                            achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
+                        else:
+                            achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未提取到，6 维兜底自 export_data）"
+                    # v3.9.25 · 与主路径一致：6 维 + 错题都缺才标 partial
+                    if (not ext.get("six_dim") and not ext.get("mistakes")):
                         achievements["is_partial"] = True
             else:
                 # v3.9.18 · report.md 是 0 字节（AI 失败）→ 兜底 export_data.json
@@ -8613,12 +8652,20 @@ def _render_student_me_lite(luogu_uid: str):
                 achievements.update(ext)
                 achievements["report_dir"] = latest.name
                 achievements["is_partial"] = True
+                if ext.get("six_dim"):
+                    achievements["six_dim_source"] = "export_data"
+                if ext.get("ai_score_thousand"):
+                    achievements["ai_score_source"] = "export_data"
         elif latest and (latest / "export_data.json").exists():
             # v3.9.18 · 没有 report.md 但有 export_data.json → 兜底
             ext = _extract_achievements_from_export_data(latest)
             achievements.update(ext)
             achievements["report_dir"] = latest.name
             achievements["is_partial"] = True
+            if ext.get("six_dim"):
+                achievements["six_dim_source"] = "export_data"
+            if ext.get("ai_score_thousand"):
+                achievements["ai_score_source"] = "export_data"
     except Exception as _e:
         achievements["_err"] = str(_e)[:200]
 
@@ -8759,7 +8806,7 @@ STUDENT_ME_LITE_HTML = r"""
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
+                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -11365,10 +11412,20 @@ STUDENT_ME_HTML = """
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
                     <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
+                    {# v3.9.25 · is_partial 文案区分 6 维来源（避免「明明有报告却说未生成」的误导）：
+                        - 6 维来自 report.md + AI 评分兜底 export_data → 黄色「AI 评分由 6 维均值兜底」
+                        - 6 维和 AI 评分都来自 export_data 兜底 → 红色「AI 报告未生成，分数来自 export_data 练习阶段」
+                    #}
                     {% if achievements.is_partial %}
-                    <div class="text-[10px] text-rose-600 mt-1.5 bg-rose-50 rounded px-1.5 py-0.5">
-                        ⚠️ AI 报告未生成 · 分数来自 export_data 练习阶段
-                    </div>
+                        {% if achievements.six_dim_source == 'report_md' %}
+                        <div class="text-[10px] text-amber-700 mt-1.5 bg-amber-50 rounded px-1.5 py-0.5">
+                            💡 AI 报告 6 维已抽取，AI 评分由 6 维均值 × 10 兜底（建议补全 AI 报告获得精准评分）
+                        </div>
+                        {% else %}
+                        <div class="text-[10px] text-rose-600 mt-1.5 bg-rose-50 rounded px-1.5 py-0.5">
+                            ⚠️ AI 报告未生成 · 分数来自 export_data 练习阶段
+                        </div>
+                        {% endif %}
                     {% endif %}
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
@@ -11542,7 +11599,7 @@ STUDENT_ME_HTML = """
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
+                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -11714,8 +11771,9 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
         </div>
         {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
         {# v3.9.16 · /r/<uid> 预览区补 AI 讲题入口（之前只有主中心的 错题集 才有） #}
+        {# v3.9.25 · 改指内部 /studymate/ai-tutor，传入 luogu_uid（不是 token） #}
         {% if m.problem_id %}
-        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
+        <a href="/studymate/ai-tutor?uid={{ luogu_uid }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
            target="_blank" rel="noopener"
            class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600"
            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
