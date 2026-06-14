@@ -11540,11 +11540,12 @@ STUDENT_ME_HTML = """
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
-                    <a href="/me/{{ luogu_uid }}/share-card.png" target="_blank"
+                    {# v3.9.23 · STUDENT_ME_HTML 用 token 而非 luogu_uid（luogu_uid 在此模板里未传入，渲染为 ""） #}
+                    <a href="/me/{{ token }}/share-card.png" target="_blank"
                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 whitespace-nowrap">
                         🔍 查看海报
                     </a>
-                    <a href="/me/{{ luogu_uid }}/share-card.png" download="学习报告位置图_{{ student.real_name or luogu_uid }}.png"
+                    <a href="/me/{{ token }}/share-card.png" download="学习报告位置图_{{ student.real_name or token }}.png"
                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-emerald-600 text-emerald-700 text-sm font-bold rounded-lg hover:bg-emerald-50 whitespace-nowrap">
                         💾 保存
                     </a>
@@ -11572,7 +11573,8 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
 <meta name="robots" content="noindex">
 <meta property="og:type" content="article">
 <meta property="og:title" content="{{ student_name }} 的洛谷 AI 测评报告">
-<meta property="og:image" content="/me/{{ luogu_uid }}/share-card.png">
+{# v3.9.23 · STUDENT_ME_HTML 用 token 而非 luogu_uid（luogu_uid 在此模板里未传入，渲染为 ""） #}
+<meta property="og:image" content="/me/{{ token }}/share-card.png">
 <title>{{ student_name }} 的洛谷 AI 测评报告</title>
 <script src="https://cdn.tailwindcss.com"></script>
 {{ app_skin_head() }}
@@ -11595,14 +11597,14 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
   <div class="bg-white rounded-2xl shadow p-8 text-center mt-8">
     <div class="text-5xl mb-3">📭</div>
     <h1 class="text-lg font-bold text-gray-800 mb-2">该选手暂未生成报告</h1>
-    <p class="text-sm text-gray-500 mb-5">UID {{ luogu_uid }} · 暂无 AI 测评数据</p>
+    <p class="text-sm text-gray-500 mb-5">UID {{ token }} · 暂无 AI 测评数据</p>
     <a href="/?ref={{ ref or '' }}" class="inline-block px-5 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-lg">✨ 立即生成我的报告</a>
   </div>
   {% else %}
 
   <section class="bg-gradient-to-br from-emerald-50 via-white to-amber-50 rounded-2xl shadow p-5 text-center">
     <div class="text-xs text-gray-500 mb-1">洛谷 UID</div>
-    <div class="text-2xl font-extrabold text-gray-800 mb-3 font-mono">{{ luogu_uid }}</div>
+    <div class="text-2xl font-extrabold text-gray-800 mb-3 font-mono">{{ token }}</div>
     <div class="text-xs text-amber-700 font-bold mb-1">AI 评测分</div>
     <div class="text-5xl font-extrabold text-amber-600 my-2">
       {{ achievements.ai_score_thousand if achievements.ai_score_thousand is not none else '—' }}
