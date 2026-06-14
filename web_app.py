@@ -4384,10 +4384,10 @@ STUDENT_REPORT_HTML = """
                     </div>
                 </div>
                 <!-- v3.9.9 · 每题独立 AI 讲题入口（直跳 aijiangti.cn，题目已直传 + C++ 实现要求） -->
-                <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id or m.pid }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
+                <a href="https://aijiangti.cn/?pid={{ m.problem_id or m.pid }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
                    target="_blank" rel="noopener"
                    class="ml-2 px-2.5 py-1.5 rounded-md bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
-                   title="跳到 StudyMate AI 讲题（题号/标题/来源已传入）">
+                   title="跳到 aijiangti.cn 生成 C++ 课件（题号/标题/来源已传入）">
                     🤖 AI 讲题
                 </a>
             </div>
@@ -8834,7 +8834,7 @@ STUDENT_ME_LITE_HTML = r"""
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
+                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -11627,7 +11627,7 @@ STUDENT_ME_HTML = """
                             {% endif %}
                         </div>
                         <!-- v3.9.9 · 直跳 aijiangti.cn · C++ 课件生成（题号/标题/来源已直传） -->
-                        <a href="/studymate/ai-tutor?uid={{ token }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
+                        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
                            target="_blank" rel="noopener"
                            class="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-bold rounded-lg hover:from-blue-600 hover:to-cyan-600 whitespace-nowrap"
                            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
@@ -11798,10 +11798,9 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
           {% if m.source %}<span class="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-700 rounded">{{ m.source }}</span>{% endif %}
         </div>
         {% if m.summary %}<div class="text-xs text-gray-600 mt-1">💡 {{ m.summary[:60] }}{% if m.summary|length > 60 %}…{% endif %}</div>{% endif %}
-        {# v3.9.16 · /r/<uid> 预览区补 AI 讲题入口（之前只有主中心的 错题集 才有） #}
-        {# v3.9.25 · 改指内部 /studymate/ai-tutor，传入 luogu_uid（不是 token） #}
+        {# v3.9.9 · /r/<uid> 预览区补 AI 讲题入口（直跳 aijiangti.cn，C++ 课件生成） #}
         {% if m.problem_id %}
-        <a href="/studymate/ai-tutor?uid={{ luogu_uid }}&pid={{ m.problem_id }}&title={{ (m.title or '')|urlencode }}&source={{ (m.source or '')|urlencode }}&summary={{ (m.summary or '')|urlencode }}"
+        <a href="https://aijiangti.cn/?pid={{ m.problem_id }}&from=luogu&lang=cpp&require={{ '用C++代码实现并讲解'|urlencode }}&source={{ (m.source or '')|urlencode }}&title={{ (m.title or '')|urlencode }}"
            target="_blank" rel="noopener"
            class="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-[11px] font-bold rounded-md hover:from-blue-600 hover:to-cyan-600"
            title="跳到 aijiangti.cn 生成 C++ 课件（题目已传入）">
