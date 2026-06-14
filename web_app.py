@@ -11591,30 +11591,27 @@ STUDENT_ME_HTML = """
             <h2 class="text-lg font-bold text-gray-800 mb-3">🏅 我的个人成就</h2>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <!-- 千分制 AI 评测分 -->
+                {# v3.9.31 · 标题从「AI 评测分」改为「能力总分（6 维均分）」——之前误导
+                    用户以为是 AI 给的分数，实际是 6 维均分 × 10 算的派生值。
+                    6 维本身来自学员练习数据（export_data.json），不是 AI 评的。 #}
                 <div class="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-4 text-center">
-                    <div class="text-xs text-amber-700 font-bold">⭐ AI 评测分（千分制）</div>
+                    <div class="text-xs text-amber-700 font-bold" title="数据来源: {{ achievements.report_dir or '暂无' }}">📊 能力总分（6 维均分 × 10）</div>
                     {% if achievements.ai_score_thousand is not none %}
                     <div class="text-4xl font-extrabold text-amber-700 mt-1">{{ achievements.ai_score_thousand }}</div>
                     <div class="text-xs text-amber-600 mt-1">{{ achievements.ai_score_label }} · 满分 1000</div>
-                    {# v3.9.25 · is_partial 文案区分 6 维来源（避免「明明有报告却说未生成」的误导）：
-                        - 6 维来自 report.md + AI 评分兜底 export_data → 黄色「AI 评分由 6 维均值兜底」
-                        - 6 维和 AI 评分都来自 export_data 兜底 → 红色「AI 报告未生成，分数来自 export_data 练习阶段」
-                    #}
-                    {% if achievements.is_partial %}
-                        {% if achievements.six_dim_source == 'report_md' %}
-                        <div class="text-[10px] text-amber-700 mt-1.5 bg-amber-50 rounded px-1.5 py-0.5">
-                            💡 AI 报告 6 维已抽取，AI 评分由 6 维均值 × 10 兜底（建议补全 AI 报告获得精准评分）
-                        </div>
-                        {% else %}
-                        <div class="text-[10px] text-rose-600 mt-1.5 bg-rose-50 rounded px-1.5 py-0.5">
-                            ⚠️ AI 报告未生成 · 分数来自 export_data 练习阶段
-                        </div>
-                        {% endif %}
+                    {# v3.9.31 · label 区分数据源（之前「AI 报告未生成」红色警示容易让人以为 723 是瞎编的） #}
+                    {% if achievements.six_dim_source == 'export_data' %}
+                    <div class="text-[10px] text-sky-700 mt-1.5 bg-sky-50 rounded px-1.5 py-0.5">
+                        ℹ️ 6 维数据来自 export_data.json（练习阶段真实记录）
+                    </div>
+                    {% elif achievements.is_partial %}
+                    <div class="text-[10px] text-amber-700 mt-1.5 bg-amber-50 rounded px-1.5 py-0.5">
+                        💡 AI 报告 6 维已抽取，分数由 6 维均分 × 10 兜底
+                    </div>
                     {% endif %}
                     {% else %}
                     <div class="text-3xl font-extrabold text-gray-300 mt-1">—</div>
-                    <div class="text-xs text-gray-400 mt-1">暂未生成 AI 报告</div>
+                    <div class="text-xs text-gray-400 mt-1">暂无练习数据</div>
                     {% endif %}
                 </div>
 
@@ -11692,6 +11689,49 @@ STUDENT_ME_HTML = """
                 {% endif %}
                 <div class="text-[10px] text-gray-400 mt-2" title="6 维来源={{ _src6 }}，AI 评分来源={{ _src_ai }}">数据来源：{{ achievements.report_dir }} / {{ _src_text }}</div>
                 {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        {# v3.9.31 · 家长端入口（除「生成报告」外的第二个入口）
+            之前家长订阅版只在生成报告完成页有入口，学员中心 (/me/<uid>) 看不到。
+            现在在"个人成就"卡片下方加一行 4 入口快捷区：
+            1) 家长订阅版 — /me/<uid>/parent-subscribe
+            2) 我的 AI 报告 — /me/<uid>/report-data/<latest> 或 list
+            3) 错题集 — /me/<uid>/mistakes（如果有）
+            4) 我的二维码海报 — 跳到 /r/<uid> 公开预览页（家长扫码会到的页面）#}
+        <div class="bg-white rounded-2xl shadow p-5 mb-4" id="parent-entry">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">👨‍👩‍👧 家长与分享</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-sm">
+                <a href="/me/{{ token }}/parent-subscribe" class="block bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-3 hover:shadow">
+                    <div class="text-2xl mb-1">📨</div>
+                    <div class="font-semibold text-amber-700">家长订阅版</div>
+                    <div class="text-[10px] text-gray-500 mt-1">5 维度决策支持</div>
+                </a>
+                <a href="/r/{{ token }}" target="_blank" class="block bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-200 rounded-xl p-3 hover:shadow">
+                    <div class="text-2xl mb-1">📱</div>
+                    <div class="font-semibold text-rose-700">我的二维码</div>
+                    <div class="text-[10px] text-gray-500 mt-1">家长扫码预览</div>
+                </a>
+                <a href="/r/{{ token }}" target="_blank" class="block bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200 rounded-xl p-3 hover:shadow">
+                    <div class="text-2xl mb-1">🤖</div>
+                    <div class="font-semibold text-sky-700">AI 讲题入口</div>
+                    <div class="text-[10px] text-gray-500 mt-1">每题点开 → aijiangti.cn</div>
+                </a>
+                <a href="/me/{{ token }}" class="block bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 rounded-xl p-3 hover:shadow">
+                    <div class="text-2xl mb-1">🎓</div>
+                    <div class="font-semibold text-emerald-700">学员中心</div>
+                    <div class="text-[10px] text-gray-500 mt-1">返回个人中心</div>
+                </a>
+            </div>
+            {# v3.9.31 · 如果是家长订阅会员（v3.9.26 门控），给出提示 #}
+            {% if has_parent_sub %}
+            <div class="mt-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                ✅ 家长订阅会员已开通 · 家长订阅版所有内容可读
+            </div>
+            {% else %}
+            <div class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                💡 家长订阅版目前是预览态 · 完整版需 <a href="/redeem" class="underline">兑换家长订阅码</a>
             </div>
             {% endif %}
         </div>
