@@ -10303,6 +10303,48 @@ def _sanitize_ref(raw: str | None) -> str:
     return s[:32]
 
 
+def _resolve_gesp_level_score(student: dict) -> tuple:
+    """v3.9.29 · GESP 段位+分数 3 层兜底（学生表 → gesp_exams 表）
+
+    返回 (level, score) 元组。任意一层有值就返回。
+    之前 /r/<uid> 路由只读 student.gesp_highest_passed（学生表），遇到
+    gesp_exams 表有记录但 students 表没更新（用户自录后未重算）的情况就显示 0。
+    现在跟 /me 路由一样，先读 students 表，0 则查 gesp_exams 表。
+
+    错误防御：gesp_exams 表可能不存在、字段可能不同，全部 try/except。
+    """
+    if not student:
+        return (0, 0)
+    _gh = 0
+    _gs = 0
+    try:
+        _gh = int(student.get("gesp_highest_passed") or 0)
+        _gs = int(student.get("gesp_latest_score") or 0)
+    except Exception:
+        pass
+    if _gh and _gh > 0:
+        return (_gh, _gs)
+    # 第二层：gesp_exams 表兜底
+    try:
+        sid = int(student.get("id") or 0)
+        if sid > 0:
+            from task_store import _get_conn as _gconn
+            _gc = _gconn()
+            try:
+                _gr = _gc.execute(
+                    "SELECT MAX(registered_level) AS lvl, MAX(actual_score) AS sc "
+                    "FROM gesp_exams WHERE student_id=? AND passed=1",
+                    (sid,),
+                ).fetchone()
+                if _gr and _gr["lvl"]:
+                    return (int(_gr["lvl"]), int(_gr["sc"] or 0))
+            finally:
+                _gc.close()
+    except Exception:
+        pass
+    return (_gh, _gs)
+
+
 @app.route("/r/<luogu_uid>", methods=["GET"])
 def report_preview(luogu_uid: str):
     """v3.7 · 报告预览中转页（公开，陌生人扫码落地）
@@ -10329,16 +10371,36 @@ def report_preview(luogu_uid: str):
     latest_dir_name = latest.name if latest else ""
 
     if not latest or not (latest / "report.md").exists():
+        # v3.9.29 · 即使没 report.md，也走 export_data 兜底（之前直接 has_report=False）
+        _ext_fb = {}
+        try:
+            if latest and (latest / "export_data.json").exists():
+                _ext_fb = _extract_achievements_from_export_data(latest) or {}
+                if _ext_fb.get("six_dim"):
+                    _ext_fb["six_dim_source"] = "export_data"
+                if _ext_fb.get("ai_score_thousand"):
+                    _ext_fb["ai_score_source"] = "export_data"
+                    _ext_fb["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告未生成，6 维+评分来自 export_data.json）"
+                if not (latest / "report.md").exists():
+                    _ext_fb["is_partial"] = True
+                _ext_fb["report_dir"] = latest.name if latest else ""
+        except Exception:
+            pass
+        # v3.9.29 · 3 层 GESP 兜底（student 表 → gesp_exams 表）
+        _gh, _gs = _resolve_gesp_level_score(student)
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
-            student_name=f"UID {luogu_uid}",
-            achievements=empty_achievements,
+            token=luogu_uid,  # v3.9.29 · 模板 header 用 {{ token }} 渲染 UID
+            student_name=(student.get("real_name") or f"UID {luogu_uid}"),
+            achievements=_ext_fb or empty_achievements,
             ai_summary="",
             suggestions=[],
             ref=ref,
-            has_report=False,
-            latest_dir_name="",
+            has_report=bool(_ext_fb.get("six_dim") or _ext_fb.get("mistakes")),
+            latest_dir_name=latest_dir_name,
+            gesp_level=_gh,
+            gesp_score=_gs,
         ), 200
 
     try:
@@ -10346,6 +10408,33 @@ def report_preview(luogu_uid: str):
         achievements = _extract_achievements_from_report(report_md) or empty_achievements
         ai_summary = _extract_ai_summary(report_md) or ""
         suggestions = _extract_top_suggestions(report_md) or []
+
+        # v3.9.29 · 3 级兜底：之前只读 report.md，没匹配到 6 维/AI 评分就一直空。
+        # 跟 /me 路由一致：逐字段补全（report.md 已读到的优先，否则 export_data.json 兜底）。
+        try:
+            if (latest / "export_data.json").exists():
+                _ext_fb = _extract_achievements_from_export_data(latest) or {}
+                if not achievements.get("six_dim") and _ext_fb.get("six_dim"):
+                    achievements["six_dim"] = _ext_fb["six_dim"]
+                    achievements["six_dim_source"] = "export_data"
+                if not achievements.get("mistakes") and _ext_fb.get("mistakes"):
+                    achievements["mistakes"] = _ext_fb["mistakes"]
+                if not achievements.get("ai_score_thousand") and _ext_fb.get("ai_score_thousand"):
+                    achievements["ai_score_thousand"] = _ext_fb["ai_score_thousand"]
+                    achievements["ai_score_source"] = "export_data"
+                    if achievements.get("six_dim_source") == "report_md":
+                        _mean = sum(achievements["six_dim"].values()) / max(1, len(achievements["six_dim"]))
+                        achievements["ai_score_label"] = f"预估 {int(round(_mean * 10))}/1000（AI 报告 6 维已抽取；评分由 6 维均值 × 10 兜底）"
+                    else:
+                        achievements["ai_score_label"] = f"预估 {_ext_fb['ai_score_thousand']}/1000（AI 报告 6 维 regex 未匹配，评分来自 export_data.json）"
+                if (not achievements.get("six_dim") and not achievements.get("mistakes")):
+                    achievements["is_partial"] = True
+                if achievements.get("six_dim") and not achievements.get("six_dim_source"):
+                    achievements["six_dim_source"] = "report_md"
+                if achievements.get("ai_score_thousand") and not achievements.get("ai_score_source"):
+                    achievements["ai_score_source"] = "report_md"
+        except Exception as _de:
+            app.logger.warning(f"[v3.9.29 /r/{luogu_uid}] 3 级兜底失败: {_de}")
 
         # v3.9.6 · 来源 D 兜底：report.md 正则没抓到错题时，从 export_data.json.failed_items 拿
         # 这是数据源本身，最权威。report.md 是 AI 生成的衍生品，可能格式漂移。
@@ -10384,28 +10473,36 @@ def report_preview(luogu_uid: str):
             except Exception as _de:
                 app.logger.warning(f"[v3.9.6 /r/{luogu_uid}] 来源 D 兜底失败: {_de}")
     except Exception:
+        _gh2, _gs2 = _resolve_gesp_level_score(student)
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
-            student_name=f"UID {luogu_uid}",
+            token=luogu_uid,
+            student_name=(student.get("real_name") or f"UID {luogu_uid}"),
             achievements=empty_achievements,
             ai_summary="",
             suggestions=[],
             ref=ref,
             has_report=False,
             latest_dir_name=latest_dir_name,
+            gesp_level=_gh2,
+            gesp_score=_gs2,
         ), 200
 
+    _gh3, _gs3 = _resolve_gesp_level_score(student)
     return render_template_string(
         REPORT_PREVIEW_HTML,
         luogu_uid=luogu_uid,
-        student_name=f"UID {luogu_uid}",
+        token=luogu_uid,
+        student_name=(student.get("real_name") or f"UID {luogu_uid}"),
         achievements=achievements,
         ai_summary=ai_summary,
         suggestions=suggestions,
         ref=ref,
         has_report=True,
         latest_dir_name=latest_dir_name,
+        gesp_level=_gh3,
+        gesp_score=_gs3,
     ), 200
 
 
@@ -11793,8 +11890,23 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
     <div class="text-sm font-bold text-amber-700">{{ achievements.ai_score_label or '—' }}</div>
     <div class="grid grid-cols-3 gap-2 mt-4 text-center text-xs">
       <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">错题</div><div class="text-base font-bold text-red-600 mt-0.5">{{ achievements.mistakes|length }}</div></div>
-      <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">GESP 段位</div><div class="text-base font-bold text-emerald-600 mt-0.5">—</div></div>
-      <div class="bg-white/60 rounded-lg p-2"><div class="text-gray-500">能力维度</div><div class="text-base font-bold text-blue-600 mt-0.5">{{ achievements.six_dim|length }} 维</div></div>
+      <div class="bg-white/60 rounded-lg p-2">
+        <div class="text-gray-500">GESP 段位</div>
+        {# v3.9.29 · 之前硬编码"—"，gasp 段位来自 student.gesp_highest_passed（admin 录入） #}
+        {% if gesp_level and gesp_level > 0 %}
+          <div class="text-base font-bold text-emerald-600 mt-0.5">{{ gesp_level }} 级{% if gesp_score %} · {{ gesp_score }} 分{% endif %}</div>
+        {% else %}
+          <div class="text-base font-bold text-emerald-600 mt-0.5">未录入</div>
+        {% endif %}
+      </div>
+      <div class="bg-white/60 rounded-lg p-2">
+        <div class="text-gray-500">能力维度</div>
+        {# v3.9.29 · 改 6 维来源标签：自 report.md vs export_data.json #}
+        <div class="text-base font-bold text-blue-600 mt-0.5">
+          {{ achievements.six_dim|length }} 维
+          {% if achievements.six_dim_source == 'export_data' %}<span class="text-[10px] text-amber-600">（兜底）</span>{% endif %}
+        </div>
+      </div>
     </div>
   </section>
 
