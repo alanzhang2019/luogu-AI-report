@@ -560,10 +560,15 @@ def enrich_problem_tags(
 
     progress_callback(fetched, enriched, total_missing) 在每道题处理完后调用，
     用于向前端实时反馈标签抓取进度；传 None 则不回调。
+
+    v3.9.14 · 增加 per-problem 标签持久化缓存（_PROBLEM_TAGS_CACHE_FILE），
+    同一道题再次生成报告时直接命中缓存，避免每次都打洛谷 API。
+    之前每次重试都重新抓 100+ 道题详情，慢且易触发风控。
     """
     enriched = 0
     fetched = 0
     cache: dict[str, list[int]] = {}
+    persistent_cache: dict[str, list[int]] = _load_problem_tags_cache()  # v3.9.14
 
     # 先一次性统计需要补全的题目总数，方便前端显示 "X/Y" 进度
     missing_indices = [
@@ -589,11 +594,18 @@ def enrich_problem_tags(
             continue
 
         try:
+            # v3.9.14 · 先看进程内 cache（同一调用内去重）
             if pid not in cache:
-                fetched += 1
-                detail = luogu.get_problem(pid)
-                problem_detail = getattr(detail, "problem", None)
-                cache[pid] = list(getattr(problem_detail, "tags", []) or [])
+                # v3.9.14 · 再看持久化磁盘 cache（跨调用/跨重试命中）
+                if pid in persistent_cache and persistent_cache[pid]:
+                    cache[pid] = list(persistent_cache[pid])
+                else:
+                    fetched += 1
+                    detail = luogu.get_problem(pid)
+                    problem_detail = getattr(detail, "problem", None)
+                    cache[pid] = list(getattr(problem_detail, "tags", []) or [])
+                    # v3.9.14 · 写回持久化 cache（即便为空也写，避免反复打空题）
+                    persistent_cache[pid] = cache[pid]
             if cache[pid]:
                 problem.tags = list(cache[pid])
                 enriched += 1
@@ -606,7 +618,55 @@ def enrich_problem_tags(
             except Exception:
                 pass
 
+    # v3.9.14 · 把本轮新增的 tags 写回磁盘
+    if fetched > 0 or any(cache):
+        try:
+            _save_problem_tags_cache(persistent_cache)
+        except Exception:
+            pass
+
     return enriched
+
+
+# ========== v3.9.14 · per-problem 标签持久化缓存（解决重试重抓） ==========
+# 全局共享：_ROOT/.source_cache/_problem_tags.json
+# 格式：{"P1000": [1, 2, 3], "P1001": [4, 5], ...}
+# 洛谷题目标签基本不变（管理员改标签才会动），TTL = 永久
+_PROBLEM_TAGS_CACHE_FILE = Path(__file__).parent / ".source_cache" / "_problem_tags.json"
+_PROBLEM_TAGS_CACHE_LOCK = __import__("threading").Lock()  # 写并发保护
+
+
+def _load_problem_tags_cache() -> dict[str, list[int]]:
+    """读取 _PROBLEM_TAGS_CACHE_FILE → {pid: [tag_id, ...]}"""
+    if not _PROBLEM_TAGS_CACHE_FILE.exists():
+        return {}
+    try:
+        payload = json.loads(_PROBLEM_TAGS_CACHE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return {}
+        out: dict[str, list[int]] = {}
+        for k, v in payload.items():
+            if not isinstance(v, list):
+                continue
+            try:
+                out[str(k)] = [int(x) for x in v if x is not None]
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def _save_problem_tags_cache(cache: dict[str, list[int]]) -> None:
+    """原子写：先写 .tmp → os.replace 防止半文件"""
+    _PROBLEM_TAGS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with _PROBLEM_TAGS_CACHE_LOCK:
+        # 合并已有（避免被覆盖丢条目）
+        existing = _load_problem_tags_cache()
+        existing.update(cache)
+        tmp = _PROBLEM_TAGS_CACHE_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, _PROBLEM_TAGS_CACHE_FILE)
 
 
 def fetch_behavior_analysis(luogu: pyLuogu.luoguAPI, uid: int, fallback_items: list[dict] | None = None) -> dict:

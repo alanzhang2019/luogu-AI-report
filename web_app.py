@@ -221,8 +221,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.13"
-APP_VERSION_BUILD = "20260614_v3p9p13"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.9.14"
+APP_VERSION_BUILD = "20260614_v3p9p14"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1599,6 +1599,14 @@ RETRY_FORM_FIELDS = (
     "csp_award_year",
     "csp_score",
     "csp_province",
+    # v3.9.14 · 选手档案字段持久化：省份/城市/性别/出生日期
+    # 之前没存到 retry_form_json，导致「返回重试」后这些字段全空，
+    # 用户不得不重新填（之前是写入 students 表，但 retry_form_json 没存）
+    "province",
+    "city",
+    "city_legacy",
+    "gender",
+    "birth_date",
 )
 
 
@@ -2546,8 +2554,8 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
-        {# v3.9.12 · AI 服务拒绝请求的通用提示（不再假设是 Key 问题） #}
-        {% if is_401_api_key %}
+        {# v3.9.14 · AI 服务拒绝请求的通用提示（仅当本轮以 401 失败时显示，running/completed 不显示） #}
+        {% if is_401_api_key and status == 'error' %}
         <div class="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-left text-sm">
             <p class="font-bold text-amber-800 mb-1">⚠️ AI 服务返回 401（拒绝请求）</p>
             <ul class="text-amber-700 text-xs space-y-1 list-disc list-inside">
