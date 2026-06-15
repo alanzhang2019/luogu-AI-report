@@ -10187,6 +10187,7 @@ def share_card_png(luogu_uid: str):
             _dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
         else:
             _dir = _find_latest_report_dir(luogu_uid, data.get("name") or "")
+        print(f"[v3.9.37 cache] uid={luogu_uid} _dir={_dir!r} student={bool(student)}")
         if _dir:
             _dir.mkdir(parents=True, exist_ok=True)
             (_dir / "share-card.png").write_bytes(png_bytes)
@@ -10194,11 +10195,15 @@ def share_card_png(luogu_uid: str):
         else:
             # 没有任何 report 目录：建一个 reports/<uid>/share-card.png 占位
             _fallback = Path(__file__).parent / "reports" / luogu_uid
+            print(f"[v3.9.37 cache] uid={luogu_uid} fallback path={_fallback!r}")
             _fallback.mkdir(parents=True, exist_ok=True)
             (_fallback / "share-card.png").write_bytes(png_bytes)
+            print(f"[v3.9.37 cache] uid={luogu_uid} wrote {_fallback / 'share-card.png'}")
             app.logger.info(f"v3.9.37 share-card.png 兜底渲染并缓存到新目录: {_fallback / 'share-card.png'} ({len(png_bytes)} bytes)")
     except Exception as _cache_e:
         # 缓存失败不影响本次返回
+        import traceback as _tb
+        print(f"[v3.9.37 cache] uid={luogu_uid} 失败: {_cache_e!r}\n{_tb.format_exc()}")
         app.logger.warning(f"v3.9.37 share-card.png 落盘缓存失败（不影响本次返回）: {_cache_e}")
     return Response(png_bytes, mimetype="image/png", headers={
         "Content-Disposition": f'inline; filename="share-card-{luogu_uid}.png"',
