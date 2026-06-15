@@ -9843,20 +9843,51 @@ def _render_share_card_png(data: dict, qr_url: str) -> bytes:
 
     # ─ AI 定级（大字，主视觉） ──────────────
     if ai_level:
-        # v3.9 · 限长从 12 → 24 字符，完整保留 "CSP‑J 熟练 → CSP‑S 入门" 等长定级
         level_text = ai_level
-        if len(level_text) > 24:
-            level_text = level_text[:24]
+        # v3.9.34 · 按文本长度动态算 fontsize，并按标点智能断行成 ≤2 行，
+        # 避免 "CSP-S 入门者，尚未达到 CSP-S 合格水平" 这类长定级溢出卡片右边
+        # 经验值：1 个汉字 ≈ 1.0pt 宽，字号 28pt 时一行约 12 个汉字能塞进 7.3 轴单位
+        char_count = len(level_text)
+        if char_count <= 12:
+            level_fontsize = 28
+        elif char_count <= 16:
+            level_fontsize = 24
+        elif char_count <= 20:
+            level_fontsize = 21
+        elif char_count <= 24:
+            level_fontsize = 18
+        elif char_count <= 30:
+            level_fontsize = 16
+        else:
+            level_fontsize = 14
+        # 超 16 字符：尝试在标点（，、；： /  ·  →）处断成 2 行
+        if char_count > 16:
+            break_chars = ["，", "、", "；", "：", " ", "（", ")", "(", ")", "·", "→", ">", "/"]
+            target = char_count // 2
+            best_split = -1
+            for off in range(0, 6):
+                for cand in (target + off, target - off):
+                    if 4 <= cand < char_count and level_text[cand] in break_chars:
+                        best_split = cand + 1
+                        break
+                if best_split != -1:
+                    break
+            if best_split == -1:
+                # 没找到标点 → 直接在中间硬切
+                best_split = char_count // 2
+            level_text = level_text[:best_split].rstrip() + "\n" + level_text[best_split:].lstrip()
     else:
         level_text = "尚未生成报告"
+        level_fontsize = 28
 
     # 大字（label/大字/小标签 三组留白均衡）
     ax.text(0.85, 11.85, level_text, ha="left", va="center",
-            fontsize=28, color=COLOR_PRIMARY_DK, fontweight="bold",
+            fontsize=level_fontsize, color=COLOR_PRIMARY_DK, fontweight="bold",
             path_effects=[pe.withStroke(linewidth=0.4, foreground=COLOR_PRIMARY_LT)])
-    # 小标签
+    # 小标签（断行后下移一点，避免与大字的 2 行重叠）
+    _sub_y = 11.20 if char_count <= 16 else 10.95
     if ai_level:
-        ax.text(0.85, 11.20, "（基于 NOI 2025 大纲 · AI 综合判定）",
+        ax.text(0.85, _sub_y, "（基于 NOI 2025 大纲 · AI 综合判定）",
                 ha="left", va="center", fontsize=9.5, color=COLOR_TEXT_XL, style="italic")
 
     # 分隔线
