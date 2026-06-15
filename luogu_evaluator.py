@@ -1311,13 +1311,17 @@ def _build_one_tree_svg(
                     f'text-anchor="middle">{line}</text>'
                 )
 
-        # 被截掉的 "+N"（分别锚定到分支末端外侧）
+        # 被截掉的 "+N"
+        # v3.9.35 · 修复两侧 +N 都被 viewBox 剪掉的问题：
+        #  - 左侧：原来 branch_end_x - 4 (≈ x=2) + anchor=end → 文字推到 x=-15，被剪
+        #  - 右侧：原来 branch_end_x + 4 (≈ x=458) + anchor=start → 文字推到 x=480，被剪
+        # 修复：两侧都留 24px 边界（min/max + 边距），保证 "+N" 永远完整可见
         if hidden > 0:
             if going_right:
-                overflow_x = branch_end_x + 4
+                overflow_x = min(branch_end_x + 4, width - 24)
                 anchor = "start"
             else:
-                overflow_x = branch_end_x - 4
+                overflow_x = max(branch_end_x - 4, 24)
                 anchor = "end"
             svg.append(
                 f'<text x="{overflow_x}" y="{by + 3}" font-size="10" '
