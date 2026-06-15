@@ -2422,6 +2422,47 @@ def run_generation(task_id: str, form: dict):
             behavior_data if "error" not in behavior_data else {}
         )
 
+        # ========== v3.9.39 提交代码考古（多版源码 diff）==========
+        with TASKS_LOCK:
+            update_task(task_id, message="正在做提交代码考古（多版源码 diff）...")
+        current_stage = "代码考古"
+        try:
+            # 拉取提交记录（与行为分析同源；上限 25 页 ≈ 500 条；早期被截断无所谓，
+            # 只要覆盖到 TOP N 高频卡题即可）
+            evolution_records: list[dict] = []
+            for page in range(1, 26):
+                try:
+                    record_list = luogu.get_record_list(page=page, uid=uid, user=str(uid))
+                    page_records = (
+                        getattr(record_list, "records", None)
+                        or getattr(record_list, "data", None)
+                        or []
+                    )
+                    normalized = [
+                        r.to_json() if hasattr(r, "to_json") else r
+                        for r in page_records
+                    ]
+                except Exception:
+                    break
+                if not normalized:
+                    break
+                evolution_records.extend(normalized)
+                if len(normalized) < 20 or len(evolution_records) >= 1000:
+                    break
+            from submission_evolution import analyze_submission_evolution
+            submission_evolution = analyze_submission_evolution(
+                luogu, uid, evolution_records, top_n=5, verbose=False
+            )
+            app.logger.info(
+                f"v3.9.39 提交代码考古：{submission_evolution['summary']}"
+            )
+        except Exception as _evol_e:
+            app.logger.warning(f"v3.9.39 提交代码考古失败（不影响主报告）: {_evol_e}")
+            submission_evolution = {
+                "selected_problems": [],
+                "summary": {"error": str(_evol_e)},
+            }
+
         export_data = {
             "student_info": {
                 "name": student_name,
@@ -2440,6 +2481,7 @@ def run_generation(task_id: str, form: dict):
             "behavior_analysis": behavior_data,
             "syllabus_evaluation": syllabus_evaluation,
             "six_dimension_scores": six_dim_scores,
+            "submission_evolution": submission_evolution,  # v3.9.39
         }
 
         _write_export_data_json(out_dir, export_data)
