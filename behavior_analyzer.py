@@ -4,9 +4,12 @@
 """
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 from typing import Any
+
+# v3.9.38 · 北京时间 helper（防御性：与 web_app.py 同款）
+_BJ_TZ = timezone(timedelta(hours=8))
 
 
 def analyze_submission_behavior(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -40,7 +43,9 @@ def analyze_submission_behavior(records: list[dict[str, Any]]) -> dict[str, Any]
             pid_records[pid].append(r)
 
         if submit_time:
-            dt = datetime.fromtimestamp(submit_time)
+            # v3.9.38 · 显式转北京时间（之前用 datetime.fromtimestamp() 是 UTC 偏 8h，
+            # 导致 AI 报告的"13:00 提交峰值"实际是 21:00，"凌晨 113次"是 17:00-22:00 等）
+            dt = datetime.fromtimestamp(submit_time, tz=_BJ_TZ)
             hourly_distribution[dt.hour] += 1
             weekday_distribution[dt.weekday()] += 1
             date_key = dt.strftime("%Y-%m-%d")

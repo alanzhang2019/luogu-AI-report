@@ -17,7 +17,10 @@ from __future__ import annotations
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# v3.9.38 · 北京时间 helper
+_BJ_TZ = timezone(timedelta(hours=8))
 from pathlib import Path
 from typing import Optional
 
@@ -77,8 +80,9 @@ def collect_all_mistakes() -> dict[int, list[dict]]:
             finished = judge.get("finishedCaseCount", 0)
             submit_time = record.get("submitTime", 0)
             try:
+                # v3.9.38 · 显式转北京时间（之前是 UTC 偏 8h）
                 submit_iso = (
-                    datetime.fromtimestamp(int(submit_time)).strftime("%Y-%m-%d %H:%M")
+                    datetime.fromtimestamp(int(submit_time), tz=_BJ_TZ).strftime("%Y-%m-%d %H:%M")
                     if submit_time else "—"
                 )
             except (ValueError, OSError):

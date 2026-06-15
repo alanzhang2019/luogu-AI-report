@@ -6,7 +6,15 @@ import threading
 import time
 import hmac
 from pathlib import Path
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+
+# v3.9.38 · 北京时间统一 helper（防御性：即使容器 TZ 没设置也能正确转 Beijing）
+# 之前用 datetime.utcnow() + 8h hack，依赖容器 TZ=Asia/Shanghai 后改回 datetime.now()，
+# 但保留 _NOW_BJ() 作为兜底（用户本地浏览器也可能因各种原因看到错误时区）
+_BJ_TZ = timezone(timedelta(hours=8))
+def _NOW_BJ():
+    """获取当前北京时间（aware datetime，TZ=Asia/Shanghai，UTC+8）"""
+    return datetime.now(_BJ_TZ)
 from urllib.parse import urlsplit, urlunsplit
 from openai import APIConnectionError, APITimeoutError, APIError, RateLimitError as OpenAIRateLimitError
 try:
@@ -889,7 +897,8 @@ def discover_orphan_report_tasks() -> list[dict]:
 
         existing_files = [path for path in (html_path, pdf_path, md_path, export_json_path) if path.exists()]
         latest_time = max((path.stat().st_mtime for path in existing_files), default=report_dir.stat().st_mtime)
-        display_time = eval_time or datetime.fromtimestamp(latest_time).strftime("%Y-%m-%d %H:%M")
+        # v3.9.38 · 显式转北京时间（之前用 datetime.fromtimestamp() 是 UTC 偏 8h）
+        display_time = eval_time or datetime.fromtimestamp(latest_time, tz=_BJ_TZ).strftime("%Y-%m-%d %H:%M")
 
         discovered.append({
             "id": folder_name,
@@ -1960,7 +1969,7 @@ def _generate_ai_report_artifacts(
     chart_paths = generate_chart_images(export_data, str(assets_dir))
     build_html_and_pdf(report_md, export_data, str(html_path), str(pdf_path), chart_paths)
 
-    eval_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+    eval_time = _NOW_BJ().strftime("%Y-%m-%d %H:%M")
     with TASKS_LOCK:
         update_task(
             task_id,
@@ -2420,7 +2429,7 @@ def run_generation(task_id: str, form: dict):
                 # v3.9.7 · 中文年级（不再显示 PRIMARY_6 这种 enum 值）
                 "grade": _grade_to_label(grade) or grade,
                 "grade_zh": _grade_to_label(grade) or grade,
-                "eval_time": (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
+                "eval_time": _NOW_BJ().strftime("%Y-%m-%d %H:%M"),
             },
             "solved_count": len(all_passed),
             "failed_count": len(all_failed),
@@ -4193,7 +4202,8 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
             # 优先用 report.html mtime，否则 export_data.json
             ref_p = html_p if status == "complete" else export_p
             stat = ref_p.stat()
-            mtime = datetime.fromtimestamp(stat.st_mtime)
+            # v3.9.38 · 显式转北京时间（之前用 datetime.fromtimestamp() 是 UTC 偏 8h）
+            mtime = datetime.fromtimestamp(stat.st_mtime, tz=_BJ_TZ)
             items.append({
                 "dir_name": dir_name,
                 "html_url": f"/reports/{dir_name}/report.html" if status == "complete" else "",

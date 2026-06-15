@@ -2,6 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# v3.9.38 · 容器时区统一到北京时间（UTC+8）
+# 之前容器是 UTC，导致 datetime.now() / datetime.fromtimestamp() 全部偏 8h，
+# 历史报告时间显示 04:20 而非 12:20、行为分析把 21:00 当成 13:00。
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # 安装系统依赖（Playwright Chromium 所需）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
