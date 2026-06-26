@@ -248,8 +248,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.10.0.13"
-APP_VERSION_BUILD = "20260625_v3p10p0p13_vjudge_progress_smooth"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.10.0.14"
+APP_VERSION_BUILD = "20260625_v3p10p0p14_vjudge_sr_dict_fix"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -1242,6 +1242,8 @@ def _run_vjudge_report(
             conn.close()
         if not sr:
             raise ValueError(f"学员 id={student_id} 不存在")
+        # v3.10.0.14 · sr 是 sqlite3.Row 不支持 .get(), 提前转 dict 防御性
+        sr = dict(sr)
         if not vj:
             raise ValueError(f"学员 id={student_id} 还没绑 VJudge")
         vj_dict = dict(vj)
@@ -1294,7 +1296,7 @@ def _run_vjudge_report(
                         "solved_count": int(_o.get("count") or _o.get("solved") or 0),
                     })
         # 3) solved 表反推 (兜底, fetcher 旧版没存 oj_stats 时仍能展示)
-        if not _oj_dist_list and sr.get("id"):
+        if not _oj_dist_list and sr["id"]:
             try:
                 from task_store import _get_conn as _vj_conn
                 _vc = _vj_conn()
@@ -1437,8 +1439,8 @@ def _run_vjudge_report(
         # v3.10.0.12 · oj_distribution 改为 list[dict], 海报按 list 渲染, 不再走字符串拼接
         try:
             _sc_data = {
-                "name": sr.get("real_name") or "选手",
-                "uid": sr.get("luogu_uid") or short_id,
+                "name": sr["real_name"] or "选手",
+                "uid": sr["luogu_uid"] or short_id,
                 "ai_level": "跨平台测评 · 初步阶段",
                 "core_reading": "基于 vjudge.net 真实数据, AI 生成的跨平台编程能力评估。",
                 "total_submissions": total_sub,
@@ -1458,7 +1460,7 @@ def _run_vjudge_report(
                 _base = request.host_url.rstrip("/")
             if not _base:
                 _base = "https://oi.aijiangti.cn"
-            _sc_qr = f"{_base}/r/{sr.get('luogu_uid') or short_id}?exam_type=vjudge"
+            _sc_qr = f"{_base}/r/{sr['luogu_uid'] or short_id}?exam_type=vjudge"
             _sc_png = _render_vjudge_share_card_png(_sc_data, _sc_qr)
             # VJudge 专属后缀 + 兼容旧 share-card.png
             _sc_vjudge_path = out_dir / "share-card_vjudge.png"
