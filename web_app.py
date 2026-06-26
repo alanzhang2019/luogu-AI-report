@@ -248,8 +248,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.10.0.15"
-APP_VERSION_BUILD = "20260626_v3p10p0p15_vjudge_r_link_fix"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.10.0.16"
+APP_VERSION_BUILD = "20260626_v3p10p0p16_vjudge_r_link_abs"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -574,13 +574,24 @@ def api_reports_vjudge(short_id: str):
                 remain_txt = f"约 {remain_min // 60} 小时 {remain_min % 60} 分钟后可重新生成"
             except Exception:
                 remain_txt = "明天再来生成新报告"
+            # v3.10.0.16 · 规范化 html 路径: VJudge 入队时写的是
+            # "reports/<dir>/report.html"(无前导 /), 而 _report_url() 写的是
+            # "/reports/<dir>/report.html?v=..."(有前导 /). 限流页直接渲染该
+            # 字段作为 <a href> 时, 没前导 / 会导致相对路径解析, 浏览器从
+            # "/api/reports/vjudge/<uid>" 跳到
+            # "/api/reports/vjudge/reports/<dir>/report.html" -> 404.
+            # 这里统一加前导 /, 并剥掉查询参数 ?v=... 以便 <a target="_blank">.
+            _vj_html = (existing.get("html") or "").split("?", 1)[0].strip()
+            if _vj_html and not _vj_html.startswith("/") and not _vj_html.startswith("http"):
+                _vj_html = "/" + _vj_html
+            vjudge_html_url = _vj_html or url_for("student_me", short_id=luogu_uid)
             return render_template_string(
                 VJUDGE_RATE_LIMITED_HTML,
                 luogu_uid=luogu_uid,
                 remain_txt=remain_txt,
                 me_url=url_for("student_me", short_id=luogu_uid),
                 task_id=existing.get("id") or "",
-                vjudge_html_url=existing.get("html") or url_for("student_me", short_id=luogu_uid),
+                vjudge_html_url=vjudge_html_url,
             ), 429
     except Exception as _rate_e:
         app.logger.warning(f"[vjudge 24h 限流] 检查失败, 放行: {_rate_e}")
