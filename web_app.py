@@ -248,8 +248,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.10.0.14"
-APP_VERSION_BUILD = "20260625_v3p10p0p14_vjudge_sr_dict_fix"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.10.0.15"
+APP_VERSION_BUILD = "20260626_v3p10p0p15_vjudge_r_link_fix"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -580,6 +580,7 @@ def api_reports_vjudge(short_id: str):
                 remain_txt=remain_txt,
                 me_url=url_for("student_me", short_id=luogu_uid),
                 task_id=existing.get("id") or "",
+                vjudge_html_url=existing.get("html") or url_for("student_me", short_id=luogu_uid),
             ), 429
     except Exception as _rate_e:
         app.logger.warning(f"[vjudge 24h 限流] 检查失败, 放行: {_rate_e}")
@@ -19242,7 +19243,7 @@ VJUDGE_RATE_LIMITED_HTML = """
         </div>
         <div class="mt-6 flex flex-col gap-2">
             <a href="{{ me_url }}" class="app-btn app-btn-primary">📊 返回学员中心看现有报告</a>
-            <a href="/me/{{ luogu_uid }}/r?exam_type=vjudge" class="app-btn app-btn-secondary">🌐 直接看 VJudge 报告</a>
+            <a href="{{ vjudge_html_url }}" target="_blank" class="app-btn app-btn-secondary">🌐 直接看 VJudge 报告</a>
             <a href="/" class="app-link text-xs">← 返回首页</a>
         </div>
         <p class="mt-4 text-[11px] text-gray-400">Task ID: {{ task_id[:8] }}...</p>
