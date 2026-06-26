@@ -64,15 +64,19 @@ def _get_conn() -> sqlite3.Connection:
     # · check_same_thread=False: Flask 跨线程访问同一连接
     # · busy_timeout=10000:  写锁被占时最多等 10s，而不是立刻抛 SQLITE_BUSY
     # · journal_mode=WAL:     读写并发不互斥，readers 不阻塞 writer
-    # · foreign_keys=ON:      让 _admin_students 等子模块的 FK 约束真正生效
+    # v3.10.0 · 改为 foreign_keys=OFF:旧库 v3.9 迁移到 v3.10.0 时,students 表被 RENAME 又 DROP,
+    #             依赖表(student_vjudge_data 等)的 FK 可能还指向已不存在的
+    #             students__v3p9_backup,导致 "no such table" 错误。SQLite 没有
+    #             ALTER TABLE ... ALTER FK,只能重建表才能修。本次只关 FK 校验,
+    #             业务逻辑不受影响(查询都是显式 JOIN/IN)。
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
-        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA foreign_keys = OFF")
     except Exception:
-        # WAL 在某些只读 FS / 网络盘下不可用，失败时降级回默认（不致命）
+        # WAL 在某些只读 FS / 网络盘下不可用,失败时降级回默认（不致命）
         pass
     return conn
 
@@ -134,17 +138,30 @@ def init_db():
     """)
 
     # ---- 2. v2 学员档案 ----
+    # v3.10.0 · 邮箱注册改造:
+    #   - luogu_uid: 从 NOT NULL 改可空(老学员保留,新学员不填)
+    #   - email: 唯一登录账号
+    #   - short_id: 8 位随机 ID,用于 /me/<x> URL 隐藏邮箱
+    #   - password_hash: BCrypt 哈希
     conn.execute("""
         CREATE TABLE IF NOT EXISTS students (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            luogu_uid   TEXT UNIQUE NOT NULL,
-            real_name   TEXT,
-            school      TEXT,
-            grade       TEXT,
-            is_minor    BOOLEAN NOT NULL DEFAULT 0,
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            luogu_uid       TEXT UNIQUE,                  -- v3.10.0 · 可空(已废弃)
+            email           TEXT UNIQUE,                  -- v3.10.0 · 新主键(登录账号)
+            short_id        TEXT UNIQUE,                  -- v3.10.0 · 8 位短 ID(URL 用)
+            password_hash   TEXT,                         -- v3.10.0 · BCrypt 哈希
+            real_name       TEXT,
+            school          TEXT,
+            grade           TEXT,
+            is_minor        BOOLEAN NOT NULL DEFAULT 0,
             guardian_consent_at  DATETIME,
-            note        TEXT,
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            note            TEXT,
+            city            TEXT,
+            province        TEXT,
+            gender          TEXT,
+            birth_date      TEXT,
+            registered_via  TEXT DEFAULT 'admin',
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.execute("""
@@ -415,8 +432,1152 @@ def init_db():
     if added:
         print(f"[task_store] auto-added columns: {added}")
 
+    # ---- 5. v3.10.0 · 邮箱注册改造 ----
+    #   老 students 表有 luogu_uid NOT NULL,新学员不再填 → 把 NOT NULL 去掉
+    #   已有学员补 short_id(email 用 placeholder),luogu_uid 保留供迁移期引用
+    _migrate_students_v3100(conn)
+
     conn.commit()
     conn.close()
+
+
+def _migrate_students_v3100(conn: sqlite3.Connection) -> None:
+    """v3.10.0 · students 表邮箱化迁移
+
+    1. luogu_uid NOT NULL → 可空(老数据保留)
+    2. 缺 email / short_id / password_hash / city / province / gender /
+       birth_date / registered_via 列则补(防御老 schema)
+    3. 给所有已存在的学员分配 short_id(8 位),email 置为
+       legacy-<short_id>@noemail.local(标记无可用邮箱)
+    """
+    import secrets
+    import string
+
+    # 0) 防御:上次迁移失败可能残留 students__v3p9_backup 备份表,先清掉
+    try:
+        conn.execute("DROP TABLE IF EXISTS students__v3p9_backup")
+    except Exception:
+        pass
+
+    # 1) 检查老 schema 是否是 NOT NULL
+    cols = conn.execute("PRAGMA table_info(students)").fetchall()
+    col_names = {c[1]: c for c in cols}
+    has_luogu_notnull = False
+    for c in cols:
+        if c[1] == "luogu_uid" and c[3] == 1:  # notnull=1
+            has_luogu_notnull = True
+            break
+
+    if has_luogu_notnull:
+        # SQLite 不支持直接改 NOT NULL,要重建表
+        # v3.10.0 · 关键修复:必须在 foreign_keys=ON 状态下 RENAME,这样依赖表(student_vjudge_data
+        # 等)的 FK 引用会自动从 students__v3p9_backup 更新到新 students 表。否则 DROP 备份表后,
+        # 任何对依赖表的 DELETE/INSERT/UPDATE 都会报"no such table: main.students__v3p9_backup"。
+        print("[v3.10.0] students.luogu_uid 是 NOT NULL,执行表重建…")
+        # 先确保 foreign_keys=ON(让 RENAME 自动更新依赖表的 FK)
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("ALTER TABLE students RENAME TO students__v3p9_backup")
+        # 新表(无 NOT NULL + 新字段)
+        conn.execute("""
+            CREATE TABLE students (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                luogu_uid       TEXT UNIQUE,
+                email           TEXT UNIQUE,
+                short_id        TEXT UNIQUE,
+                password_hash   TEXT,
+                real_name       TEXT,
+                school          TEXT,
+                grade           TEXT,
+                is_minor        BOOLEAN NOT NULL DEFAULT 0,
+                guardian_consent_at  DATETIME,
+                note            TEXT,
+                city            TEXT,
+                province        TEXT,
+                gender          TEXT,
+                birth_date      TEXT,
+                registered_via  TEXT DEFAULT 'admin',
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # 复制老数据(补默认值)
+        conn.execute("""
+            INSERT INTO students
+              (id, luogu_uid, real_name, school, grade, is_minor,
+               guardian_consent_at, note, city, province, gender,
+               birth_date, registered_via, created_at)
+            SELECT id, luogu_uid, real_name, school, grade, is_minor,
+                   guardian_consent_at, note,
+                   COALESCE(city, ''), COALESCE(province, ''), COALESCE(gender, ''),
+                   COALESCE(birth_date, ''), COALESCE(registered_via, 'legacy'),
+                   COALESCE(created_at, CURRENT_TIMESTAMP)
+            FROM students__v3p9_backup
+        """)
+        conn.execute("DROP TABLE students__v3p9_backup")
+        print("[v3.10.0] students 表重建完成")
+
+    # 2) 防御式 ADD COLUMN(如果新表已用新 schema,这里都是 no-op)
+    for col, decl in [
+        ("email",          "TEXT UNIQUE"),
+        ("short_id",       "TEXT UNIQUE"),
+        ("password_hash",  "TEXT"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE students ADD COLUMN {col} {decl}")
+        except Exception:
+            pass  # 已存在,忽略
+
+    # 3) 给缺 short_id / email 的学员补 short_id
+    rows = conn.execute("SELECT id FROM students WHERE short_id IS NULL OR short_id = ''").fetchall()
+    if rows:
+        alphabet = string.ascii_lowercase + string.digits
+        existing = {r[0] for r in conn.execute("SELECT short_id FROM students WHERE short_id IS NOT NULL").fetchall()}
+        for (sid,) in rows:
+            # 8 位,排除易混淆的 0/o/1/l
+            pool = "abcdefghijkmnpqrstuvwxyz23456789"
+            for _ in range(20):
+                short_id = "".join(secrets.choice(pool) for _ in range(8))
+                if short_id not in existing:
+                    break
+            else:
+                short_id = "u" + secrets.token_hex(3)  # 兜底
+            email = f"legacy-{short_id}@noemail.local"
+            conn.execute(
+                "UPDATE students SET short_id = ?, email = ? WHERE id = ?",
+                (short_id, email, sid),
+            )
+            existing.add(short_id)
+        print(f"[v3.10.0] backfilled short_id/email for {len(rows)} legacy students")
+
+
+# ============================================================
+# v3.9.73 · AtCoder 跨平台数据（5 张表 + students.atcoder_handle）
+# 原则: luogu_uid 永远主键,AtCoder 是附加属性
+# 任何环节失败都不阻塞洛谷主报告生成
+# ============================================================
+
+def init_atcoder_tables() -> None:
+    """v3.9.73 · 幂等创建 AtCoder 跨平台数据 5 张表。
+
+    升级路径:
+      v3.9.72 → v3.9.73: students 加 atcoder_handle 列 +
+        student_atcoder_data + student_atcoder_ac_problems +
+        student_atcoder_recent_subs + atcoder_fetch_tasks
+
+    全部用 IF NOT EXISTS,反复执行不报错。
+    """
+    conn = _get_conn()
+    try:
+        # ---- 1. students.atcoder_handle 软引用(可空) ----
+        # v3.9.73 · 轻量级引用,1:1
+        # 留空 = 未绑,非空 = 已绑(唯一约束)
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(students)")}
+        if "atcoder_handle" not in cols:
+            conn.execute("ALTER TABLE students ADD COLUMN atcoder_handle TEXT DEFAULT ''")
+        # 唯一索引(忽略空串,允许多个学生都不绑)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_students_atcoder_handle
+                ON students(atcoder_handle) WHERE atcoder_handle != ''
+        """)
+
+        # ---- 2. AtCoder 抓取快照(1:1 with student) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_atcoder_data (
+                student_id           INTEGER PRIMARY KEY REFERENCES students(id),
+                handle               TEXT NOT NULL,
+                rating               INTEGER DEFAULT 0,
+                highest_rating       INTEGER DEFAULT 0,
+                rank                 TEXT DEFAULT '',
+                contests_count       INTEGER DEFAULT 0,
+                ac_problems_count    INTEGER DEFAULT 0,
+                hard_ac_count        INTEGER DEFAULT 0,
+                recent_contest_rate  INTEGER DEFAULT 0,
+                first_event_at       DATETIME,
+                last_event_at        DATETIME,
+                last_fetched_at      DATETIME,
+                fetch_status         TEXT DEFAULT 'pending',
+                fetch_error          TEXT DEFAULT '',
+                raw_html_cache_path  TEXT DEFAULT '',
+                link_status          TEXT DEFAULT 'pending',
+                updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ---- 3. AC 难题清单(1:N with student) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_atcoder_ac_problems (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                contest_id   TEXT NOT NULL,
+                problem_id   TEXT NOT NULL,
+                title        TEXT DEFAULT '',
+                difficulty   INTEGER DEFAULT 0,
+                language     TEXT DEFAULT '',
+                solved_at    DATETIME,
+                UNIQUE(student_id, contest_id, problem_id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ac_problems_student
+                ON student_atcoder_ac_problems(student_id)
+        """)
+
+        # ---- 4. 最近提交(1:N,限 20 条/学生,用于代码 review) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_atcoder_recent_subs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id      INTEGER NOT NULL REFERENCES students(id),
+                contest_id      TEXT NOT NULL,
+                problem_id      TEXT NOT NULL,
+                result          TEXT NOT NULL,
+                language        TEXT DEFAULT '',
+                submit_time     DATETIME,
+                source_url      TEXT DEFAULT '',
+                UNIQUE(student_id, contest_id, problem_id, submit_time)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ac_recent_subs_student
+                ON student_atcoder_recent_subs(student_id, submit_time DESC)
+        """)
+
+        # ---- 5. AtCoder 抓取异步任务跟踪(与 tasks 表同模式) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS atcoder_fetch_tasks (
+                task_id      TEXT PRIMARY KEY,
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                handle       TEXT NOT NULL,
+                status       TEXT DEFAULT 'pending',
+                trigger      TEXT DEFAULT 'user_link',
+                retry_count  INTEGER DEFAULT 0,
+                error_msg    TEXT DEFAULT '',
+                started_at   DATETIME,
+                finished_at  DATETIME,
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ac_tasks_student
+                ON atcoder_fetch_tasks(student_id, created_at DESC)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ac_tasks_status
+                ON atcoder_fetch_tasks(status, started_at)
+        """)
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recover_orphan_atcoder_tasks() -> int:
+    """v3.9.73 · 容器启动时清理残留: 状态为 pending/fetching 的任务
+    视为孤儿(进程崩溃或容器重启),置为 failed,等下次手动触发重抓。
+
+    返回清理条数。"""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            UPDATE atcoder_fetch_tasks
+            SET status='failed',
+                error_msg='容器重启,任务丢弃,等下次手动刷新',
+                finished_at=CURRENT_TIMESTAMP
+            WHERE status IN ('pending', 'fetching')
+        """)
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def atcoder_link_handle(luogu_uid: str, handle: str) -> dict:
+    """v3.9.73 · 绑 AtCoder handle。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+
+    成功: {'ok': True, 'student_id': int, 'handle': str}
+    失败: {'ok': False, 'error': str, 'code': 'invalid_format'|'not_found'|'already_bound'}
+    """
+    import re
+    if not re.match(r"^[a-zA-Z0-9_]{3,20}$", handle):
+        return {"ok": False, "error": "handle 格式不对,3-20 位字母数字下划线", "code": "invalid_format"}
+
+    conn = _get_conn()
+    try:
+        # 查 student
+        row = conn.execute(
+            "SELECT id, atcoder_handle FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": f"洛谷 UID {luogu_uid} 不存在", "code": "luogu_uid_not_found"}
+
+        student_id = row["id"]
+        # UNIQUE 冲突: handle 已被他人绑
+        dup = conn.execute(
+            "SELECT id, luogu_uid FROM students WHERE atcoder_handle=? AND id != ?",
+            (handle, student_id),
+        ).fetchone()
+        if dup:
+            return {
+                "ok": False,
+                "error": f"该 handle 已被其他学员(UID={dup['luogu_uid']})绑定",
+                "code": "already_bound",
+            }
+
+        # 写 handle(覆盖旧值)
+        conn.execute(
+            "UPDATE students SET atcoder_handle=? WHERE id=?", (handle, student_id)
+        )
+        # 清旧 AtCoder 数据(改绑场景)
+        conn.execute("DELETE FROM student_atcoder_data WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM student_atcoder_ac_problems WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM student_atcoder_recent_subs WHERE student_id=?", (student_id,))
+        # 插抓取任务
+        import time
+        task_id = f"AC-{student_id}-{int(time.time() * 1000)}"
+        conn.execute(
+            """INSERT INTO atcoder_fetch_tasks
+               (task_id, student_id, handle, status, trigger, started_at)
+               VALUES (?, ?, ?, 'pending', 'user_link', CURRENT_TIMESTAMP)""",
+            (task_id, student_id, handle),
+        )
+        conn.commit()
+        return {"ok": True, "student_id": student_id, "handle": handle, "task_id": task_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "code": "db_error"}
+    finally:
+        conn.close()
+
+
+def atcoder_pickup_pending_task() -> Optional[dict]:
+    """v3.9.73 · 工作线程调用: 取一个 pending 任务,标 fetching,返回。
+
+    使用 IMMEDIATE 事务避免两个 worker 抢同一任务。
+    返回 None 表示没有待抓任务。"""
+    conn = _get_conn()
+    try:
+        # 先抢: UPDATE ... WHERE status='pending' RETURNING
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("""
+            SELECT task_id, student_id, handle FROM atcoder_fetch_tasks
+            WHERE status='pending'
+            ORDER BY created_at ASC
+            LIMIT 1
+        """).fetchone()
+        if not row:
+            conn.execute("COMMIT")
+            return None
+        conn.execute(
+            "UPDATE atcoder_fetch_tasks SET status='fetching', started_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (row["task_id"],),
+        )
+        conn.execute("COMMIT")
+        return {"task_id": row["task_id"], "student_id": row["student_id"], "handle": row["handle"]}
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return None
+    finally:
+        conn.close()
+
+
+def atcoder_finish_task(task_id: str, status: str, error_msg: str = "") -> None:
+    """v3.9.73 · 工作线程调用: 标记任务完成(ok / failed / rate_limited)。"""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """UPDATE atcoder_fetch_tasks
+               SET status=?, error_msg=?, finished_at=CURRENT_TIMESTAMP
+               WHERE task_id=?""",
+            (status, error_msg, task_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def atcoder_persist_data(student_id: int, handle: str, raw: dict) -> None:
+    """v3.9.73 · 工作线程调用: 把抓取结果落库(student_atcoder_data + ac_problems + recent_subs)。
+
+    raw 字段约定(由 atcoder_fetcher.parse_* 返回):
+        handle, rating, highest_rating, rank, contests_count,
+        ac_problems_count, hard_ac_count, recent_contest_rate,
+        first_event_at, last_event_at, ac_problems[], recent_subs[],
+        fetch_status, fetch_error, raw_html_cache_path
+    """
+    conn = _get_conn()
+    try:
+        # 主表 UPSERT
+        conn.execute("""
+            INSERT INTO student_atcoder_data (
+                student_id, handle, rating, highest_rating, rank,
+                contests_count, ac_problems_count, hard_ac_count,
+                recent_contest_rate, first_event_at, last_event_at,
+                last_fetched_at, fetch_status, fetch_error,
+                raw_html_cache_path, link_status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'ok', CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id) DO UPDATE SET
+                handle=excluded.handle,
+                rating=excluded.rating,
+                highest_rating=excluded.highest_rating,
+                rank=excluded.rank,
+                contests_count=excluded.contests_count,
+                ac_problems_count=excluded.ac_problems_count,
+                hard_ac_count=excluded.hard_ac_count,
+                recent_contest_rate=excluded.recent_contest_rate,
+                first_event_at=excluded.first_event_at,
+                last_event_at=excluded.last_event_at,
+                last_fetched_at=CURRENT_TIMESTAMP,
+                fetch_status=excluded.fetch_status,
+                fetch_error=excluded.fetch_error,
+                raw_html_cache_path=excluded.raw_html_cache_path,
+                link_status='ok',
+                updated_at=CURRENT_TIMESTAMP
+        """, (
+            student_id, handle,
+            raw.get("rating", 0), raw.get("highest_rating", 0), raw.get("rank", ""),
+            raw.get("contests_count", 0), raw.get("ac_problems_count", 0),
+            raw.get("hard_ac_count", 0), raw.get("recent_contest_rate", 0),
+            raw.get("first_event_at"), raw.get("last_event_at"),
+            raw.get("fetch_status", "ok"), raw.get("fetch_error", ""),
+            raw.get("raw_html_cache_path", ""),
+        ))
+
+        # AC 难题: 清旧写新
+        conn.execute("DELETE FROM student_atcoder_ac_problems WHERE student_id=?", (student_id,))
+        for p in raw.get("ac_problems", [])[:200]:  # 限 200 条
+            try:
+                conn.execute("""
+                    INSERT OR IGNORE INTO student_atcoder_ac_problems
+                    (student_id, contest_id, problem_id, title, difficulty, language, solved_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    student_id,
+                    p.get("contest_id", ""),
+                    p.get("problem_id", ""),
+                    p.get("title", ""),
+                    int(p.get("difficulty", 0) or 0),
+                    p.get("language", ""),
+                    p.get("solved_at"),
+                ))
+            except Exception:
+                pass
+
+        # 最近提交: 清旧写新
+        conn.execute("DELETE FROM student_atcoder_recent_subs WHERE student_id=?", (student_id,))
+        for s in raw.get("recent_subs", [])[:20]:  # 限 20 条
+            try:
+                conn.execute("""
+                    INSERT OR IGNORE INTO student_atcoder_recent_subs
+                    (student_id, contest_id, problem_id, result, language, submit_time, source_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    student_id,
+                    s.get("contest_id", ""),
+                    s.get("problem_id", ""),
+                    s.get("result", ""),
+                    s.get("language", ""),
+                    s.get("submit_time"),
+                    s.get("source_url", ""),
+                ))
+            except Exception:
+                pass
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def atcoder_mark_failed(student_id: int, error_msg: str, status: str = "failed") -> None:
+    """v3.9.73 · 工作线程调用: 抓取失败时写状态(不删旧数据,留个底)。"""
+    conn = _get_conn()
+    try:
+        conn.execute("""
+            INSERT INTO student_atcoder_data (
+                student_id, handle, link_status, fetch_status, fetch_error, updated_at
+            ) VALUES (?, '', ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id) DO UPDATE SET
+                link_status=excluded.link_status,
+                fetch_status=excluded.fetch_status,
+                fetch_error=excluded.fetch_error,
+                updated_at=CURRENT_TIMESTAMP
+        """, (student_id, status, status, error_msg))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_atcoder_context(luogu_uid: str) -> dict:
+    """v3.9.73 · 给报告 AI 用的只读接口。返回 dict,无数据时 link_status='unlinked'。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+    """
+    empty = {
+        "handle": "", "rating": 0, "highest_rating": 0, "rank": "", "rank_zh": "",
+        "contests_count": 0, "ac_problems_count": 0, "hard_ac_count": 0,
+        "recent_contest_rate": 0, "link_status": "unlinked",
+        "last_fetched_at": "", "fetch_error": "",
+        "ac_highlights": [], "recent_subs": [],
+    }
+    conn = _get_conn()
+    try:
+        srow = conn.execute(
+            "SELECT id, atcoder_handle FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow or not srow["atcoder_handle"]:
+            return empty
+
+        sid = srow["id"]
+        d = conn.execute(
+            "SELECT * FROM student_atcoder_data WHERE student_id=?", (sid,)
+        ).fetchone()
+        if not d:
+            return {**empty, "handle": srow["atcoder_handle"], "link_status": "pending"}
+
+        # 派生: 中文段位名
+        rank_zh_map = {
+            "gray": "灰色", "brown": "茶色", "green": "绿色", "cyan": "青色",
+            "blue": "蓝色", "yellow": "黄色", "orange": "橙色", "red": "红色",
+        }
+        # 7d 陈旧判断
+        link_status = d["link_status"] or "ok"
+        try:
+            from datetime import datetime, timedelta
+            last = datetime.fromisoformat(d["last_fetched_at"]) if d["last_fetched_at"] else None
+            if link_status == "ok" and last and (datetime.now() - last) > timedelta(days=7):
+                link_status = "stale"
+        except Exception:
+            pass
+
+        # AC 高光(取 8 条,按难度倒序)
+        highlights = [dict(r) for r in conn.execute("""
+            SELECT contest_id, problem_id, title, difficulty, language
+            FROM student_atcoder_ac_problems
+            WHERE student_id=?
+            ORDER BY difficulty DESC, solved_at DESC
+            LIMIT 8
+        """, (sid,)).fetchall()]
+
+        # 最近提交(取 10 条)
+        subs = [dict(r) for r in conn.execute("""
+            SELECT contest_id, problem_id, result, language, source_url
+            FROM student_atcoder_recent_subs
+            WHERE student_id=?
+            ORDER BY submit_time DESC
+            LIMIT 10
+        """, (sid,)).fetchall()]
+
+        return {
+            "handle": d["handle"] or srow["atcoder_handle"],
+            "rating": d["rating"] or 0,
+            "highest_rating": d["highest_rating"] or 0,
+            "rank": d["rank"] or "",
+            "rank_zh": rank_zh_map.get(d["rank"] or "", ""),
+            "contests_count": d["contests_count"] or 0,
+            "ac_problems_count": d["ac_problems_count"] or 0,
+            "hard_ac_count": d["hard_ac_count"] or 0,
+            "recent_contest_rate": d["recent_contest_rate"] or 0,
+            "link_status": link_status,
+            "last_fetched_at": d["last_fetched_at"] or "",
+            "fetch_error": d["fetch_error"] or "",
+            "ac_highlights": highlights,
+            "recent_subs": subs,
+        }
+    finally:
+        conn.close()
+
+
+def atcoder_should_refresh(luogu_uid: str) -> bool:
+    """v3.9.73 · 报告生成时判断: 是否需要触发后台刷新(陈旧/失败/限流)。"""
+    ctx = get_atcoder_context(luogu_uid)
+    return ctx["link_status"] in ("stale", "failed", "rate_limited", "pending")
+
+
+def atcoder_enqueue_refresh(luogu_uid: str, trigger: str = "report_gen") -> Optional[str]:
+    """v3.9.73 · 报告生成时调用: 若陈旧则入队一个刷新任务,返回 task_id;否则 None。
+
+    不 await,不等结果,直接 return。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+    """
+    conn = _get_conn()
+    try:
+        srow = conn.execute(
+            "SELECT id, atcoder_handle FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow or not srow["atcoder_handle"]:
+            return None
+        # 节流: 1h 内已有进行中任务就不重复入队
+        existing = conn.execute("""
+            SELECT task_id FROM atcoder_fetch_tasks
+            WHERE student_id=? AND status IN ('pending', 'fetching')
+              AND created_at > datetime('now', '-1 hour')
+        """, (srow["id"],)).fetchone()
+        if existing:
+            return None
+        import time
+        task_id = f"AC-R-{srow['id']}-{int(time.time() * 1000)}"
+        conn.execute("""
+            INSERT INTO atcoder_fetch_tasks
+            (task_id, student_id, handle, status, trigger, started_at)
+            VALUES (?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP)
+        """, (task_id, srow["id"], srow["atcoder_handle"], trigger))
+        conn.commit()
+        return task_id
+    finally:
+        conn.close()
+
+
+# ============================================================
+# v3.9.74 · VJudge 跨平台数据(取代 AtCoder,只抓公开数据)
+# 设计原则:
+#   - handle(username) 软引用(可空)+ 唯一约束
+#   - 4 张表: 主页快照 + 已解决题 + 抓取任务 + OJ/标签分布
+#   - 复用 atcoder 字段语义(students.<platform>_handle 是惯例)
+# ============================================================
+
+def init_vjudge_tables() -> None:
+    """v3.9.74 · 幂等创建 VJudge 跨平台数据 4 张表。
+
+    升级路径:
+      v3.9.73 → v3.9.74: students 加 vjudge_username 列 +
+        student_vjudge_data + student_vjudge_solved +
+        student_vjudge_fetch_tasks + student_vjudge_oj_stats
+
+    全部用 IF NOT EXISTS,反复执行不报错。
+    """
+    conn = _get_conn()
+    try:
+        # ---- 1. students.vjudge_username 软引用(可空) ----
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(students)")}
+        if "vjudge_username" not in cols:
+            conn.execute("ALTER TABLE students ADD COLUMN vjudge_username TEXT DEFAULT ''")
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_students_vjudge_username
+                ON students(vjudge_username) WHERE vjudge_username != ''
+        """)
+
+        # ---- 2. VJudge 主页快照(1:1 with student) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_vjudge_data (
+                student_id           INTEGER PRIMARY KEY REFERENCES students(id),
+                username             TEXT NOT NULL,
+                nick                 TEXT DEFAULT '',
+                total_submissions    INTEGER DEFAULT 0,
+                total_ac             INTEGER DEFAULT 0,
+                total_wa             INTEGER DEFAULT 0,
+                total_tle            INTEGER DEFAULT 0,
+                total_re             INTEGER DEFAULT 0,
+                total_ce             INTEGER DEFAULT 0,
+                ac_rate              REAL DEFAULT 0.0,
+                solved_count         INTEGER DEFAULT 0,
+                register_time        DATETIME,
+                last_fetched_at      DATETIME,
+                fetch_status         TEXT DEFAULT 'pending',
+                fetch_error          TEXT DEFAULT '',
+                link_status          TEXT DEFAULT 'pending',
+                updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ---- 3. 已解决题列表(1:N with student,单次最多 200 条) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_vjudge_solved (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                oj_source    TEXT NOT NULL,
+                problem_id   TEXT NOT NULL,
+                title        TEXT DEFAULT '',
+                ac_time      DATETIME,
+                UNIQUE(student_id, oj_source, problem_id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vj_solved_student
+                ON student_vjudge_solved(student_id, ac_time DESC)
+        """)
+
+        # ---- 4. VJudge 抓取任务队列 ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_vjudge_fetch_tasks (
+                task_id      TEXT PRIMARY KEY,
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                username     TEXT NOT NULL,
+                status       TEXT DEFAULT 'pending',
+                trigger      TEXT DEFAULT 'user_link',
+                retry_count  INTEGER DEFAULT 0,
+                error_msg    TEXT DEFAULT '',
+                started_at   DATETIME,
+                finished_at  DATETIME,
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # v3.10.0.4 · 进度信息列(迁移:已有表加列)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(student_vjudge_fetch_tasks)").fetchall()]
+        if "progress_msg" not in cols:
+            conn.execute("ALTER TABLE student_vjudge_fetch_tasks ADD COLUMN progress_msg TEXT DEFAULT ''")
+        if "progress_step" not in cols:
+            conn.execute("ALTER TABLE student_vjudge_fetch_tasks ADD COLUMN progress_step INTEGER DEFAULT 0")
+        if "progress_total" not in cols:
+            conn.execute("ALTER TABLE student_vjudge_fetch_tasks ADD COLUMN progress_total INTEGER DEFAULT 0")
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vj_tasks_student
+                ON student_vjudge_fetch_tasks(student_id, created_at DESC)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_vj_tasks_status
+                ON student_vjudge_fetch_tasks(status, started_at)
+        """)
+
+        # ---- 5. 各 OJ 分布统计(派生,加速展示) ----
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_vjudge_oj_stats (
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                oj_source    TEXT NOT NULL,
+                solved_count INTEGER DEFAULT 0,
+                PRIMARY KEY (student_id, oj_source)
+            )
+        """)
+
+        # ---- 6. v3.11 · 学员主动上传的历史代码(书签导出 / zip / JSON)
+        # 数据来源:学员本机书签抓取,合规(用户主动提供)
+        # 用途:AI 报告"代码维度"分析(算法/风格/复杂度/改进建议)
+        # 与 student_vjudge_solved 区别:本表存的是完整源码,而非只 OJ+题号
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS student_imported_codes (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id   INTEGER NOT NULL REFERENCES students(id),
+                problem_id   TEXT DEFAULT '',
+                title        TEXT DEFAULT '',
+                lang         TEXT DEFAULT '',
+                verdict      TEXT DEFAULT '',
+                time_ms      INTEGER DEFAULT 0,
+                memory_kb    INTEGER DEFAULT 0,
+                source       TEXT DEFAULT '',   -- bookmarklet / json_upload / zip_upload / paste
+                source_code  TEXT DEFAULT '',
+                ac_time      DATETIME,
+                imported_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(student_id, source, problem_id, ac_time)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_imp_student
+                ON student_imported_codes(student_id, imported_at DESC)
+        """)
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recover_orphan_vjudge_tasks() -> int:
+    """v3.9.74 · 容器启动时清理残留的 VJudge 抓取任务(pending/fetching)。"""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            UPDATE student_vjudge_fetch_tasks
+            SET status='failed',
+                error_msg='容器重启,任务丢弃,等下次手动刷新',
+                finished_at=CURRENT_TIMESTAMP
+            WHERE status IN ('pending', 'fetching')
+        """)
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def vjudge_link_username(luogu_uid: str, username: str) -> dict:
+    """v3.9.74 · 绑 VJudge username。
+
+    v3.10.0 · 参数 luogu_uid 可传 luogu_uid 或 short_id(优先用 short_id 查,找不到 fallback)
+
+    返回 dict:
+      ok: bool
+      error: str(失败原因)
+      already_bound: bool(该 username 已被其他学员绑定)
+    """
+    if not username or not username.strip():
+        return {"ok": False, "error": "username 为空"}
+    username = username.strip()
+    # 简单合法性: VJudge username 允许字母/数字/_/-, 3-30 字符
+    import re
+    if not re.match(r"^[A-Za-z0-9_\-]{3,30}$", username):
+        return {"ok": False, "error": "username 格式不合法(3-30 字母/数字/_/-)"}
+
+    conn = _get_conn()
+    try:
+        # v3.10.0 · 兼容 short_id / luogu_uid
+        srow = conn.execute(
+            "SELECT id, luogu_uid, vjudge_username FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow:
+            return {"ok": False, "error": f"学员 {luogu_uid} 不存在"}
+
+        # 是否已被其他学员绑
+        dup = conn.execute(
+            "SELECT luogu_uid FROM students WHERE vjudge_username=? AND id != ?",
+            (username, srow["id"])
+        ).fetchone()
+        if dup:
+            return {"ok": False, "error": f"VJudge 用户 {username} 已被其他学员绑定",
+                    "already_bound": True, "ok": False}
+
+        # 写入
+        conn.execute(
+            "UPDATE students SET vjudge_username=? WHERE id=?", (username, srow["id"])
+        )
+        # 删除旧快照(如果有),强制重新抓
+        conn.execute("DELETE FROM student_vjudge_data WHERE student_id=?", (srow["id"],))
+        conn.execute("DELETE FROM student_vjudge_solved WHERE student_id=?", (srow["id"],))
+        conn.execute("DELETE FROM student_vjudge_oj_stats WHERE student_id=?", (srow["id"],))
+        conn.commit()
+        return {"ok": True, "student_id": srow["id"], "username": username}
+    finally:
+        conn.close()
+
+
+def vjudge_unlink(luogu_uid: str) -> bool:
+    """v3.9.74 · 解绑 VJudge。返回是否成功。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+    """
+    conn = _get_conn()
+    try:
+        srow = conn.execute(
+            "SELECT id FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow:
+            return False
+        sid = srow["id"]
+        conn.execute("UPDATE students SET vjudge_username='' WHERE id=?", (sid,))
+        conn.execute("DELETE FROM student_vjudge_data WHERE student_id=?", (sid,))
+        conn.execute("DELETE FROM student_vjudge_solved WHERE student_id=?", (sid,))
+        conn.execute("DELETE FROM student_vjudge_oj_stats WHERE student_id=?", (sid,))
+        # 未完成任务也清掉
+        conn.execute("""
+            DELETE FROM student_vjudge_fetch_tasks
+            WHERE student_id=? AND status IN ('pending', 'fetching')
+        """, (sid,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def vjudge_enqueue_refresh(luogu_uid: str, trigger: str = "report_gen") -> Optional[str]:
+    """v3.9.74 · 入队抓取任务(节流: 1h 内已有进行中任务则跳过)。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+    """
+    conn = _get_conn()
+    try:
+        srow = conn.execute(
+            "SELECT id, vjudge_username FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow or not srow["vjudge_username"]:
+            return None
+        sid = srow["id"]
+        existing = conn.execute("""
+            SELECT task_id FROM student_vjudge_fetch_tasks
+            WHERE student_id=? AND status IN ('pending', 'fetching')
+              AND created_at > datetime('now', '-1 hour')
+            LIMIT 1
+        """, (sid,)).fetchone()
+        if existing:
+            return None
+        import time
+        task_id = f"VJ-R-{sid}-{int(time.time() * 1000)}"
+        # v3.10.0.13 · 入队即写 progress=1/100 + started_at, 避免前端轮询看到 0/0
+        # (前 v3.10.0.4 把 progress 写到 0/3 但 template 渲染时 0/0 显示"准备中",
+        #  30s 内 step 没动过就会弹"卡住"提示,其实 worker 还没 pickup)
+        # 现在 progress_total=100, 完整生命周期: 1→10→15→20→45→65→85→95→98→100
+        conn.execute("""
+            INSERT INTO student_vjudge_fetch_tasks
+            (task_id, student_id, username, status, trigger, started_at,
+             progress_step, progress_total, progress_msg)
+            VALUES (?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP,
+                    1, 100, '⏳ 已入队,等待 worker pickup…')
+        """, (task_id, sid, srow["vjudge_username"], trigger))
+        # v3.10.0.4 · 同步把 student_vjudge_data 标为 pending
+        # 否则前端模板一直显示"已同步"卡片,看不到进度条
+        conn.execute("""
+            UPDATE student_vjudge_data
+            SET link_status='pending', updated_at=CURRENT_TIMESTAMP
+            WHERE student_id=?
+        """, (sid,))
+        conn.commit()
+        return task_id
+    finally:
+        conn.close()
+
+
+def vjudge_pickup_pending_task() -> Optional[dict]:
+    """v3.9.74 · worker 拉取一个 pending 任务(原子,mark 为 fetching)。
+
+    返回 dict 或 None:
+      task_id, student_id, username
+    """
+    conn = _get_conn()
+    try:
+        # 先找最早 pending
+        row = conn.execute("""
+            SELECT task_id, student_id, username, trigger, retry_count
+            FROM student_vjudge_fetch_tasks
+            WHERE status='pending'
+            ORDER BY created_at ASC
+            LIMIT 1
+        """).fetchone()
+        if not row:
+            return None
+        # 原子抢锁
+        # v3.10.0.13 · pickup 时把 step 推到 10/100, msg 改为"🔄 worker 已拾取"
+        # (前 v3.10.0.4 写到 0/3 会让前端 30s 内看不到 step 推进)
+        cur = conn.execute("""
+            UPDATE student_vjudge_fetch_tasks
+            SET status='fetching', started_at=CURRENT_TIMESTAMP,
+                progress_step=10, progress_total=100,
+                progress_msg='🔄 worker 已拾取,准备抓 vjudge.net…'
+            WHERE task_id=? AND status='pending'
+        """, (row["task_id"],))
+        if cur.rowcount == 0:
+            # 被别的 worker 抢了
+            return None
+        conn.commit()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def vjudge_update_progress(task_id: str, step: int, total: int, msg: str) -> None:
+    """v3.10.0.4 · 更新任务进度(worker 在每一步调用)。
+    step/total 用于前端渲染进度条;msg 是中文描述。
+    """
+    conn = _get_conn()
+    try:
+        conn.execute("""
+            UPDATE student_vjudge_fetch_tasks
+            SET progress_step=?, progress_total=?, progress_msg=?
+            WHERE task_id=?
+        """, (int(step), int(total), str(msg or ""), task_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def vjudge_finish_task(task_id: str, status: str, error_msg: str = "") -> None:
+    """v3.9.74 · 标记任务完成(succeeded/failed/rate_limited)。"""
+    conn = _get_conn()
+    try:
+        conn.execute("""
+            UPDATE student_vjudge_fetch_tasks
+            SET status=?, error_msg=?, finished_at=CURRENT_TIMESTAMP,
+                progress_msg=CASE WHEN ? IN ('succeeded') THEN '完成' ELSE progress_msg END,
+                progress_step=CASE WHEN ? IN ('succeeded') THEN progress_total ELSE progress_step END
+            WHERE task_id=?
+        """, (status, error_msg, status, status, task_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def vjudge_persist_data(student_id: int, username: str, raw: dict) -> None:
+    """v3.9.74 · 抓取成功 → 落库(覆盖旧数据)。"""
+    conn = _get_conn()
+    try:
+        # 1. 主页快照(upsert)
+        conn.execute("""
+            INSERT INTO student_vjudge_data
+            (student_id, username, nick, total_submissions, total_ac,
+             total_wa, total_tle, total_re, total_ce, ac_rate,
+             solved_count, register_time, last_fetched_at,
+             fetch_status, fetch_error, link_status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                    'succeeded', '', 'ok', CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id) DO UPDATE SET
+              username=excluded.username,
+              nick=excluded.nick,
+              total_submissions=excluded.total_submissions,
+              total_ac=excluded.total_ac,
+              total_wa=excluded.total_wa,
+              total_tle=excluded.total_tle,
+              total_re=excluded.total_re,
+              total_ce=excluded.total_ce,
+              ac_rate=excluded.ac_rate,
+              solved_count=excluded.solved_count,
+              register_time=excluded.register_time,
+              last_fetched_at=CURRENT_TIMESTAMP,
+              fetch_status='succeeded',
+              fetch_error='',
+              link_status='ok',
+              updated_at=CURRENT_TIMESTAMP
+        """, (
+            student_id, username,
+            raw.get("nick", ""),
+            int(raw.get("total_submissions", 0) or 0),
+            int(raw.get("total_ac", 0) or 0),
+            int(raw.get("total_wa", 0) or 0),
+            int(raw.get("total_tle", 0) or 0),
+            int(raw.get("total_re", 0) or 0),
+            int(raw.get("total_ce", 0) or 0),
+            float(raw.get("ac_rate", 0.0) or 0.0),
+            int(raw.get("solved_count", 0) or 0),
+            raw.get("register_time") or None,
+        ))
+
+        # 2. 已解决题列表(全量替换)
+        conn.execute("DELETE FROM student_vjudge_solved WHERE student_id=?", (student_id,))
+        solved = raw.get("solved_list") or []
+        for p in solved:
+            conn.execute("""
+                INSERT OR IGNORE INTO student_vjudge_solved
+                (student_id, oj_source, problem_id, title, ac_time)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                student_id,
+                p.get("oj", ""),
+                p.get("problem_id", ""),
+                p.get("title", ""),
+                p.get("ac_time") or None,
+            ))
+
+        # 3. OJ 分布统计
+        conn.execute("DELETE FROM student_vjudge_oj_stats WHERE student_id=?", (student_id,))
+        oj_stats = raw.get("oj_stats") or {}
+        for oj, cnt in oj_stats.items():
+            conn.execute("""
+                INSERT INTO student_vjudge_oj_stats
+                (student_id, oj_source, solved_count)
+                VALUES (?, ?, ?)
+            """, (student_id, oj, int(cnt)))
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def vjudge_mark_failed(student_id: int, error_msg: str, status: str = "failed") -> None:
+    """v3.9.74 · 抓取失败 → 更新 link_status。"""
+    conn = _get_conn()
+    try:
+        # upsert 一条失败记录(避免学生数据全无)
+        conn.execute("""
+            INSERT INTO student_vjudge_data
+            (student_id, username, fetch_status, fetch_error, link_status, updated_at)
+            VALUES (?, '', ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id) DO UPDATE SET
+              fetch_status=excluded.fetch_status,
+              fetch_error=excluded.fetch_error,
+              link_status=excluded.link_status,
+              updated_at=CURRENT_TIMESTAMP
+        """, (student_id, status, error_msg, status))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_vjudge_context(luogu_uid: str) -> dict:
+    """v3.9.74 · 给报告 AI / UI 用的只读接口。返回 dict,无数据时 link_status='unlinked'。
+
+    v3.10.0 · 参数可传 luogu_uid 或 short_id。
+    """
+    empty = {
+        "username": "", "nick": "",
+        "total_submissions": 0, "total_ac": 0,
+        "total_wa": 0, "total_tle": 0, "total_re": 0, "total_ce": 0,
+        "ac_rate": 0.0, "solved_count": 0,
+        "register_time": "", "last_fetched_at": "", "fetch_error": "",
+        "link_status": "unlinked",
+        "recent_solved": [],
+        "oj_stats": [],
+    }
+    conn = _get_conn()
+    try:
+        srow = conn.execute(
+            "SELECT id, vjudge_username FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+            (luogu_uid, luogu_uid),
+        ).fetchone()
+        if not srow or not srow["vjudge_username"]:
+            return empty
+
+        sid = srow["id"]
+        d = conn.execute(
+            "SELECT * FROM student_vjudge_data WHERE student_id=?", (sid,)
+        ).fetchone()
+        if not d:
+            return {**empty, "username": srow["vjudge_username"], "link_status": "pending"}
+
+        # 7d 陈旧判断
+        link_status = d["link_status"] or "ok"
+        if link_status == "ok" and d["last_fetched_at"]:
+            try:
+                from datetime import datetime, timedelta
+                fetched_dt = datetime.fromisoformat(str(d["last_fetched_at"]).replace(" ", "T"))
+                if datetime.now() - fetched_dt > timedelta(days=7):
+                    link_status = "stale"
+            except Exception:
+                pass
+
+        # 最近 5 个已解决题
+        recent = conn.execute("""
+            SELECT oj_source, problem_id, title, ac_time
+            FROM student_vjudge_solved
+            WHERE student_id=?
+            ORDER BY ac_time DESC
+            LIMIT 5
+        """, (sid,)).fetchall()
+        recent_list = []
+        for r in recent:
+            recent_list.append({
+                "oj": r["oj_source"],
+                "problem_id": r["problem_id"],
+                "title": r["title"],
+                "ac_time": r["ac_time"],
+            })
+
+        # OJ 分布
+        oj_rows = conn.execute("""
+            SELECT oj_source, solved_count
+            FROM student_vjudge_oj_stats
+            WHERE student_id=? AND solved_count > 0
+            ORDER BY solved_count DESC
+            LIMIT 10
+        """, (sid,)).fetchall()
+        oj_list = [{"oj": r["oj_source"], "count": r["solved_count"]} for r in oj_rows]
+
+        return {
+            "username": srow["vjudge_username"],
+            "nick": d["nick"] or "",
+            "total_submissions": d["total_submissions"] or 0,
+            "total_ac": d["total_ac"] or 0,
+            "total_wa": d["total_wa"] or 0,
+            "total_tle": d["total_tle"] or 0,
+            "total_re": d["total_re"] or 0,
+            "total_ce": d["total_ce"] or 0,
+            "ac_rate": float(d["ac_rate"] or 0.0),
+            "solved_count": d["solved_count"] or 0,
+            "register_time": d["register_time"] or "",
+            "last_fetched_at": d["last_fetched_at"] or "",
+            "fetch_error": d["fetch_error"] or "",
+            "link_status": link_status,
+            "recent_solved": recent_list,
+            "oj_stats": oj_list,
+        }
+    finally:
+        conn.close()
+
+
+def vjudge_should_refresh(luogu_uid: str) -> bool:
+    """v3.9.74 · 报告生成时判断: 是否需要触发后台刷新(陈旧/失败/限流)。"""
+    ctx = get_vjudge_context(luogu_uid)
+    return ctx.get("link_status") in ("stale", "failed", "rate_limited")
 
 
 # ============================================================
@@ -1214,8 +2375,160 @@ def get_stats() -> dict:
     }
 
 
+# =============================================================================
+# v3.11 · 学员主动上传的代码(书签导出 / zip / JSON / 粘贴)
+# 数据是学员本机抓取自己提交后主动 POST 到服务端,合规
+# =============================================================================
+
+# 单次导入上限:防止学员不小心塞了整个桌面
+_IMPORT_MAX_PER_REQUEST = 2000
+# 单条代码大小上限:50KB
+_IMPORT_MAX_CODE_BYTES = 50 * 1024
+
+
+def import_student_codes(student_id: int, records: list[dict], source: str = "upload") -> dict:
+    """v3.11 · 批量导入学员代码(去重 upsert)。
+    records: [{pid/problem_id, title, lang, verdict, time, memory, code, ac_time?}, ...]
+    source: 'bookmarklet' / 'json_upload' / 'zip_upload' / 'paste'
+    返回: {imported, skipped, total}
+    """
+    if not records:
+        return {"imported": 0, "skipped": 0, "total": 0, "error": "空列表"}
+
+    if len(records) > _IMPORT_MAX_PER_REQUEST:
+        return {
+            "imported": 0, "skipped": 0, "total": len(records),
+            "error": f"单次最多 {_IMPORT_MAX_PER_REQUEST} 条,当前 {len(records)} 条",
+        }
+
+    conn = _get_conn()
+    imported = 0
+    skipped = 0
+    try:
+        for r in records:
+            code = (r.get("code") or r.get("sourceCode") or "").strip()
+            if not code:
+                skipped += 1
+                continue
+            if len(code.encode("utf-8", errors="ignore")) > _IMPORT_MAX_CODE_BYTES:
+                skipped += 1
+                continue
+            try:
+                cur = conn.execute("""
+                    INSERT OR IGNORE INTO student_imported_codes
+                    (student_id, problem_id, title, lang, verdict, time_ms, memory_kb,
+                     source, source_code, ac_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    student_id,
+                    (r.get("pid") or r.get("problem_id") or "").strip()[:50],
+                    (r.get("title") or "").strip()[:200],
+                    (r.get("lang") or "").strip()[:20],
+                    (r.get("verdict") or "").strip()[:20],
+                    int(r.get("time") or r.get("time_ms") or 0),
+                    int(r.get("memory") or r.get("memory_kb") or 0),
+                    source[:20],
+                    code,
+                    r.get("ac_time") or r.get("submitTime") or None,
+                ))
+                # cur.rowcount: 1 = inserted, 0 = ignored (UNIQUE conflict)
+                if cur.rowcount > 0:
+                    imported += 1
+                else:
+                    skipped += 1
+            except Exception:
+                skipped += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"imported": imported, "skipped": skipped, "total": len(records)}
+
+
+def get_imported_codes_summary(student_id: int) -> dict:
+    """v3.11 · 取学员已上传代码的统计摘要(给 UI 卡片用)。"""
+    conn = _get_conn()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM student_imported_codes WHERE student_id=?",
+            (student_id,),
+        ).fetchone()[0]
+        by_lang = dict(conn.execute(
+            """SELECT lang, COUNT(*) FROM student_imported_codes
+               WHERE student_id=? AND lang!='' GROUP BY lang ORDER BY 2 DESC LIMIT 10""",
+            (student_id,),
+        ).fetchall())
+        verdict = dict(conn.execute(
+            """SELECT verdict, COUNT(*) FROM student_imported_codes
+               WHERE student_id=? AND verdict!='' GROUP BY verdict""",
+            (student_id,),
+        ).fetchall())
+        last_import = conn.execute(
+            """SELECT MAX(imported_at) FROM student_imported_codes WHERE student_id=?""",
+            (student_id,),
+        ).fetchone()[0]
+        last_source = conn.execute(
+            """SELECT source, MAX(imported_at) FROM student_imported_codes
+               WHERE student_id=? GROUP BY source ORDER BY 2 DESC LIMIT 1""",
+            (student_id,),
+        ).fetchone()
+        return {
+            "total": total or 0,
+            "by_lang": by_lang,
+            "verdict": verdict,
+            "last_import": last_import or "",
+            "last_source": (last_source[0] if last_source else "") or "",
+        }
+    finally:
+        conn.close()
+
+
+def get_imported_codes_for_report(student_id: int, limit: int = 300) -> list[dict]:
+    """v3.11 · 给 AI 报告喂数据:取最近 N 条上传的代码(精简字段,避免 prompt 爆炸)。"""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            """SELECT problem_id, title, lang, verdict, time_ms, memory_kb, source_code
+               FROM student_imported_codes WHERE student_id=?
+               ORDER BY imported_at DESC LIMIT ?""",
+            (student_id, int(limit)),
+        ).fetchall()
+        out = []
+        for r in rows:
+            code = (r["source_code"] or "")[:3000]  # 单条截 3KB
+            out.append({
+                "pid": r["problem_id"],
+                "title": r["title"],
+                "lang": r["lang"],
+                "verdict": r["verdict"],
+                "code": code,
+            })
+        return out
+    finally:
+        conn.close()
+
+
 # 初始化
 init_db()
+
+
+# v3.9.73 · AtCoder 5 张表(幂等,可重跑)+ 容器启动时清理孤儿任务
+init_atcoder_tables()
+try:
+    _recovered = recover_orphan_atcoder_tasks()
+    if _recovered:
+        print(f"[v3.9.73] atcoder orphan tasks recovered: {_recovered}")
+except Exception as _e:
+    print(f"[v3.9.73] orphan recovery warning: {_e}")
+
+
+# v3.9.74 · VJudge 4 张表(取代 AtCoder,只抓公开数据)+ 清理孤儿任务
+init_vjudge_tables()
+try:
+    _recovered_vj = recover_orphan_vjudge_tasks()
+    if _recovered_vj:
+        print(f"[v3.9.74] vjudge orphan tasks recovered: {_recovered_vj}")
+except Exception as _e:
+    print(f"[v3.9.74] vjudge orphan recovery warning: {_e}")
 
 
 # -- smoke test：验证 v3.5 schema 完整 --
@@ -1237,6 +2550,13 @@ if __name__ == "__main__":
         "student_goals",
         "activation_codes",
         "csp_awards",
+        # v3.9.74 VJudge 4 表
+        "student_vjudge_data",
+        "student_vjudge_solved",
+        "student_vjudge_fetch_tasks",
+        "student_vjudge_oj_stats",
+        # v3.11 学员上传代码
+        "student_imported_codes",
     }
     EXPECTED_TASKS_COLS = {
         # 核心 + v1 → v2

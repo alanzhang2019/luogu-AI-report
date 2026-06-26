@@ -1,4 +1,4 @@
-﻿import os
+import os
 from markupsafe import Markup
 import json
 import uuid
@@ -141,6 +141,21 @@ from task_store import (
     list_tasks,
     get_stats,
     _get_conn,
+    # v3.9.73 · AtCoder 跨平台数据
+    atcoder_link_handle,
+    atcoder_enqueue_refresh,
+    get_atcoder_context,
+    atcoder_should_refresh,
+    # v3.9.74 · VJudge 跨平台数据(取代 AtCoder)
+    vjudge_link_username,
+    vjudge_unlink,
+    vjudge_enqueue_refresh,
+    get_vjudge_context,
+    vjudge_should_refresh,
+    # v3.11 · 学员主动上传的代码(书签导出/zip/JSON/粘贴)
+    import_student_codes,
+    get_imported_codes_summary,
+    get_imported_codes_for_report,
 )
 
 
@@ -233,8 +248,8 @@ def _check_file_visibility(rel_path: str) -> tuple[bool, str]:
 
 # v3.9.6 · 单一权威版本号（git tag、UI 页脚、deploy 健康检查、API /api/version 都读这里）
 # 规则：每次对外发布（commit + push + 云端部署）必须 bump 这里的字符串
-APP_VERSION = "v3.9.72"
-APP_VERSION_BUILD = "20260619_v3p9p72"  # 日期 + 版本号（tag-style，便于一眼定位）
+APP_VERSION = "v3.10.0.13"
+APP_VERSION_BUILD = "20260625_v3p10p0p13_vjudge_progress_smooth"  # 日期 + 版本号（tag-style，便于一眼定位）
 APP_GIT_COMMIT = os.environ.get("LUOGU_GIT_COMMIT", "dev")[:7]
 
 app = Flask(__name__)
@@ -314,6 +329,1161 @@ def _api_version():
         "git": APP_GIT_COMMIT,
         "ts": _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
+# ===========================================================================
+# v3.9.73 · AtCoder 跨平台数据 - 3 个路由
+# ===========================================================================
+# 原则: luogu_uid 永远主键,AtCoder 是附加属性
+# 任何环节失败不阻塞洛谷主报告
+
+@app.route("/link-atcoder", methods=["POST"])
+def _link_atcoder():
+    """v3.9.73 · 绑 AtCoder handle(表单提交)。
+
+    v3.10.0 · form 字段 luogu_uid → short_id(优先用 short_id 查学员,找不到再 fallback)。
+
+    Returns:
+        302 → /me/<short_id> 成功
+        400/409 → /me/<sid>?atcoder_error=...
+    """
+    from flask import request, redirect, url_for, flash
+    short_id = (request.form.get("short_id") or request.form.get("luogu_uid") or "").strip()
+    handle = (request.form.get("handle") or "").strip()
+    if not short_id or not handle:
+        return redirect(f"/me/{short_id or ''}?atcoder_error=missing_params")
+    result = atcoder_link_handle(short_id, handle)
+    if not result.get("ok"):
+        return redirect(f"/me/{short_id}?atcoder_error={result.get('code', 'unknown')}&atcoder_msg={result.get('error', '')}")
+    # 启动后台 worker(单例)
+    try:
+        from atcoder_fetcher import start_atcoder_worker
+        start_atcoder_worker()
+    except Exception as _e:
+        print(f"[v3.9.73] start worker warning: {_e}")
+    return redirect(f"/me/{short_id}?atcoder_linked=1&atcoder_handle={handle}")
+
+
+@app.route("/refresh-atcoder", methods=["POST"])
+def _refresh_atcoder():
+    """v3.9.73 · 手动刷新 AtCoder 数据(1h 节流)。
+
+    触发条件: 报告生成时陈旧 / 用户手动点刷新 / admin 强制
+    """
+    from flask import request, redirect
+    short_id = (request.form.get("short_id") or request.form.get("luogu_uid") or "").strip()
+    if not short_id:
+        return redirect("/?atcoder_error=missing_uid")
+    # 节流: 1h 内已有进行中任务就不重复入队
+    ctx = get_atcoder_context(short_id)
+    from datetime import datetime, timedelta
+    try:
+        last = datetime.fromisoformat(ctx.get("last_fetched_at", ""))
+        if last and (datetime.now() - last) < timedelta(hours=1):
+            return redirect(f"/me/{short_id}?atcoder_throttled=1")
+    except Exception:
+        pass
+    task_id = atcoder_enqueue_refresh(short_id, trigger="user_refresh")
+    if not task_id:
+        return redirect(f"/me/{short_id}?atcoder_error=enqueue_failed")
+    try:
+        from atcoder_fetcher import start_atcoder_worker
+        start_atcoder_worker()
+    except Exception as _e:
+        print(f"[v3.9.73] start worker warning: {_e}")
+    return redirect(f"/me/{short_id}?atcoder_refreshing=1")
+
+
+@app.get("/api/atcoder/<luogu_uid>.json")
+def _api_atcoder(luogu_uid: str):
+    """v3.9.73 · AtCoder 上下文只读 JSON(给报告 AI 拼装/前端 polling 用)。"""
+    import json as _json
+    ctx = get_atcoder_context(luogu_uid)
+    if not ctx.get("handle") and ctx.get("link_status") == "unlinked":
+        return _json.dumps({"linked": False, "link_status": "unlinked"}, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+    out = dict(ctx)
+    out["linked"] = True
+    return _json.dumps(out, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
+# ============================================================
+# v3.9.74 · VJudge 跨平台数据路由(取代 AtCoder,只抓公开数据)
+# ============================================================
+
+@app.route("/link-vjudge", methods=["POST"])
+def _link_vjudge():
+    """v3.9.74 · 绑 VJudge username(表单提交)。
+
+    v3.10.0 · form 字段 luogu_uid → short_id(优先用 short_id 查学员,找不到再 fallback)。
+    """
+    from flask import request, redirect
+    from task_store import vjudge_link_username
+    short_id = (request.form.get("short_id") or request.form.get("luogu_uid") or "").strip()
+    username = (request.form.get("username") or "").strip()
+    if not short_id or not username:
+        return redirect(f"/me/{short_id or ''}?vjudge_error=missing_params")
+    result = vjudge_link_username(short_id, username)
+    # 启动 worker
+    try:
+        from vjudge_fetcher import start_vjudge_worker
+        start_vjudge_worker()
+    except Exception:
+        pass
+    if not result.get("ok"):
+        err = result.get("error", "未知错误")
+        # 透传错误到 URL(简化,避免过长的中文 URL)
+        from urllib.parse import quote
+        return redirect(f"/me/{short_id}?vjudge_error={quote(err[:80])}")
+    return redirect(f"/me/{short_id}?vjudge_linked=1")
+
+
+@app.route("/unlink-vjudge", methods=["POST"])
+def _unlink_vjudge():
+    """v3.9.74 · 解绑 VJudge。
+
+    v3.10.0 · form 字段 luogu_uid → short_id。
+    """
+    from flask import request, redirect
+    from task_store import vjudge_unlink
+    short_id = (request.form.get("short_id") or request.form.get("luogu_uid") or "").strip()
+    if not short_id:
+        return redirect("/")
+    vjudge_unlink(short_id)
+    return redirect(f"/me/{short_id}?vjudge_unlinked=1")
+
+
+@app.route("/refresh-vjudge", methods=["POST"])
+def _refresh_vjudge():
+    """v3.9.74 · 手动刷新 VJudge(入队抓取任务)。
+
+    v3.10.0 · form 字段 luogu_uid → short_id。
+    v3.10.0.4 · 加 ?heavy=1 表深度抓取(Playwright,5-10s,拿 OJ 分布 + 题目 ID)。
+    """
+    from flask import request, redirect
+    from task_store import vjudge_enqueue_refresh
+    short_id = (request.form.get("short_id") or request.form.get("luogu_uid") or "").strip()
+    if not short_id:
+        return redirect("/")
+    heavy = request.form.get("heavy") == "1" or request.args.get("heavy") == "1"
+    trigger = "user_refresh_heavy" if heavy else "user_refresh"
+    task_id = vjudge_enqueue_refresh(short_id, trigger=trigger)
+    try:
+        from vjudge_fetcher import start_vjudge_worker
+        start_vjudge_worker()
+    except Exception:
+        pass
+    if not task_id:
+        _t = _sign_me_token(short_id)
+        return redirect(f"/me/{short_id}?t={_t}&vjudge_error=already_pending")
+    _t = _sign_me_token(short_id)
+    return redirect(f"/me/{short_id}?t={_t}&vjudge_refreshing=1{'&heavy=1' if heavy else ''}")
+
+
+@app.get("/api/vjudge/<luogu_uid>.json")
+def _api_vjudge(luogu_uid: str):
+    """v3.9.74 · VJudge 上下文只读 JSON(给报告 AI 拼装/前端 polling 用)。"""
+    import json as _json
+    from task_store import get_vjudge_context
+    ctx = get_vjudge_context(luogu_uid)
+    if not ctx.get("username") and ctx.get("link_status") == "unlinked":
+        return _json.dumps({"linked": False, "link_status": "unlinked"}, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+    out = dict(ctx)
+    out["linked"] = True
+    # v3.10.0.4 · 附上最新任务进度(若正在抓 / 刚失败)
+    # v3.10.0.4-fix: failed 状态也要回传 progress,让前端能看到"为什么失败"
+    if out.get("link_status") in ("pending", "fetching", "failed", "rate_limited"):
+        try:
+            from task_store import _get_conn as _gc
+            _c = _gc()
+            try:
+                # luogu_uid 路径参数实际上是 short_id(VJudge 模式)或 luogu_uid,都试一遍
+                _r = _c.execute("""
+                    SELECT t.status, t.progress_step, t.progress_total, t.progress_msg, t.error_msg,
+                           t.started_at, t.finished_at, t.created_at
+                    FROM student_vjudge_fetch_tasks t
+                    WHERE t.student_id IN (
+                        SELECT id FROM students WHERE short_id = ? OR luogu_uid = ?
+                    )
+                    ORDER BY t.created_at DESC LIMIT 1
+                """, (luogu_uid, luogu_uid)).fetchone()
+                if _r:
+                    out["progress"] = {
+                        "status": _r[0],
+                        "step": int(_r[1] or 0),
+                        "total": int(_r[2] or 0),
+                        "msg": _r[3] or "",
+                        "error_msg": _r[4] or "",
+                        "started_at": _r[5] or "",
+                        "finished_at": _r[6] or "",
+                        "created_at": _r[7] or "",
+                    }
+            finally:
+                _c.close()
+        except Exception as _pe:
+            app.logger.debug(f"[v3.10.0.4] vjudge progress query fail: {_pe}")
+    return _json.dumps(out, ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
+
+
+# ============================================================
+# v3.10.0.4 · VJudge 全模式 AI 报告 API
+#   POST /api/reports/vjudge/<short_id>
+#     - 学员绑过 VJudge → 异步生成 AI 报告(MD → HTML → PDF)
+#     - 入任务队列,前端可轮询 /status/<task_id>
+#     - 不依赖洛谷数据,纯 VJudge 跨平台画像
+# ============================================================
+@app.route("/api/reports/vjudge/<short_id>", methods=["POST", "GET"])
+def api_reports_vjudge(short_id: str):
+    """v3.10.0.4 · 触发 VJudge 跨平台 AI 报告生成(异步)。
+
+    行为:
+      - 学员没绑 VJudge → 400
+      - API key 没配 → 400
+      - 24h 限流(VJudge 报告也走 daily cooldown, 跟洛谷版一致, task_type='vjudge_report') → 429
+      - 学员绑定正常 → 创建 task + 后台线程调 generate_vjudge_report
+      - 跳转到 /status/<task_id>(让前端轮询进度)
+
+    v3.10.0.4 · 全 vjudge 模式:不依赖洛谷 practice / passed_items / behavior_analysis,
+    只读 student_vjudge_data + students 表 → 构造 export_data → LLM 流式写 MD → 转 HTML/PDF。
+
+    v3.10.0.11 · 与洛谷版一致: 加 24h 限流。VJudge 数据虽然每天都在变,
+    但每次点"生成"都重跑 deepseek-v4-pro 会消耗 API 配额/费用,
+    学员反复点几次会触发"24h 限流"才符合与洛谷版的预期。
+    """
+    from flask import request, redirect, url_for
+    from task_store import get_vjudge_context, get_latest_done_task_for_uid
+
+    # 0) 找学员
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id)
+    if not student:
+        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册"), 404
+
+    # 1) 解析 luogu_uid (供后续限流/重定向使用, 之前修复过 NameError 500)
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
+
+    # 1.5) v3.10.0.11 · 24h 限流: 与洛谷版 generate_form_submit 一致, 按 task_type='vjudge_report' 查
+    # 限流通过: 返回 429 + 友好 HTML 提示页 (含跳转回 /me/<uid> 的按钮)
+    try:
+        existing = get_latest_done_task_for_uid(luogu_uid, since_hours=24, task_type="vjudge_report")
+        if existing:
+            from datetime import datetime as _dt, timedelta as _td
+            try:
+                last = _dt.strptime(existing.get("created_at") or "", "%Y-%m-%d %H:%M:%S")
+                next_at = last + _td(hours=24)
+                remain = next_at - _dt.now()
+                remain_min = max(1, int(remain.total_seconds() // 60))
+                remain_txt = f"约 {remain_min // 60} 小时 {remain_min % 60} 分钟后可重新生成"
+            except Exception:
+                remain_txt = "明天再来生成新报告"
+            return render_template_string(
+                VJUDGE_RATE_LIMITED_HTML,
+                luogu_uid=luogu_uid,
+                remain_txt=remain_txt,
+                me_url=url_for("student_me", short_id=luogu_uid),
+                task_id=existing.get("id") or "",
+            ), 429
+    except Exception as _rate_e:
+        app.logger.warning(f"[vjudge 24h 限流] 检查失败, 放行: {_rate_e}")
+
+    # 2) 检查 VJudge 是否绑了
+    ctx = get_vjudge_context(student.get("luogu_uid") or short_id)
+    if not ctx.get("username"):
+        return (
+            f"❌ 学员 {student.get('real_name') or short_id} 还没绑定 VJudge 账号,无法生成 VJudge 报告。",
+            400,
+        )
+
+    # 2) 检查 VJudge 是否有数据
+    total_ac = int(ctx.get("total_ac") or 0)
+    if total_ac == 0 and int(ctx.get("total_submissions") or 0) == 0:
+        return (
+            f"❌ VJudge 账号 {ctx.get('username')} 还没有任何抓取数据(0 AC/0 提交),"
+            f"请先点'刷新'按钮抓一次数据,再生成报告。",
+            400,
+        )
+
+    # 3) 解析 API key
+    form = request.form.to_dict() if request.method == "POST" else {}
+    api_key, api_key_source = resolve_openai_api_key(form)
+    if not api_key:
+        return (
+            "❌ 未配置 OpenAI API Key。请在表单填写,或在服务端设置环境变量 OPENAI_API_KEY / OPENAI_ADMIN_KEY。",
+            400,
+        )
+
+    model_name = (
+        (form.get("model_name") or "").strip()
+        or os.environ.get("OPENAI_MODEL_NAME", "").strip()
+        or os.environ.get("OPENAI_MODEL", "").strip()
+        or "gpt-4o-mini"
+    )
+    base_url = (
+        (form.get("base_url") or "").strip()
+        or os.environ.get("OPENAI_BASE_URL", "").strip()
+        or None
+    )
+
+    # 4) 创建任务 + 起后台线程
+    task_id = str(uuid.uuid4())
+    student_id = int(student.get("id") or 0)
+    with TASKS_LOCK:
+        insert_task(task_id, status="running", message="正在准备 VJudge 报告...", luogu_uid=student.get("luogu_uid") or short_id)
+        update_task(
+            task_id,
+            stage="生成 VJudge 报告",
+            task_type="vjudge_report",
+            # v3.10.0.6 · 关键修复:邮箱注册的学员(student.luogu_uid 为空)要用 short_id 而不是空字符串
+            # 否则 status_page 的 me_url = f"/me/{luogu_uid}" 拿不到值,家长订阅版入口就不显示
+            luogu_uid=str(student.get("luogu_uid") or short_id or "").strip(),
+            student_name=student.get("real_name") or "选手",
+            ai_progress=2,
+            ai_elapsed_seconds=0,
+        )
+    thread = threading.Thread(
+        target=_run_vjudge_report,
+        args=(task_id, student_id, short_id, api_key, api_key_source, base_url, model_name),
+        daemon=True,
+    )
+    register_active_generation_task(task_id, thread)
+    thread.start()
+
+    # 5) 判断 accept 决定 redirect 还是 json
+    accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in accept or request.args.get("format") == "json":
+        from flask import jsonify
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "status_url": url_for("status_page", task_id=task_id, luogu_uid=student.get("luogu_uid") or short_id, _external=False),
+            "student_id": student_id,
+            "short_id": short_id,
+            "vjudge_username": ctx.get("username"),
+            "vjudge_total_ac": total_ac,
+            "vjudge_total_submissions": int(ctx.get("total_submissions") or 0),
+            "model": model_name,
+        })
+    return redirect(url_for("status_page", task_id=task_id, luogu_uid=student.get("luogu_uid") or short_id))
+
+
+# =============================================================================
+# v3.11 · 学员主动上传代码(书签导出 / JSON / zip / 粘贴)
+# v3.11.0.2 · 改为"本地保存":书签只下载 JSON 到学员电脑,不上传到服务端
+# 数据完全留在学员电脑,服务端零接触(更稳的合规姿态)
+# 流程:
+#   1) 学员打开 /export-bookmarklet → 把"洛谷 AI 导出"按钮拖到收藏夹
+#   2) 打开 https://www.luogu.com.cn/record/list → 点收藏夹
+#   3) 书签脚本在学员浏览器里 fetch 自己的 records → 弹窗输 short_id
+#      → 浏览器自动下载 "luogu-records-<short_id>-<date>.json" 到下载目录
+#   4) 学员打开 /me/<short_id>/import-codes → 把刚才下载的 JSON 拖到上传区
+#      → 页面 fetch('/api/import-codes', source='json_upload') 才发到服务端
+#   5) 服务端存到 student_imported_codes
+#   6) 兜底:学员也可在 /me/<sid>/import-codes 页面直接粘贴代码
+# =============================================================================
+
+
+# v3.11.0.7 · 书签代码:开头不能有 \n,中间不能有换行/双空格,否则 Chrome 当成普通 URL 静默忽略
+# 用 ; 分隔多语句,整段压成单行
+# v3.11.0.8 · 洛谷 /record/list 不返回 JSON,改多端点轮询 + HTML 解析兜底
+# 整段压单行,无换行,无注释,无多余空格
+# v3.11.1.3 · 递归 findListDeep 解决 data 嵌套;源 .js → Node minify → Python 字符串 → 注入。避免 Python 字面量 \ 转义错乱。
+# 整段已用 Python 自动压成单行,无换行、无注释、无多余空格
+_BOOKMARKLET_JS = (
+    "javascript:void(async()=>{if(location.hostname.indexOf('luogu.com.cn')<0){alert('请先打开 luogu.com.cn 任意页面再点书签');return;}alert('✅ 书签 v3.11.1.4 已运行\\n(打开 F12 控制台看实时日志)');var out=[];var seenAll={};var log=function(m){console.log('[AI导出]',m);};var DQ='\\u0022';var VERDICT_MAP={0:'Pending',1:'Waiting',2:'Compiling',3:'Judging',4:'AC',5:'CE',6:'WA',7:'TLE',8:'MLE',9:'OLE',10:'RE',11:'SE',12:'UKE',13:'PE'};var LANG_MAP={0:'C',1:'C++',2:'Pascal',3:'Java',4:'C#',5:'Python',6:'PHP',7:'Ruby',8:'Go',9:'Haskell',10:'Rust',11:'JavaScript',12:'Lua'};function asStr(v){return v===undefined||v===null?'':String(v);}function asLang(v){if(v===undefined||v===null)return'';if(typeof v==='number')return LANG_MAP[v]||('LANG_'+v);if(typeof v==='object'&&v.name)return String(v.name);return String(v);}function asVerdict(v){if(v===undefined||v===null)return'';if(typeof v==='number')return VERDICT_MAP[v]||('STATUS_'+v);if(typeof v==='object'&&v.name)return String(v.name);return String(v);}function findListDeep(obj,depth){if(depth>6)return null;if(!obj||typeof obj!=='object')return null;if(Array.isArray(obj))return obj;var pref=['records','result','currentData','list','data','items'];for(var pi=0;pi<pref.length;pi++){var k=pref[pi];if(!obj.hasOwnProperty(k))continue;var v=obj[k];if(Array.isArray(v))return v;if(v&&typeof v==='object'){if(Array.isArray(v.result))return v.result;var nested=findListDeep(v,depth+1);if(nested)return nested;}}for(var key in obj){if(!obj.hasOwnProperty(key))continue;var vv=obj[key];if(Array.isArray(vv)&&vv.length>0)return vv;if(vv&&typeof vv==='object'){var inner=findListDeep(vv,depth+1);if(inner)return inner;}}return null;}function pick(rec){if(!rec||typeof rec!=='object')return null;var id=rec.id||rec.recordId||rec.record_id||rec.rid;if(!id)return null;var prob=rec.problem||rec.problemData||{};var pid=prob.pid||rec.pid||rec.problemId||rec.problem_id||'';var title=prob.title||rec.title||rec.problemTitle||(prob.name)||'';var rawStatus=rec.status;if(rawStatus===undefined)rawStatus=rec.verdict;if(rawStatus===undefined)rawStatus=rec.result;if(rawStatus&&typeof rawStatus==='object'){rawStatus=rawStatus.code!==undefined?rawStatus.code:(rawStatus.name||rawStatus.id);}var rawLang=rec.language;if(rawLang===undefined)rawLang=rec.lang;if(rawLang&&typeof rawLang==='object'){rawLang=rawLang.id!==undefined?rawLang.id:(rawLang.name||rawLang);}return{id:id,pid:asStr(pid),title:asStr(title),status:asVerdict(rawStatus),lang:asLang(rawLang),time:rec.time||rec.timeCost||0,memory:rec.memory||rec.memoryCost||0,submitTime:rec.submitTime||rec.submit_time||rec.time||null};}function extractCode(html){if(!html)return'';var patterns=[/<pre[^>]*>\\s*<code[^>]*>([\\s\\S]*?)<\\/code>\\s*<\\/pre>/i,/<pre[^>]*>([\\s\\S]*?)<\\/pre>/i,/<code[^>]*>([\\s\\S]*?)<\\/code>/i,/<textarea[^>]*>([\\s\\S]*?)<\\/textarea>/i,/<highlight-code[^>]*>([\\s\\S]*?)<\\/highlight-code>/i,new RegExp('<div[^>]*class=[\\\\'+DQ+'[^\\\\'+DQ+']*code[^\\\\'+DQ+']*[\\\\'+DQ+'][^>]*>([\\\\s\\\\S]*?)<\\\\/div>','i'),new RegExp('<div[^>]*class=[\\\\'+DQ+'[^\\\\'+DQ+']*[\\\\'+DQ+'][^>]*>([\\\\s\\\\S]*?)<\\\\/div>','i')];for(var pi=0;pi<patterns.length;pi++){var m=html.match(patterns[pi]);if(m&&m[1]&&m[1].length>5){var code=m[1].replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,DQ).replace(/&#039;/g,'\\u0027');return code.replace(/^\\s+|\\s+$/g,'');}}return'';}function parseHtmlRows(html){try{var doc=new DOMParser().parseFromString(html,'text/html');var seen={},list=[];var rowSelectors=['.user-record-list tbody tr','.user-record-list tr','table.user-record-list tr','table tbody tr','table tr','.record-list-item','.record-row','tr','.record-item','li[class*='+DQ+'record'+DQ+']','div[class*='+DQ+'record-row'+DQ+']'];var rows=[];for(var si=0;si<rowSelectors.length;si++){try{var found=doc.querySelectorAll(rowSelectors[si]);if(found.length>0&&found.length<100){rows=found;log('HTML 选择器命中: '+rowSelectors[si]+' ('+found.length+' 行)');break;}}catch(e){log('selector err: '+rowSelectors[si]+' '+e);}}var verdicts=['AC','WA','TLE','MLE','OLE','RE','CE','SE','UKE','PE'];var langs=['C++','Python','Java','Pascal','C#','Ruby','Go','Rust','JavaScript','PHP','Haskell'];for(var i=0;i<rows.length;i++){var row=rows[i];var idLink=row.querySelector('a[href*='+DQ+'/record/'+DQ+']');if(!idLink){if(row.tagName==='A'&&row.getAttribute('href')&&row.getAttribute('href').indexOf('/record/')>=0){idLink=row;}else{continue;}}var href=idLink.getAttribute('href')||'';var m2=href.match(/\\/record\\/(\\d+)/);if(!m2)continue;var id=parseInt(m2[1]);if(seen[id])continue;seen[id]=1;var pLink=row.querySelector('a[href*='+DQ+'/problem/'+DQ+']');var pid='',title='';if(pLink){pid=pLink.getAttribute('href').replace('/problem/','').replace(/^.*\\/problem\\//,'');title=pLink.textContent.trim();}var rowText=row.textContent||'';var status='';for(var vi=0;vi<verdicts.length;vi++){if(rowText.indexOf(verdicts[vi])>=0){status=verdicts[vi];break;}}var lang='';for(var li2=0;li2<langs.length;li2++){if(rowText.indexOf(langs[li2])>=0){lang=langs[li2];break;}}list.push({id:id,pid:pid,title:title,status:status,lang:lang});}return list;}catch(e){log('parseHtml error: '+e);return[];}}try{for(var page=1;page<=50;page++){var urls=['/api/record/list?page='+page+'&pageSize=20','/api/record/list?_contentOnly=true&page='+page+'&pageSize=20','/record/list?page='+page+'&pageSize=20&_contentOnly=true','/record/list?page='+page+'&pageSize=20&_contentOnly=1','/record/list?page='+page+'&pageSize=20','/record/list?page='+page];var list=null;var hitUrl='';for(var u=0;u<urls.length;u++){try{var r=await fetch(urls[u],{credentials:'include'});if(!r.ok)continue;var t=await r.text();var ch=t.trim().charAt(0);if(ch==='{'||ch==='['){var j;try{j=JSON.parse(t);}catch(e){continue;}list=findListDeep(j,0);if(list&&list.length){hitUrl=urls[u];log('OK endpoint '+(u+1)+': '+urls[u]+' (got '+list.length+')');break;}}}catch(e){}}if(!list||!list.length){try{var r2=await fetch('/record/list?page='+page+'&pageSize=20',{credentials:'include'});var t2=await r2.text();list=parseHtmlRows(t2);log('HTML parse got '+list.length+' rows');}catch(e){log('HTML parse failed: '+e);}}if(!list||!list.length)break;if(page===1&&list.length>0){log('========= 首条原始记录 ('+hitUrl+') =========');try{log(JSON.stringify(list[0],null,2).slice(0,2000));}catch(e){log('(unstringifiable)');}log('========= 原始记录键名 =========');try{log(Object.keys(list[0]).join(','));}catch(e){}if(list[0].problem){log('problem keys: '+Object.keys(list[0].problem).join(','));}log('===================================');}var addedThisPage=0;for(var i=0;i<list.length;i++){var rec=list[i];var picked=pick(rec);if(!picked||!picked.id)continue;if(seenAll[picked.id])continue;seenAll[picked.id]=1;var code='';try{var cr=await fetch('/record/'+picked.id,{credentials:'include'});if(cr.ok){var cht=await cr.text();code=extractCode(cht);if(!code){try{var cr2=await fetch('/api/record/sourceCode/'+picked.id,{credentials:'include'});if(cr2.ok){var j2;try{j2=await cr2.json();}catch(e){}if(j2&&j2.data&&j2.data.code)code=j2.data.code;else if(j2&&j2.code)code=j2.code;}}catch(e){}}}}catch(e){}out.push({record_id:picked.id,pid:picked.pid,title:picked.title,verdict:picked.status,lang:picked.lang,time:picked.time||0,memory:picked.memory||0,submitTime:picked.submitTime||null,code:code});addedThisPage++;}log('page '+page+': 新增 '+addedThisPage+' / '+list.length+' 条');if(addedThisPage===0)break;await new Promise(function(s){setTimeout(s,300);});}}catch(e){alert('catch error: '+e);return;}if(!out.length){alert('no records.');return;}var withCode=out.filter(function(r){return r.code;}).length;var withPid=out.filter(function(r){return r.pid;}).length;log('汇总:共 '+out.length+' 条, 含代码 '+withCode+' 条, 含 pid '+withPid+' 条');if(withCode===0){alert('⚠️ 已抓 '+out.length+' 条,但没有一条拿到代码。\\n\\n请看 F12 控制台: [AI导出] 汇总 行 + 首条原始记录。');}var sid=prompt('got '+out.length+' records (含代码 '+withCode+' / 含pid '+withPid+').\\n\\nEnter student short_id:','');if(!sid)return;var safe=sid.trim().replace(/[^a-zA-Z0-9_-]/g,'')||'unknown';try{var fn='luogu-records-'+safe+'-'+new Date().toISOString().slice(0,10)+'.json';var payload={version:'v3.11.1.4',short_id:sid.trim(),count:out.length,records:out};var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=fn;a.style.display='none';document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1000);alert('downloaded '+fn+' ('+out.length+' records).\\n\\nNext: open /me/'+sid.trim()+'/import-codes and drag the JSON file');}catch(e){alert('file gen failed: '+e);}})();"
+)
+@app.route("/export-bookmarklet", methods=["GET"])
+def export_bookmarklet_page():
+    """v3.11.0.2 · 书签引导页(数据完全保存在学员电脑,服务端零接触)。"""
+    # 真实使用方式:把 _BOOKMARKLET_JS 整段当 href
+    return render_template_string("""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>洛谷 AI 测评 · 书签导出 (v3.11.1.4 · 跨页 dedup + 修分页提前停止)</title>
+<style>
+body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:780px;margin:24px auto;padding:0 18px;color:#1e293b;background:#f8fafc}
+h1{color:#0f172a;margin-bottom:8px;font-size:24px}
+.sub{color:#64748b;margin-bottom:24px}
+.step{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin:12px 0;display:flex;gap:14px;align-items:flex-start;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.num{flex:0 0 32px;height:32px;border-radius:50%;background:#3b82f6;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}
+.stitle{font-weight:600;color:#0f172a;margin-bottom:4px}
+.sdesc{color:#475569;font-size:13px;line-height:1.55}
+.drag-btn{display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;border-radius:10px;font-weight:700;font-size:15px;text-decoration:none;box-shadow:0 4px 12px rgba(59,130,246,.35);cursor:pointer;user-select:none;margin:8px 0;transition:transform .1s,box-shadow .1s}
+.drag-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(59,130,246,.45)}
+.drag-btn:active{transform:scale(.98)}
+/* 关键修复:javascript: URL 在现代浏览器禁用拖拽,不要用 grab 手势(会卡住),用普通指针 */
+a[href^="javascript:"]{cursor:pointer !important}
+/* 拖拽相关元素一律禁掉 draggable,防止 Chrome 卡光标 */
+[draggable]{-webkit-user-drag:none !important;user-drag:none !important}
+/* 静态"假按钮"图示,只看不点 */
+.fake-btn{display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#94a3b8,#64748b);color:#fff;border-radius:10px;font-weight:700;font-size:15px;margin:8px 0;user-select:none;pointer-events:none;opacity:.85}
+.bm-notice{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 18px;margin:8px 0;font-size:13px;color:#991b1b;line-height:1.7}
+.bm-notice strong{color:#7f1d1d}
+.bm-notice code{background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:12px}
+.code-block{background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font:12px/1.5 Menlo,Consolas,monospace;overflow-x:auto;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+.warn{background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:6px;color:#92400e;font-size:13px;margin:14px 0}
+.tip{background:#d1fae5;border-left:3px solid #10b981;padding:10px 14px;border-radius:6px;color:#065f46;font-size:13px;margin:14px 0}
+.flow{background:#eff6ff;border:1px dashed #93c5fd;padding:14px 18px;border-radius:10px;margin:18px 0}
+.flow-title{font-weight:700;color:#1e40af;margin-bottom:8px;font-size:14px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left}
+th{background:#f1f5f9;font-weight:600}
+.copy-btn{padding:4px 10px;background:#e2e8f0;border:0;border-radius:4px;cursor:pointer;font-size:12px}
+.copy-btn:hover{background:#cbd5e1}
+textarea.bm-code{width:100%;height:120px;font:11px/1.45 Menlo,Consolas,monospace;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:10px;margin:8px 0;resize:vertical;word-break:break-all}
+.bm-tabs{display:flex;gap:4px;margin:12px 0 0 0;border-bottom:1px solid #e2e8f0}
+.bm-tab{padding:6px 12px;background:none;border:0;cursor:pointer;font-size:13px;color:#64748b;border-bottom:2px solid transparent}
+.bm-tab.active{color:#3b82f6;border-bottom-color:#3b82f6;font-weight:600}
+.bm-panel{display:none;padding:12px 0;font-size:13px;line-height:1.7;color:#475569}
+.bm-panel.active{display:block}
+kbd{background:#f1f5f9;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:4px;padding:1px 6px;font:12px/1.4 Menlo,Consolas,monospace;color:#1e293b}
+.copied{background:#10b981 !important;color:#fff !important}
+</style>
+</head>
+<body>
+<h1>📥 洛谷 AI 测评 · 书签导出</h1>
+<p class="sub">零 cookie · 零密码 · 数据完全保存在<strong>你的电脑</strong>,再由你主动上传。服务端从不接触洛谷账号。</p>
+
+<div class="warn">
+<strong>原理说明 (v3.11.1.4 · 跨页 dedup seenAll + 修分页提前停止):</strong>书签里只有一段 JavaScript,跑在你自己的浏览器里,用你登录洛谷后的身份去拉你自己的提交记录,然后<strong>把数据保存为 JSON 文件下载到你的电脑</strong>。你再到学员上传页把那个文件拖进去,数据才走网络。
+</div>
+
+<div class="flow">
+<div class="flow-title">🔒 完整数据流(分两段,完全合规)</div>
+<table>
+<tr><th>段</th><th>走哪里</th><th>谁的数据</th><th>能不能跳过</th></tr>
+<tr><td>1. 抓取</td><td>你的浏览器 ↔ luogu.com.cn</td><td>你自己的提交</td><td>不能跳过(这是数据来源)</td></tr>
+<tr><td>2. 保存</td><td>你的电脑(下载目录)</td><td>本地 JSON 文件</td><td>能(可手动复制/查看)</td></tr>
+<tr><td>3. 上传</td><td>你的浏览器 → 我们的服务端</td><td>你主动拖文件</td><td>能(也可手动粘贴代码)</td></tr>
+</table>
+</div>
+
+<h2 style="margin-top:24px;font-size:18px">📌 安装书签(选一种你能用的方式)</h2>
+
+<div class="bm-tabs">
+<button class="bm-tab active" data-tab="copy">方式 A · 复制代码(推荐,100% 通用)</button>
+<button class="bm-tab" data-tab="drag">方式 B · 直接拖(部分浏览器)</button>
+<button class="bm-tab" data-tab="right">方式 C · 右键菜单</button>
+</div>
+
+<div class="bm-panel active" id="panel-copy">
+<strong style="color:#0f172a">📋 步骤:</strong>
+<ol style="margin:8px 0 12px 20px;line-height:1.9">
+<li>点下面"复制书签代码"按钮 → 整段 JavaScript 进剪贴板</li>
+<li><strong>Chrome / Edge:</strong> 收藏夹栏空白处 <kbd>右键</kbd> → <kbd>添加书签…</kbd> → 名称填"洛谷 AI 导出" → URL 粘贴刚复制的代码</li>
+<li><strong>Firefox:</strong> 收藏夹栏空白处 <kbd>右键</kbd> → <kbd>新建书签</kbd> → 名称填"洛谷 AI 导出" → 网址粘贴刚复制的代码</li>
+<li><strong>Safari:</strong> <kbd>⇧⌘B</kbd> 显示收藏栏 → 顶部菜单 <kbd>书签</kbd> → <kbd>添加书签…</kbd> → URL 粘贴刚复制的代码</li>
+</ol>
+<button class="drag-btn" id="copyBtn" style="cursor:pointer;border:0;font-family:inherit">📋 复制书签代码</button>
+<span id="copyHint" style="margin-left:10px;color:#64748b;font-size:13px"></span>
+<textarea class="bm-code" id="bmCode" readonly>{{ BM_HREF|safe }}</textarea>
+</div>
+
+<div class="bm-panel" id="panel-drag">
+<div class="bm-notice">
+<strong>⚠️ Chrome 88+ / Edge / Safari 已默认禁用 <code>javascript:</code> URL 拖拽</strong>
+<br>这是浏览器安全策略,无法绕过。即使这里显示"按钮",你拖了也只是触发浏览器"不允许拖拽"的反馈,<strong>而且可能让鼠标光标卡住</strong>。
+<br><br>👉 <strong>强烈建议直接用方式 A</strong>(复制代码,1 步搞定,100% 通用,不卡光标)
+</div>
+<p style="margin-top:14px;color:#94a3b8;font-size:12px">下面是"假如能拖会长啥样"的静态图示(灰色,不可点,不可拖):</p>
+<div class="fake-btn">🔖 洛谷 AI 导出 (拖拽按钮示意)</div>
+</div>
+
+<div class="bm-panel" id="panel-right">
+<div class="bm-notice">
+<strong>⚠️ Chrome / Edge 右键菜单没有"添加书签"选项</strong>
+<br>这是 Chrome 故意删的(怕被钓鱼网站滥用)。Firefox 用户才看得到这个菜单项。
+</div>
+
+<strong style="color:#0f172a;display:block;margin-top:14px">🅰 Chrome / Edge 用户走这里(3 步):</strong>
+<ol style="margin:8px 0 12px 20px;line-height:1.9;font-size:13px">
+<li>按 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> 打开"书签管理器" (Mac: <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>Y</kbd>)</li>
+<li>右上角 <strong>⋮</strong> → <strong>添加新书签</strong></li>
+<li>名称填 <code>洛谷 AI 导出</code>,URL 粘贴从方式 A 复制的代码(用 <kbd>Ctrl</kbd>+<kbd>V</kbd>)</li>
+</ol>
+
+<strong style="color:#0f172a;display:block;margin-top:14px">🅱 Firefox 用户(右键可用):</strong>
+<p style="font-size:13px;line-height:1.7;margin:8px 0">在按钮上 <kbd>右键</kbd> → 选 <kbd>将此链接加为书签</kbd>。完事。</p>
+<a class="drag-btn" href="{{ BM_HREF|safe }}" onclick="event.preventDefault();">🔖 Firefox 用户右键我</a>
+<p style="color:#94a3b8;font-size:12px;margin-top:10px">↑ 这按钮 Firefox 才有用。Chrome 用户点它没反应,直接走上面 🅰 步骤。</p>
+</div>
+
+<h2 style="margin-top:28px;font-size:18px">🚀 安装完后怎么用</h2>
+
+<div class="step">
+<div class="num">1</div>
+<div>
+<div class="stitle">打开洛谷记录页</div>
+<div class="sdesc">在浏览器里打开: <a href="https://www.luogu.com.cn/record/list" target="_blank" style="color:#3b82f6">https://www.luogu.com.cn/record/list</a> (确保右上角是登录状态)。</div>
+</div>
+</div>
+
+<div class="step">
+<div class="num">2</div>
+<div>
+<div class="stitle">点收藏夹里的"洛谷 AI 导出"</div>
+<div class="sdesc">点一下。脚本会自动分页抓取你最近的提交记录(每次 20 条)。全程在你自己浏览器里跑。</div>
+</div>
+</div>
+
+<div class="step">
+<div class="num">3</div>
+<div>
+<div class="stitle">弹窗输学员短码 → JSON 文件自动下载</div>
+<div class="sdesc">浏览器弹窗让你输学员短码(在 <a href="/me" style="color:#3b82f6">学员主页</a> 顶部能看到,类似 <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px">a3f2b1</code>)。然后浏览器自动下载 <code>luogu-records-&lt;short_id&gt;-&lt;date&gt;.json</code> 到你的"下载"目录。🔒 此刻数据已落盘,断网都能用。</div>
+</div>
+</div>
+
+<div class="step">
+<div class="num">4</div>
+<div>
+<div class="stitle">打开上传页 → 拖入 JSON 文件</div>
+<div class="sdesc">打开: <a href="/me" style="color:#3b82f6">学员主页</a> → 点"📂 上传历史代码" → 把刚才下载的 JSON 拖到页面"上传区"。页面才会 fetch 到我们的服务端。</div>
+</div>
+</div>
+
+<div class="step">
+<div class="num">5</div>
+<div>
+<div class="stitle">回主页 → 重新生成 AI 报告</div>
+<div class="sdesc">回 <a href="/me" style="color:#3b82f6">学员主页</a>,点"重新生成 AI 报告",这次的报告会带上你代码的算法/风格/复杂度/改进建议。</div>
+</div>
+</div>
+
+<div class="tip">
+<strong>💡 兜底方案:</strong>如果书签实在装不上(企业 Chrome / Edge 策略禁用),可以:
+<ul style="margin:6px 0 0 18px;line-height:1.8">
+<li>在 <a href="/me" style="color:#3b82f6">学员主页</a> → "上传历史代码"页面,直接<strong>粘贴多段代码</strong>(用 <code>---</code> 分隔)。</li>
+<li>在洛谷"提交记录"页按 <kbd>F12</kbd> 打开控制台,粘上面板 A 里那段 JavaScript 按回车(每次重新抓都要这样)。</li>
+</ul>
+</div>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid #e2e8f0">
+<p style="text-align:center;color:#94a3b8;font-size:12px">洛谷 AI 报告 v3.11.1.4 · 学员本机导出 · 0 cookie / 0 密码 · 数据先落盘再上传 · 跨页 dedup</p>
+
+<script>
+// tab 切换
+document.querySelectorAll('.bm-tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.bm-tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.bm-panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+    // 切 tab 时强制复位光标,防止 Chrome 把 grab 状态卡住
+    document.body.style.cursor = 'default';
+    setTimeout(() => { document.body.style.cursor = ''; }, 50);
+  };
+});
+// 全局兜底:鼠标在页面上随便移动时,主动复位 cursor
+let _lastX = -1, _lastY = -1;
+document.addEventListener('mousemove', (e) => {
+  if (e.clientX !== _lastX || e.clientY !== _lastY) {
+    _lastX = e.clientX; _lastY = e.clientY;
+    // 每 200ms 复位一次,足够频繁地"擦掉"被卡住的 grab 状态
+    if (Date.now() % 200 < 30) document.body.style.cursor = '';
+  }
+});
+// 切到 B 面板时,主动把所有 draggable 元素的 drag 事件禁掉
+function _blockDrag(e) { e.preventDefault(); return false; }
+document.querySelectorAll('.bm-tab').forEach(t => {
+  t.addEventListener('click', () => {
+    // 移除所有 draggable 元素的 draggable 属性
+    document.querySelectorAll('[draggable=true]').forEach(el => {
+      el.setAttribute('draggable', 'false');
+    });
+  });
+});
+// 复制按钮
+const copyBtn = document.getElementById('copyBtn');
+const bmCode = document.getElementById('bmCode');
+const copyHint = document.getElementById('copyHint');
+copyBtn.onclick = async () => {
+  const text = bmCode.value;
+  try {
+    await navigator.clipboard.writeText(text);
+    copyHint.textContent = '✅ 已复制!去收藏夹栏粘贴即可';
+    copyHint.style.color = '#10b981';
+    copyBtn.classList.add('copied');
+    setTimeout(() => { copyBtn.classList.remove('copied'); copyHint.textContent=''; copyHint.style.color='#64748b'; }, 3500);
+  } catch(e) {
+    // 旧浏览器 fallback
+    bmCode.select();
+    document.execCommand('copy');
+    copyHint.textContent = '✅ 已复制(传统方式)';
+    copyHint.style.color = '#10b981';
+    setTimeout(() => { copyHint.textContent=''; copyHint.style.color='#64748b'; }, 3500);
+  }
+};
+// 选中文本框方便用户看到代码
+bmCode.onclick = () => bmCode.select();
+</script>
+</body>
+</html>
+""", BM_HREF=_BOOKMARKLET_JS, BM_JS_DISPLAY=_BOOKMARKLET_JS[:200] + "...")
+
+
+# 学员短码 -> student_id 的轻量解析(复用现有工具)
+def _resolve_student_id_by_short_id(short_id):
+    """v3.11 · 给 /api/import-codes 用。短码/UID 都接受,返回 students.id。"""
+    if not short_id:
+        return None
+    sid = str(short_id).strip()
+    if not sid:
+        return None
+    try:
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id FROM students WHERE short_id=? OR CAST(luogu_uid AS TEXT)=? OR CAST(id AS TEXT)=? LIMIT 1",
+                (sid, sid, sid),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    return None
+
+
+@app.route("/api/import-codes", methods=["POST"])
+def api_import_codes():
+    """v3.11 · 接收书签/JSON 上传的学员代码。
+    入参(JSON):
+        { short_id: "a3f2b1", records: [{pid, title, verdict, lang, time, memory, code, ac_time?}, ...] }
+    出参(JSON):
+        { ok: True, imported: N, skipped: M, total: K }
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "JSON 解析失败"}), 400
+
+    short_id = (body.get("short_id") or body.get("student_id") or "").strip()
+    records = body.get("records") or body.get("codes") or []
+
+    if not short_id:
+        return jsonify({"ok": False, "error": "缺少 short_id"}), 400
+    if not isinstance(records, list):
+        return jsonify({"ok": False, "error": "records 必须是数组"}), 400
+
+    sid_int = _resolve_student_id_by_short_id(short_id)
+    if not sid_int:
+        return jsonify({"ok": False, "error": f"找不到学员:{short_id}"}), 404
+
+    # 推断 source
+    src = (body.get("source") or "").strip()[:20] or "bookmarklet"
+    if request.content_type and "json" not in request.content_type:
+        src = "json_upload"
+
+    result = import_student_codes(sid_int, records, source=src)
+    if "error" in result:
+        return jsonify({"ok": False, "error": result["error"], **result}), 400
+    return jsonify({"ok": True, "student_id": sid_int, "source": src, **result})
+
+
+@app.route("/api/import-codes-status", methods=["GET"])
+def api_import_codes_status():
+    """v3.11 · 学员已上传代码摘要(给前端卡片用)。"""
+    short_id = (request.args.get("short_id") or "").strip()
+    if not short_id:
+        return jsonify({"ok": False, "error": "缺少 short_id"}), 400
+    sid_int = _resolve_student_id_by_short_id(short_id)
+    if not sid_int:
+        return jsonify({"ok": False, "error": f"找不到学员:{short_id}"}), 404
+    summary = get_imported_codes_summary(sid_int)
+    return jsonify({"ok": True, "student_id": sid_int, **summary})
+
+
+@app.route("/api/import-codes-cleanup", methods=["POST"])
+def api_import_codes_cleanup():
+    """v3.11 · 学员清空自己上传的代码(按 source 维度)。"""
+    body = request.get_json(silent=True) or {}
+    short_id = (body.get("short_id") or "").strip()
+    src = (body.get("source") or "").strip()[:20]
+    if not short_id:
+        return jsonify({"ok": False, "error": "缺少 short_id"}), 400
+    sid_int = _resolve_student_id_by_short_id(short_id)
+    if not sid_int:
+        return jsonify({"ok": False, "error": f"找不到学员:{short_id}"}), 404
+    try:
+        from task_store import _get_conn
+        conn = _get_conn()
+        try:
+            if src:
+                cur = conn.execute("DELETE FROM student_imported_codes WHERE student_id=? AND source=?",
+                                   (sid_int, src))
+            else:
+                cur = conn.execute("DELETE FROM student_imported_codes WHERE student_id=?",
+                                   (sid_int,))
+            conn.commit()
+            deleted = cur.rowcount
+        finally:
+            conn.close()
+        return jsonify({"ok": True, "deleted": deleted, "source": src or "all"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:200]}), 500
+
+
+@app.route("/me/<short_id>/import-codes", methods=["GET"])
+def import_codes_form(short_id: str):
+    """v3.11 · 学员上传页(拖文件 / 粘贴)。"""
+    sid_int = _resolve_student_id_by_short_id(short_id)
+    if not sid_int:
+        return "找不到学员,请检查 short_id", 404
+    summary = get_imported_codes_summary(sid_int)
+    return render_template_string("""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上传历史代码 · {{ sid }}</title>
+<style>
+body{font:14px/1.6 -apple-system,sans-serif;max-width:780px;margin:30px auto;padding:0 18px;color:#1e293b}
+h1{font-size:22px;margin-bottom:4px}
+.sub{color:#64748b;margin-bottom:20px}
+.drop{border:2px dashed #cbd5e1;border-radius:12px;padding:30px;text-align:center;background:#f8fafc;cursor:pointer;transition:all .15s}
+.drop:hover,.drop.drag{border-color:#3b82f6;background:#eff6ff}
+textarea{width:100%;height:200px;font:12px/1.5 Menlo,Consolas,monospace;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box}
+button{padding:10px 24px;background:#3b82f6;color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;margin:8px 0}
+button:hover{background:#2563eb}
+button:disabled{background:#94a3b8;cursor:not-allowed}
+.stats{background:#f1f5f9;padding:10px 14px;border-radius:6px;margin:14px 0;font-size:13px}
+.stats span{font-weight:600;color:#3b82f6}
+#result{margin-top:14px;padding:12px 16px;border-radius:6px;display:none;white-space:pre-wrap;font-size:13px}
+.ok{background:#d1fae5;color:#065f46;border-left:3px solid #10b981}
+.err{background:#fee2e2;color:#991b1b;border-left:3px solid #ef4444}
+.bm-hint{background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:6px;color:#92400e;font-size:13px;margin:14px 0}
+a{color:#3b82f6}
+</style>
+</head>
+<body>
+<h1>📂 上传历史代码</h1>
+<p class="sub">学员 short_id: <code style="background:#f1f5f9;padding:2px 8px;border-radius:4px">{{ sid }}</code></p>
+
+<div class="bm-hint">
+💡 <strong>推荐:</strong>用 <a href="/export-bookmarklet" target="_blank">📥 书签导出</a> 一次性抓全部历史提交(200+ 条),免去手动上传。
+</div>
+
+<div class="stats">
+当前已上传: <span>{{ summary.total }}</span> 条
+{% if summary.by_lang %}· 语言: {% for k,v in summary.by_lang.items() %}<code>{{ k }}</code>=<span>{{ v }}</span>{% if not loop.last %} {% endif %}{% endfor %}{% endif %}
+{% if summary.last_import %}· 最近导入: <span>{{ summary.last_import }}</span> ({{ summary.last_source }}){% endif %}
+</div>
+
+<h3>方式 1:拖文件 (.json / .zip)</h3>
+<div class="drop" id="drop">
+  <p style="font-size:32px;margin:0">📎</p>
+  <p>拖入文件,或<a href="#" id="pickFile">点此选择</a></p>
+  <p style="font-size:12px;color:#94a3b8">支持 JSON(书签导出格式) / ZIP(每文件一份代码) / 多个 .cpp .py 等</p>
+  <input type="file" id="fileInput" multiple style="display:none" accept=".json,.zip,.ndjson,.txt,.cpp,.py,.pas,.java,.c,.cc">
+</div>
+
+<h3>方式 2:粘贴多段代码(用 <code>---</code> 分隔)</h3>
+<textarea id="pasteBox" placeholder="[P1001]
+... code 1 ...
+
+---
+[P1002]
+... code 2 ..."></textarea>
+<br>
+<button id="submitPaste" disabled>📤 上传粘贴</button>
+
+<div id="result"></div>
+
+<p style="margin-top:30px;font-size:12px;color:#94a3b8">
+<a href="/me/{{ sid }}">← 返回学员主页</a>
+</p>
+
+<script>
+const SID = {{ sid|tojson }};
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const pickFile = document.getElementById('pickFile');
+const submitPaste = document.getElementById('submitPaste');
+const pasteBox = document.getElementById('pasteBox');
+const result = document.getElementById('result');
+
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
+drop.ondragleave = e => drop.classList.remove('drag');
+drop.ondrop = e => {
+  e.preventDefault();
+  drop.classList.remove('drag');
+  handleFiles(e.dataTransfer.files);
+};
+pickFile.onclick = e => { e.preventDefault(); fileInput.click(); };
+fileInput.onchange = e => handleFiles(e.target.files);
+pasteBox.oninput = e => submitPaste.disabled = !e.target.value.trim();
+
+function showResult(ok, msg){
+  result.style.display='block';
+  result.className = ok ? 'ok' : 'err';
+  result.textContent = msg;
+}
+
+async function handleFiles(files){
+  if(!files || !files.length){ showResult(false,'没有文件'); return; }
+  let allRecords = [];
+  for(const f of files){
+    if(f.name.endsWith('.zip')){
+      showResult(false,'zip 解压需要服务端,暂未实现,请先用方式 2 或书签导出');
+      return;
+    } else if(f.name.endsWith('.json')){
+      try{
+        const txt = await f.text();
+        const j = JSON.parse(txt);
+        if(Array.isArray(j)) allRecords.push(...j);
+        else if(j.records) allRecords.push(...j.records);
+        else if(j.codes) allRecords.push(...j.codes);
+        else allRecords.push(j);
+      }catch(e){ showResult(false, f.name+': JSON 解析失败 - '+e); return; }
+    } else {
+      // 单文件:当一条记录,题号用文件名
+      const pid = f.name.replace(/\\.[^.]+$/,'');
+      const code = await f.text();
+      allRecords.push({pid, title:pid, lang:f.name.split('.').pop(), code});
+    }
+  }
+  await upload(allRecords, 'json_upload');
+}
+
+async function upload(records, source){
+  if(!records.length){ showResult(false,'没有可上传的记录'); return; }
+  showResult(true,'⏳ 上传中...('+records.length+' 条)');
+  try{
+    const r = await fetch('/api/import-codes',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({short_id: SID, source, records})
+    });
+    const j = await r.json();
+    if(j.ok){
+      showResult(true, '✅ 上传成功\\n导入: '+j.imported+'  跳过(重复): '+j.skipped+'  共: '+j.total+'\\n\\n刷新学员主页即可看到 AI 报告更新。');
+    } else {
+      showResult(false, '❌ '+(j.error||'失败'));
+    }
+  } catch(e){
+    showResult(false, '❌ 网络错误: '+e);
+  }
+}
+
+submitPaste.onclick = async () => {
+  const text = pasteBox.value.trim();
+  if(!text) return;
+  // 解析多段:按 --- 分隔,每段首行 [PID] 形式或文件头
+  const blocks = text.split(/^---+$/m);
+  const records = [];
+  for(const blk of blocks){
+    const lines = blk.trim().split('\\n');
+    if(!lines.length) continue;
+    let pid='', title='', lang='';
+    let i = 0;
+    // 解析 [P1001] 或 // P1001
+    const m1 = lines[0].match(/^\\[?([A-Za-z0-9_-]+)\\]?/);
+    if(m1){ pid = m1[1]; i = 1; }
+    const m2 = lines[0] && lines[0].match(/\\/\\/\\s*([A-Za-z0-9_-]+)/);
+    if(m2 && !pid){ pid = m2[1]; i = 1; }
+    if(!pid) continue;
+    const code = lines.slice(i).join('\\n').trim();
+    if(!code) continue;
+    // 简易语言识别
+    if(code.includes('#include') || code.includes('using namespace')) lang='cpp';
+    else if(code.includes('def ') || code.includes('import ')) lang='python';
+    else if(code.includes('program ') || code.includes('var ')) lang='pascal';
+    else if(code.includes('public class') || code.includes('public static void main')) lang='java';
+    records.push({pid, title:pid, lang, verdict:'', code});
+  }
+  if(!records.length){ showResult(false,'没解析出任何代码块'); return; }
+  await upload(records, 'paste');
+};
+</script>
+</body>
+</html>
+""", sid=short_id, summary=summary)
+
+
+def _run_vjudge_report(
+    task_id: str,
+    student_id: int,
+    short_id: str,
+    api_key: str,
+    api_key_source: str,
+    base_url: str | None,
+    model_name: str,
+) -> None:
+    """v3.10.0.4 · 后台线程:读 VJudge 数据 → 构 export_data → 调 LLM → 转 HTML/PDF。
+
+    输出目录:reports/vjudge_<student_id>_<short_id>_<timestamp>/
+      - report.md
+      - report.html
+      - report.pdf
+    """
+    import time as _time
+    started = _time.time()
+    from pathlib import Path as _Path
+    from task_store import _get_conn, get_vjudge_context
+
+    try:
+        # 1) 读 DB
+        with TASKS_LOCK:
+            update_task(task_id, message="正在读取学员与 VJudge 数据...", ai_progress=10)
+        conn = _get_conn()
+        try:
+            sr = conn.execute(
+                "SELECT id, short_id, real_name, luogu_uid, city, school, grade, gesp_highest_passed "
+                "FROM students WHERE id=?",
+                (student_id,),
+            ).fetchone()
+            vj = conn.execute(
+                "SELECT * FROM student_vjudge_data WHERE student_id=?",
+                (student_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not sr:
+            raise ValueError(f"学员 id={student_id} 不存在")
+        if not vj:
+            raise ValueError(f"学员 id={student_id} 还没绑 VJudge")
+        vj_dict = dict(vj)
+
+        total_ac = int(vj_dict.get("total_ac") or 0)
+        total_sub = int(vj_dict.get("total_submissions") or 0)
+        ac_rate = (total_ac / total_sub) if total_sub > 0 else 0.0
+
+        # v3.10.0.5 · 读 ctx 拿真实 recent_solved / oj_stats,不再用静态占位串。
+        # ctx.recent_solved 是 [{oj, problem_id, title, ac_time}, ...] 列表
+        # ctx.oj_stats 是 [{oj, count}, ...] 列表
+        try:
+            ctx = get_vjudge_context(sr["luogu_uid"] or short_id or "")
+        except Exception as _ctx_e:
+            app.logger.warning(f"[v3.10.0.5] get_vjudge_context fail in _run_vjudge_report: {_ctx_e}")
+            ctx = {"recent_solved": [], "oj_stats": []}
+
+        recent_solved_raw = ctx.get("recent_solved") or []
+        # 取最多 20 条,渲染成 LLM 友好的多行字符串(列:OJ / 题号 / 标题 / AC 时间)
+        if recent_solved_raw:
+            _rs_lines = ["| OJ | 题号 | 标题 | AC 时间 |", "|---|---|---|---|"]
+            for _r in recent_solved_raw[:20]:
+                _rs_lines.append(
+                    f"| {_r.get('oj','?')} | {_r.get('problem_id','?')} | "
+                    f"{_r.get('title','(无标题)')} | {_r.get('ac_time','')} |"
+                )
+            recent_solved_text = "\n".join(_rs_lines)
+        else:
+            recent_solved_text = "（暂未抓到已解决题列表,请检查 VJudge 抓取是否完成）"
+
+        # OJ 分布(优先用 DB json 字段,空时回退到 ctx.oj_stats / solved 表反推)
+        # v3.10.0.12 · 改为 list[dict](name/oj/solved/solved_count),
+        #              海报 _render_vjudge_share_card_png 不再依赖字符串拼
+        _oj_dist_list: list[dict] = []
+        # 1) vj_dict.oj_distribution_json (历史, schema 里可能没这个字段)
+        _raw_json = vj_dict.get("oj_distribution_json")
+        if isinstance(_raw_json, list):
+            for _o in _raw_json:
+                if isinstance(_o, dict):
+                    _oj_dist_list.append(_o)
+        # 2) ctx.oj_stats
+        oj_stats_raw = ctx.get("oj_stats") or []
+        if not _oj_dist_list and oj_stats_raw:
+            for _o in oj_stats_raw:
+                if isinstance(_o, dict):
+                    _oj_dist_list.append({
+                        "name": _o.get("oj") or _o.get("name") or "",
+                        "oj": _o.get("oj") or _o.get("name") or "",
+                        "solved": int(_o.get("count") or _o.get("solved") or 0),
+                        "solved_count": int(_o.get("count") or _o.get("solved") or 0),
+                    })
+        # 3) solved 表反推 (兜底, fetcher 旧版没存 oj_stats 时仍能展示)
+        if not _oj_dist_list and sr.get("id"):
+            try:
+                from task_store import _get_conn as _vj_conn
+                _vc = _vj_conn()
+                try:
+                    _solved_rows = _vc.execute(
+                        "SELECT oj_source, COUNT(*) AS n FROM student_vjudge_solved "
+                        "WHERE student_id=? AND oj_source != '' "
+                        "GROUP BY oj_source ORDER BY n DESC LIMIT 10",
+                        (int(sr["id"]),),
+                    ).fetchall()
+                    for _r in _solved_rows:
+                        _oj_dist_list.append({
+                            "name": _r["oj_source"] or "",
+                            "oj": _r["oj_source"] or "",
+                            "solved": int(_r["n"] or 0),
+                            "solved_count": int(_r["n"] or 0),
+                        })
+                finally:
+                    _vc.close()
+            except Exception as _vc_e:
+                app.logger.debug(f"[v3.10.0.12] solved 表反推 OJ 分布失败: {_vc_e}")
+        # 旧字段 _oj_dist 保留作向后兼容 (LLM 友好 markdown 字符串)
+        if _oj_dist_list:
+            _oj_dist = "、".join([f"{o.get('name','')} {o.get('solved_count',0)}" for o in _oj_dist_list[:10]])
+        else:
+            _oj_dist = "（暂无 OJ 维度数据）"
+
+        export_data = {
+            "student_info": {
+                "real_name": sr["real_name"] or "",
+                "short_id": sr["short_id"] or short_id,
+                "city": sr["city"] or "",
+                "school": sr["school"] or "",
+                "grade": sr["grade"] or "",
+                "gesp_highest_passed": sr["gesp_highest_passed"] or 0,
+            },
+            "vjudge_data": {
+                "username": vj_dict.get("username", ""),
+                "nick": vj_dict.get("nick", ""),
+                "register_time": vj_dict.get("register_time", ""),
+                "total_submissions": total_sub,
+                "total_ac": total_ac,
+                "total_wa": int(vj_dict.get("total_wa") or 0),
+                "total_tle": int(vj_dict.get("total_tle") or 0),
+                "total_re": int(vj_dict.get("total_re") or 0),
+                "total_ce": int(vj_dict.get("total_ce") or 0),
+                "solved_count": int(vj_dict.get("solved_count") or 0),
+                "oj_count": int(vj_dict.get("oj_count") or 0),
+                "ac_rate": ac_rate,
+                "oj_distribution": _oj_dist_list,  # v3.10.0.12 · list[dict] 给海报渲染
+                "oj_distribution_text": _oj_dist,    # v3.10.0.12 · 字符串保留给 LLM prompt 用
+                # v3.10.0.5 · recent_solved 改为真实数据(LLM 友好的 markdown 表格字符串)
+                "recent_solved": recent_solved_text,
+                "recent_solved_list": recent_solved_raw[:20],  # 列表原样也带上,给 HTML 模板用
+                "oj_stats": oj_stats_raw,
+            },
+        }
+
+        # 2) 准备输出目录
+        reports_root = _Path("reports")
+        ts = _time.strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(c for c in (sr["real_name"] or "") if c.isalnum() or c in "_-").strip() or short_id
+        out_dir = reports_root / f"vjudge_{student_id}_{short_id}_{ts}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # 写侧车 short_id.txt(给 _find_latest_report_dir 兜底匹配用)
+        (out_dir / "short_id.txt").write_text(short_id, encoding="utf-8")
+        (out_dir / "luogu_uid.txt").write_text(sr["luogu_uid"] or "", encoding="utf-8")
+        # 写 export_data.json(给后续 parent_subscribe / share card 等用)
+        (out_dir / "export_data.json").write_text(
+            json.dumps(export_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        # 3) 调 LLM 流式写 MD
+        md_path = out_dir / "report.md"
+        if md_path.exists():
+            md_path.unlink()
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                message=f"({api_key_source}) 正在调用 {model_name} 生成 VJudge 报告...",
+                ai_progress=30,
+            )
+        from luogu_evaluator import generate_vjudge_report
+        md = generate_vjudge_report(
+            export_data=export_data,
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+            output_path=str(md_path),
+        )
+        if not md or not md.strip():
+            raise ValueError("AI 返回空内容")
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                message=f"Markdown 已生成({len(md)} 字符),正在渲染 HTML+PDF...",
+                ai_progress=80,
+            )
+
+        # 4) HTML + PDF
+        html_path = out_dir / "report.html"
+        pdf_path = out_dir / "report.pdf"
+        try:
+            from luogu_evaluator import build_html_and_pdf, generate_chart_images
+            assets_dir = out_dir / "assets"
+            assets_dir.mkdir(exist_ok=True)
+            chart_paths = generate_chart_images(export_data, assets_dir) or {}
+            build_html_and_pdf(md, export_data, str(html_path), str(pdf_path), chart_paths, export_pdf=True)
+        except Exception as conv_e:
+            app.logger.warning(f"v3.10.0.4 VJudge 报告 HTML/PDF 转换失败(不影响 MD): {conv_e}")
+            import traceback as _tb
+            _tb.print_exc()
+
+        # 5) 完成
+        elapsed = int(_time.time() - started)
+        # v3.10.0.4 · 把报告相对路径写到 tasks 表的 html/pdf/md 列(status 页可读出来给下载链接)
+        rel_html = f"reports/{out_dir.name}/report.html"
+        rel_pdf = f"reports/{out_dir.name}/report.pdf"
+        rel_md = f"reports/{out_dir.name}/report.md"
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                status="done",
+                message=f"VJudge 报告已生成 ({elapsed}s) → reports/{out_dir.name}/",
+                ai_progress=100,
+                ai_elapsed_seconds=elapsed,
+                html=rel_html,
+                pdf=rel_pdf,
+                md=rel_md,
+            )
+
+        # v3.10.0.5 · 与洛谷版一致:报告生成后立刻标记 hide_pdf=1(不开放 PDF 直链,统一走海报扫码)
+        try:
+            _record_hide_pdf(task_id)
+        except Exception as _hp_e:
+            app.logger.warning(f"[v3.10.0.5] VJudge _record_hide_pdf 失败(不影响主流程): {_hp_e}")
+
+        # v3.10.0.5 · 预渲染分享海报 PNG(VJudge 专属深琥珀色主题,不带洛谷版 AI 性格画像/算法标签/GESP/8段位/赛事倒计时)
+        # v3.10.0.7 · 改为调用 _render_vjudge_share_card_png,数据从 export_data.json 读
+        # v3.10.0.12 · oj_distribution 改为 list[dict], 海报按 list 渲染, 不再走字符串拼接
+        try:
+            _sc_data = {
+                "name": sr.get("real_name") or "选手",
+                "uid": sr.get("luogu_uid") or short_id,
+                "ai_level": "跨平台测评 · 初步阶段",
+                "core_reading": "基于 vjudge.net 真实数据, AI 生成的跨平台编程能力评估。",
+                "total_submissions": total_sub,
+                "total_ac": total_ac,
+                "total_wa": int(vj_dict.get("total_wa") or 0),
+                "total_tle": int(vj_dict.get("total_tle") or 0),
+                "total_re": int(vj_dict.get("total_re") or 0),
+                "total_ce": int(vj_dict.get("total_ce") or 0),
+                "solved_count": int(vj_dict.get("solved_count") or 0),
+                "ac_rate": ac_rate,
+                "oj_distribution": _oj_dist_list,  # v3.10.0.12 · 改为 list[dict]
+                "asof": _time.strftime("%Y-%m-%d"),
+            }
+            # QR 指向 VJudge 报告 HTML
+            _base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+            if not _base and request:
+                _base = request.host_url.rstrip("/")
+            if not _base:
+                _base = "https://oi.aijiangti.cn"
+            _sc_qr = f"{_base}/r/{sr.get('luogu_uid') or short_id}?exam_type=vjudge"
+            _sc_png = _render_vjudge_share_card_png(_sc_data, _sc_qr)
+            # VJudge 专属后缀 + 兼容旧 share-card.png
+            _sc_vjudge_path = out_dir / "share-card_vjudge.png"
+            _sc_vjudge_path.write_bytes(_sc_png)
+            try:
+                (out_dir / "share-card.png").write_bytes(_sc_png)
+            except Exception:
+                pass
+            app.logger.info(
+                f"[v3.10.0.7] VJudge share-card cached: {_sc_vjudge_path} ({len(_sc_png)} bytes)"
+            )
+        except Exception as _sc_err:
+            app.logger.warning(f"[v3.10.0.7] VJudge 预渲染分享海报失败(不影响主流程): {_sc_err}")
+    except Exception as e:
+        elapsed = int(_time.time() - started)
+        import traceback as _tb
+        _tb.print_exc()
+        with TASKS_LOCK:
+            update_task(
+                task_id,
+                status="failed",
+                message=f"VJudge 报告生成失败: {e} ({elapsed}s)",
+                ai_progress=0,
+                ai_elapsed_seconds=elapsed,
+            )
 
 
 # v3.9.69 · 部署时一次性清理旧版缓存（避免旧 share-card*.png / parent_subscribe.html
@@ -431,9 +1601,28 @@ except Exception as _je:
 
 
 def _set_student_session(luogu_uid: str, student_id: int, real_name: str = "") -> None:
-    """v3.8 · 注册/识别成功后写入学员会话（永久 cookie · 180 天）"""
+    """v3.8 · 注册/识别成功后写入学员会话（永久 cookie · 180 天）
+
+    v3.10.0 · 同时写 student_short_id(新主键) 和 student_uid(兼容老学员,值为 luogu_uid)
+    """
     try:
         session.permanent = True
+        # v3.10.0 · 新主键 short_id(8 位);从数据库查出来写 session
+        try:
+            _stu = _admin_students.get_student_by_uid(luogu_uid) if luogu_uid else None
+        except Exception:
+            _stu = None
+        if not _stu and str(luogu_uid).strip() and len(str(luogu_uid).strip()) == 8:
+            # 传进来的可能就是 short_id
+            try:
+                _stu = _admin_students.get_student_by_short_id(str(luogu_uid).strip())
+            except Exception:
+                _stu = None
+        if _stu:
+            _short = str(_stu.get("short_id") or "").strip()
+            if _short:
+                session["student_short_id"] = _short
+        # v3.10.0 · 旧 key 保留(luogu_uid),让 /me_root / me_picker fallback 生效
         session["student_uid"] = str(luogu_uid).strip()
         session["student_sid"] = int(student_id) if student_id else 0
         session["student_name"] = (real_name or "").strip()
@@ -1131,6 +2320,227 @@ def _is_retryable_ai_error(exc: Exception) -> bool:
         "504",
     )
     return any(keyword in message for keyword in retryable_keywords)
+
+# ============================================================
+# v3.10.0.4 · 新版首页 INDEX_V3100_HTML
+#   - 完全替换旧版洛谷模式
+#   - 核心三步:邮箱注册 → 绑 VJudge → 一键 AI 报告
+#   - 简洁现代(200 行内),不依赖深色主题
+#   - 已登录学员显示 banner + 直达个人中心
+# ============================================================
+INDEX_V3100_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>信竞 AI 报告 · 选手成长平台 · VJudge 版</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body{font-family:"Inter",ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#F8FAFC;color:#0F172A;}
+        .grad-text{background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 50%,#EC4899 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+        .card{background:white;border-radius:1rem;box-shadow:0 1px 3px rgba(15,23,42,.06),0 1px 2px rgba(15,23,42,.04);transition:all .2s;}
+        .card:hover{box-shadow:0 10px 25px rgba(99,102,241,.15);transform:translateY(-2px);}
+        .btn-primary{background:linear-gradient(135deg,#6366F1 0%,#8B5CF6 100%);color:white;font-weight:600;padding:.75rem 1.5rem;border-radius:.5rem;box-shadow:0 4px 14px rgba(99,102,241,.25);transition:all .2s;}
+        .btn-primary:hover{box-shadow:0 6px 20px rgba(99,102,241,.35);transform:translateY(-1px);}
+        .btn-secondary{background:white;color:#6366F1;font-weight:600;padding:.75rem 1.5rem;border-radius:.5rem;border:2px solid #6366F1;transition:all .2s;}
+        .btn-secondary:hover{background:#EEF2FF;}
+        .step-num{width:3rem;height:3rem;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;font-weight:700;font-size:1.25rem;box-shadow:0 4px 14px rgba(99,102,241,.3);}
+        .badge{display:inline-flex;align-items:center;padding:.25rem .75rem;border-radius:9999px;font-size:.75rem;font-weight:600;}
+        .anim-float{animation:float 3s ease-in-out infinite;}
+        @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+    </style>
+</head>
+<body class="min-h-screen">
+
+    {# 顶部导航 #}
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">信</div>
+                <span class="font-bold text-lg">信竞 AI 报告</span>
+                <span class="text-xs text-slate-400 ml-1">VJudge 版</span>
+            </a>
+            <div class="flex items-center gap-3">
+                {% if logged_in_banner %}
+                <a href="/me/{{ student_short_id }}" class="text-sm text-slate-600 hover:text-indigo-600 font-medium">我的主页</a>
+                <a href="/logout?next=/" class="text-sm text-slate-500 hover:text-rose-600 font-medium">退出</a>
+                {% else %}
+                <a href="/login" class="text-sm text-slate-600 hover:text-indigo-600 font-medium">登录</a>
+                <a href="/register" class="btn-primary text-sm py-2 px-4">免费注册</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    {# 已登录横幅(可选) #}
+    {{ logged_in_banner|safe }}
+
+    {# Hero #}
+    <section class="max-w-6xl mx-auto px-4 py-16 text-center">
+        <div class="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
+            <span class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+            v3.10.0 · 全 VJudge 跨平台模式
+        </div>
+        <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-6">
+            30 秒,让你的<br>
+            <span class="grad-text">VJudge 跨平台数据</span><br>
+            变成 AI 深度报告
+        </h1>
+        <p class="text-lg text-slate-600 max-w-2xl mx-auto mb-8">
+            直接绑定 <strong>VJudge username</strong>,AI 教练会基于你的 100+ OJ
+            跨平台提交记录,生成专属的《算法竞赛成长画像》。
+        </p>
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+            {% if logged_in_banner %}
+            <a href="/me/{{ student_short_id }}" class="btn-primary text-base">🤖 去生成我的 AI 报告</a>
+            {% else %}
+            <a href="/register" class="btn-primary text-base">🚀 立即注册(30 秒)</a>
+            <a href="/login" class="btn-secondary text-base">已有账号 → 登录</a>
+            {% endif %}
+        </div>
+        <p class="text-xs text-slate-400 mt-4">📌 邮箱+密码注册 · 零门槛</p>
+    </section>
+
+    {# 三步流程 #}
+    <section class="max-w-6xl mx-auto px-4 py-12">
+        <h2 class="text-3xl font-bold text-center mb-3">三步搞定</h2>
+        <p class="text-center text-slate-500 mb-12">从注册到拿到报告,平均不到 2 分钟</p>
+        <div class="grid md:grid-cols-3 gap-6">
+
+            <div class="card p-6">
+                <div class="step-num mb-4">1</div>
+                <h3 class="text-xl font-bold mb-2">📧 邮箱注册</h3>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                    填邮箱 + 设置密码 + 姓名 / 年级 / 城市,
+                    30 秒内注册完成。系统会生成一个 8 位
+                    <code class="text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded text-xs">short_id</code>
+                    作为你的个人主页地址。
+                </p>
+                <a href="/register" class="inline-block mt-4 text-indigo-600 text-sm font-semibold hover:underline">→ 去注册</a>
+            </div>
+
+            <div class="card p-6">
+                <div class="step-num mb-4">2</div>
+                <h3 class="text-xl font-bold mb-2">🔗 绑定 VJudge</h3>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                    在个人主页输入你的
+                    <strong class="text-indigo-600">VJudge username</strong>
+                    (vjudge.net 上的账号),点"刷新"开始抓取。
+                    抓取内容包括:总 AC、总提交、各 OJ 分布、最近 20 题。
+                </p>
+                <a href="https://vjudge.net/user" target="_blank" class="inline-block mt-4 text-indigo-600 text-sm font-semibold hover:underline">→ 找我的 VJudge ID</a>
+            </div>
+
+            <div class="card p-6">
+                <div class="step-num mb-4">3</div>
+                <h3 class="text-xl font-bold mb-2">🤖 一键 AI 报告</h3>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                    抓取完成后,点紫色的
+                    <strong class="text-purple-600">"🤖 AI 报告"</strong>
+                    按钮,30 秒-3 分钟内 AI 教练会输出:
+                    跨平台画像 / 提交效率 / 难度研判 / 4 周训练计划 / 家长版总结。
+                </p>
+                <span class="inline-block mt-4 text-slate-400 text-sm">→ 输出 MD / HTML / PDF 三件套</span>
+            </div>
+
+        </div>
+    </section>
+
+    {# 数据流示意 #}
+    <section class="max-w-6xl mx-auto px-4 py-12">
+        <div class="card p-8 bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+            <h2 class="text-2xl font-bold mb-6 text-center">📊 数据流全景</h2>
+            <div class="flex flex-col md:flex-row items-center justify-center gap-4 text-sm">
+                <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
+                    <div class="text-2xl mb-1">🌐</div>
+                    <div class="font-semibold">VJudge 公开数据</div>
+                    <div class="text-xs text-slate-500 mt-1">100+ OJ 提交记录</div>
+                </div>
+                <div class="text-2xl text-indigo-400">→</div>
+                <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
+                    <div class="text-2xl mb-1">🗄️</div>
+                    <div class="font-semibold">SQLite 持久化</div>
+                    <div class="text-xs text-slate-500 mt-1">student_vjudge_data</div>
+                </div>
+                <div class="text-2xl text-indigo-400">→</div>
+                <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
+                    <div class="text-2xl mb-1">🧠</div>
+                    <div class="font-semibold">AI 教练分析</div>
+                    <div class="text-xs text-slate-500 mt-1">DeepSeek / GPT-4o</div>
+                </div>
+                <div class="text-2xl text-indigo-400">→</div>
+                <div class="bg-white p-4 rounded-lg shadow-sm text-center min-w-[140px]">
+                    <div class="text-2xl mb-1">📄</div>
+                    <div class="font-semibold">报告三件套</div>
+                    <div class="text-xs text-slate-500 mt-1">MD / HTML / PDF</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {# 为什么选 VJudge #}
+    <section class="max-w-6xl mx-auto px-4 py-12">
+        <h2 class="text-3xl font-bold text-center mb-12">为什么用 VJudge 数据?</h2>
+        <div class="grid md:grid-cols-3 gap-6">
+            <div class="card p-6">
+                <div class="text-3xl mb-3">🌍</div>
+                <h3 class="font-bold text-lg mb-2">跨平台画像</h3>
+                <p class="text-sm text-slate-600">VJudge 聚合 100+ OJ 提交记录(Codeforces/AtCoder/洛谷/POJ/HDU ...),比单一 OJ 更能反映真实水平。</p>
+            </div>
+            <div class="card p-6">
+                <div class="text-3xl mb-3">⚡</div>
+                <h3 class="font-bold text-lg mb-2">30 秒出报告</h3>
+                <p class="text-sm text-slate-600">不需要洛谷 cookie 也不需要密码登录,绑一次 VJudge username 就能反复刷新,AI 报告秒级出。</p>
+            </div>
+            <div class="card p-6">
+                <div class="text-3xl mb-3">🎯</div>
+                <h3 class="font-bold text-lg mb-2">家长友好</h3>
+                <p class="text-sm text-slate-600">报告里的"家长下一步"模块用直白中文写,父母看不懂算法也能帮孩子定方向。</p>
+            </div>
+        </div>
+    </section>
+
+    {# 底部 CTA #}
+    <section class="max-w-6xl mx-auto px-4 py-16 text-center">
+        <div class="card p-12 bg-gradient-to-br from-indigo-600 to-purple-600 text-white">
+            <h2 class="text-3xl font-bold mb-4">准备好看到你的 AI 报告了吗?</h2>
+            <p class="text-indigo-100 mb-8">注册 + 绑 VJudge + 出报告 · 全程 2 分钟</p>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                {% if logged_in_banner %}
+                <a href="/me/{{ student_short_id }}" class="bg-white text-indigo-600 font-semibold px-8 py-3 rounded-lg hover:bg-indigo-50">🤖 去生成我的报告</a>
+                {% else %}
+                <a href="/register" class="bg-white text-indigo-600 font-semibold px-8 py-3 rounded-lg hover:bg-indigo-50">🚀 立即注册</a>
+                <a href="/login" class="border-2 border-white text-white font-semibold px-8 py-3 rounded-lg hover:bg-white hover:text-indigo-600">已有账号 → 登录</a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    {# footer #}
+    <footer class="border-t border-slate-200 py-10 text-center text-sm text-slate-400">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 mb-4">
+                <a href="https://qm.qq.com/q/610931699" target="_blank" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold transition">
+                    <span class="text-lg">💬</span>
+                    <span>QQ 交流群:610931699</span>
+                </a>
+                <a href="/leaderboard" class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 font-medium transition">
+                    <span class="text-lg">🏆</span>
+                    <span>查看排行榜</span>
+                </a>
+            </div>
+            <p>信竞 AI 报告 · v3.10.0.4 · 学员成长平台</p>
+            <p class="mt-1">Powered by VJudge + DeepSeek/GPT-4o + Playwright</p>
+        </div>
+    </footer>
+
+</body>
+</html>
+"""
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -2369,14 +3779,15 @@ def render_index(
     # v3.9.6 · 已登录学员：在首页顶部加一个 "已登录为 XX" 横幅 + 直达个人中心
     logged_in_banner = ""
     try:
-        _uid = str(session.get("student_uid") or "").strip()
+        # v3.10.0 · 优先用 student_short_id(新主键),fallback 老 student_uid
+        _uid = str(session.get("student_short_id") or session.get("student_uid") or "").strip()
         _name = str(session.get("student_name") or "").strip()
-        if _uid and _uid.isdigit():
+        if _uid:
             # v3.9.20 · 首页用深空主题，app-btn-primary 的白字+绿底在首页 CSS 里没注册，
             # 退化为浏览器默认 <a> 蓝色，文字就看不见。改用 Tailwind 显式指定绿底白字。
             logged_in_banner = (
                 f'<div class="bg-emerald-500/10 border border-emerald-400/40 rounded-lg p-3 mb-4 flex items-center justify-between gap-3">'
-                f'<div class="text-sm text-emerald-100">✅ 已识别身份：<strong class="text-white">{_name or "学员"}</strong>（UID {_uid}）</div>'
+                f'<div class="text-sm text-emerald-100">✅ 已识别身份：<strong class="text-white">{_name or "学员"}</strong></div>'
                 f'<a href="/me/{_uid}" class="inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-bold bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-400 hover:to-teal-400 whitespace-nowrap shadow-lg shadow-emerald-500/30">🎓 回我的个人中心 →</a>'
                 f'</div>'
             )
@@ -2414,6 +3825,96 @@ def render_index(
         luogu_killswitch_enabled=_is_luogu_access_enabled(),
         luogu_killswitch_state=_read_luogu_killswitch(),
     )
+
+
+def render_index_v3100(info: str | None = None, error: str | None = None):
+    """v3.10.0.4 · 新版首页(注册/登录 → 绑 VJudge → AI 报告)渲染器。
+
+    替代旧 render_index 内部的洛谷模式:
+    - 已登录:显示 "已登录" 横幅 + 直达个人中心
+    - 未登录:显示"注册/登录" CTA
+    """
+    logged_in_banner = ""
+    student_short_id = ""
+    student_name = ""
+    try:
+        student_short_id = str(session.get("student_short_id") or session.get("student_uid") or "").strip()
+        student_name = str(session.get("student_name") or "").strip()
+        if student_short_id:
+            # v3.10.0.4 · 适配新主题色(紫粉),不再是旧版绿
+            logged_in_banner = (
+                f'<div class="max-w-6xl mx-auto px-4 mt-4">'
+                f'<div class="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between gap-3">'
+                f'<div class="text-sm text-indigo-900">✅ 已识别身份:<strong>{student_name or "学员"}</strong>'
+                f'<span class="text-indigo-500 ml-2 font-mono text-xs">/{student_short_id}</span></div>'
+                f'<a href="/me/{student_short_id}" class="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-bold bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-400 hover:to-purple-400 whitespace-nowrap shadow-md">🎓 回个人中心 →</a>'
+                f'</div>'
+                f'</div>'
+            )
+    except Exception:
+        pass
+
+    flash_html = ""
+    if info:
+        flash_html += f'<div class="max-w-6xl mx-auto px-4 mt-4"><div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-900">✅ {info}</div></div>'
+    if error:
+        flash_html += f'<div class="max-w-6xl mx-auto px-4 mt-4"><div class="bg-rose-50 border border-rose-200 rounded-xl p-4 text-sm text-rose-900">❌ {error}</div></div>'
+
+    html = render_template_string(
+        INDEX_V3100_HTML,
+        logged_in_banner=logged_in_banner + flash_html,
+        student_short_id=student_short_id,
+    )
+    return html
+
+
+def _build_vjudge_export_chunk(luogu_uid: str) -> dict:
+    """v3.9.74 · 给 AI 报告 prompt 用的 VJudge 数据块(取代 AtCoder 字段)。
+
+    只读 get_vjudge_context,把里面跟 AI 报告相关的字段挑出来。
+    link_status=unlinked 时只返回极简 stub,避免污染 prompt。
+    """
+    try:
+        from task_store import get_vjudge_context
+        ctx = get_vjudge_context(luogu_uid or "")
+    except Exception:
+        return {"linked": False, "summary": "未接入 VJudge"}
+
+    if not ctx.get("username") and ctx.get("link_status") == "unlinked":
+        return {
+            "linked": False,
+            "summary": "未接入 VJudge",
+            "note": "建议学员在个人主页绑定 VJudge username,获取跨平台做题画像(取代 AtCoder)。",
+        }
+
+    # 简化 OJ 分布(前 5)
+    oj_stats = (ctx.get("oj_stats") or [])[:5]
+    oj_text = "、".join([f"{x['oj']} {x['count']}" for x in oj_stats]) or "无"
+
+    # 简化最近 5 个 AC 题
+    recent = (ctx.get("recent_solved") or [])[:5]
+    recent_text = "、".join([
+        f"{r.get('problem_id','')}({r.get('oj','')})"
+        for r in recent
+    ]) or "无"
+
+    return {
+        "linked": True,
+        "username": ctx.get("username") or "",
+        "nick": ctx.get("nick") or "",
+        "solved_count": int(ctx.get("solved_count") or 0),
+        "total_submissions": int(ctx.get("total_submissions") or 0),
+        "total_ac": int(ctx.get("total_ac") or 0),
+        "total_wa": int(ctx.get("total_wa") or 0),
+        "ac_rate": float(ctx.get("ac_rate") or 0.0),
+        "oj_distribution": oj_text,
+        "recent_solved": recent_text,
+        "link_status": ctx.get("link_status") or "ok",
+        "summary": (
+            f"VJudge {ctx.get('username') or ''}: 已解决 {ctx.get('solved_count', 0)} 题,"
+            f"AC {ctx.get('total_ac', 0)}/{ctx.get('total_submissions', 0)} ({ctx.get('ac_rate', 0)*100:.1f}%)"
+        ),
+    }
 
 
 def _resolve_source_code_progress(export_data: dict | None) -> tuple[int, int]:
@@ -3499,6 +5000,8 @@ def run_generation(task_id: str, form: dict):
             "syllabus_evaluation": syllabus_evaluation,
             "six_dimension_scores": six_dim_scores,
             "submission_evolution": submission_evolution,  # v3.9.39
+            # v3.9.74 · VJudge 跨平台数据(供 AI 报告 prompt 引用,取代 AtCoder)
+            "vjudge_data": _build_vjudge_export_chunk(_form_uid),
         }
 
         _write_export_data_json(out_dir, export_data)
@@ -3563,11 +5066,16 @@ def run_generation(task_id: str, form: dict):
 
 @app.route("/")
 def index():
-    # v3.7 · ref 归因 cookie（30 天）
+    # v3.10.0.4 · 新版首页(注册/登录 → 绑 VJudge → AI 报告)
+    # 默认走新版;通过 ?v3_legacy=1 仍可看旧洛谷版
+    if request.args.get("v3_legacy") == "1":
+        return _index_legacy()
+
+    # ref 归因 cookie（30 天）
     raw_ref = request.args.get("ref")
     sanitized_ref = _sanitize_ref(raw_ref) if raw_ref else ""
 
-    # v3.9.52 · 密码登录成功后回填 cookies 到表单（一次性，读取后清掉 session 避免泄露）
+    # 密码登录成功后回填 cookies（保留旧逻辑，新首页会忽略）
     pwd_login_form: dict = {}
     pwd_login_success_msg = ""
     _pwd_login_flag = request.args.get("_pwd_login")
@@ -3581,11 +5089,42 @@ def index():
                 "c3vk": temp_cookies.get("C3VK", ""),
                 "luogu_uid": str(temp_uid or temp_cookies.get("_uid", "")),
             }
-            pwd_login_success_msg = f"✅ 账号密码登录成功（UID {pwd_login_form['luogu_uid']}），Cookies 已自动填好，可直接点下方「生成 AI 报告」"
+            pwd_login_success_msg = f"✅ 账号密码登录成功（UID {pwd_login_form['luogu_uid']}），Cookies 已自动填好"
 
-    # v3.9.52 fix · 真正会显示成功提示 / 失败提示的页面是 /generate-form（GENERATE_FORM_HTML），
-    # 首页 INDEX_HTML 没有 info/error 渲染块，残留的 _pwd_login=1 仍走首页会让提示丢失。
-    # 旧逻辑保留 redirect(url_for("index", _pwd_login=1)) 是 v3.9.52 初版的兜底；现在统一跳到 /generate-form。
+    if _pwd_login_flag and pwd_login_form:
+        return redirect(url_for("generate_form", _pwd_login=1))
+
+    response = make_response(render_index_v3100(info=pwd_login_success_msg or None))
+    if sanitized_ref:
+        response.set_cookie(
+            "ref_uid", sanitized_ref,
+            max_age=30 * 24 * 3600,
+            httponly=True,
+            samesite="Lax",
+        )
+    return response
+
+
+def _index_legacy():
+    """v3.10.0.4 · 旧版首页（洛谷模式），?v3_legacy=1 仍可访问。"""
+    raw_ref = request.args.get("ref")
+    sanitized_ref = _sanitize_ref(raw_ref) if raw_ref else ""
+
+    pwd_login_form: dict = {}
+    pwd_login_success_msg = ""
+    _pwd_login_flag = request.args.get("_pwd_login")
+    if _pwd_login_flag:
+        temp_cookies = session.pop("temp_cookies", None)
+        temp_uid = session.pop("temp_luogu_uid", "")
+        if isinstance(temp_cookies, dict) and temp_cookies:
+            pwd_login_form = {
+                "client_id": temp_cookies.get("__client_id", ""),
+                "uid": temp_cookies.get("_uid", ""),
+                "c3vk": temp_cookies.get("C3VK", ""),
+                "luogu_uid": str(temp_uid or temp_cookies.get("_uid", "")),
+            }
+            pwd_login_success_msg = f"✅ 账号密码登录成功（UID {pwd_login_form['luogu_uid']}），Cookies 已自动填好"
+
     if _pwd_login_flag and pwd_login_form:
         return redirect(url_for("generate_form", _pwd_login=1))
 
@@ -4091,10 +5630,14 @@ STATUS_HTML = """
         <div class="app-card text-center">
             <h1 class="app-title">📊 报告生成状态</h1>
             <p class="app-subtitle">AI 正在生成报告，请不要关闭本页面</p>
-            {# v3.9.64 · 报告类型 chip（NOI-CSP / GESP） #}
+            {# v3.9.64 · 报告类型 chip（NOI-CSP / GESP / VJudge） #}
             {% if task_type == 'report_gesp' %}
             <div class="mt-2">
                 <span class="inline-block px-3 py-1 text-xs font-bold rounded-full bg-blue-100 text-blue-800">📘 GESP 备考报告</span>
+            </div>
+            {% elif task_type == 'vjudge_report' %}
+            <div class="mt-2">
+                <span class="inline-block px-3 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800">🌐 VJudge 跨平台测评 <span style="background:yellow;color:red;padding:1px 4px;font-size:10px;">[v3.10.0.6-vjudge-ui]</span></span>
             </div>
             {% else %}
             <div class="mt-2">
@@ -4130,7 +5673,7 @@ STATUS_HTML = """
             </div>
         </div>
         {% endif %}
-        {% if stage == '生成 AI 报告' or stage == '生成 GESP 报告' %}
+        {% if stage == '生成 AI 报告' or stage == '生成 GESP 报告' or stage == '生成 VJudge 报告' %}
         <div class="mb-4 text-left">
             <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
                 <span>AI 报告生成进度</span>
@@ -4172,6 +5715,159 @@ STATUS_HTML = """
         {% else %}
         <p class="text-sm text-gray-400">页面每 3 秒自动刷新，AI 正在基于您家孩子的报告重写一份家长视角的深度分析...</p>
         {% endif %}
+        {# v3.10.0.4 · VJudge 报告完成态：与洛谷版一致(HTML + 海报分享 + 家长订阅版,PDF/Markdown 隐藏)
+           v3.10.0.5 · 统一体验 #}
+        {% elif task_type == 'vjudge_report' %}
+        <div class="space-y-3">
+            {% if status == 'done' %}
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <p class="text-sm text-emerald-800 font-bold mb-2">✅ VJudge 跨平台 AI 报告已生成</p>
+                {# v3.10.0.5 · 与洛谷版一致：HTML + 海报分享（PDF/Markdown 不在用户态展示,统一走海报扫码） #}
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <a href="/{{ html }}" target="_blank" class="app-btn app-btn-primary">🔍 查看 HTML 报告</a>
+                    <button type="button" onclick="openSharePoster()" class="app-btn app-btn-amber">📤 生成海报分享</button>
+                </div>
+                {# 家长订阅版入口 - 智能门控(已激活 → 直接看;未激活 → 邀请码表单) #}
+                {% if me_url %}
+                    {% if has_parent_sub_html or has_parent_sub_db %}
+                        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                            {% if has_parent_sub_html %}
+                            <p class="text-sm text-emerald-800">✅ 家长订阅版已生成</p>
+                            <a href="{{ ps_html_url }}" target="_blank" class="app-btn app-btn-amber mt-2 block text-center">📨 查看家长订阅版（AI 决策支持）</a>
+                            {% else %}
+                            <p class="text-sm text-emerald-800">✅ 家长订阅已激活</p>
+                            <p class="text-[11px] text-emerald-600 mt-1">订阅版报告正在生成或上次生成未完成，点击下方按钮重新触发</p>
+                            {% endif %}
+                            <a href="/me/{{ me_url.split('/')[-1] }}/parent-subscribe" class="app-btn app-btn-secondary mt-2 block text-center">↩ 进入家长订阅版中心</a>
+                        </div>
+                    {% else %}
+                    {# v3.9 · 家长订阅版：邀请码门控(获取方式 = 加微信) #}
+                    <form method="POST" action="/me/{{ me_url.split('/')[-1] }}/start-parent-subscribe" class="block">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
+                            <label class="block text-xs font-bold text-amber-800 mb-1">🔑 家长订阅邀请码（必填）</label>
+                            <input type="text" name="invite_code" required
+                                   placeholder="扫码下方微信，备注'家长订阅'获取"
+                                   class="w-full px-3 py-2 border border-amber-300 rounded text-sm font-mono focus:outline-none focus:border-amber-500" />
+                            <div class="flex items-start gap-3 mt-3">
+                                <img src="/static/wechat_qr.png" alt="微信二维码"
+                                     class="w-28 h-28 border border-amber-200 rounded bg-white p-1 flex-shrink-0" />
+                                <div class="text-[11px] text-amber-700 leading-relaxed flex-1">
+                                    📞 <strong>邀请码获取方式：</strong>
+                                    <ol class="list-decimal list-inside mt-1 space-y-0.5 marker:font-bold marker:text-amber-800">
+                                        <li>微信扫码左侧二维码</li>
+                                        <li>添加客服为好友</li>
+                                        <li>备注"<strong>家长订阅</strong>"</li>
+                                        <li>客服会立即发送邀请码</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="submit" class="app-btn app-btn-amber">
+                            📨 验证邀请码并生成家长订阅版
+                        </button>
+                        <p class="text-[10px] text-gray-500 text-center mt-1">💡 基于 VJudge 跨平台测评数据,生成家长视角的深度分析报告</p>
+                    </form>
+                    {% endif %}
+                {% endif %}
+            </div>
+            <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}" class="app-btn app-btn-secondary">↩ 返回学员主页</a>
+            {% elif status == 'error' %}
+            <div class="bg-rose-50 border border-rose-200 rounded-lg p-3">
+                <p class="text-sm text-rose-800 font-bold">❌ VJudge 报告生成失败</p>
+                <p class="text-xs text-rose-600 mt-1">{{ message }}</p>
+            </div>
+            <a href="/me/{{ me_url.split('/')[-1] if me_url else luogu_uid }}" class="app-btn app-btn-primary">返回重试</a>
+            {% else %}
+            <p class="text-sm text-gray-400">页面每 3 秒自动刷新，AI 正在基于 VJudge 跨平台数据生成深度分析报告(约 30s-3min)...</p>
+            {% endif %}
+        </div>
+
+        {# v3.10.0.5 · 海报分享模态框(VJudge 复用洛谷版模态框,海报走 share-card.png?exam_type=vjudge) #}
+        <div id="posterModal" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+             onclick="if(event.target===this) closeSharePoster()">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 relative">
+                <button type="button" onclick="closeSharePoster()" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-lg">×</button>
+                <h3 class="text-lg font-bold text-gray-800 mb-1 text-center">📤 分享海报</h3>
+                <p class="text-xs text-gray-500 text-center mb-3">首次生成约 5-15 秒，生成后自动下载</p>
+                <div class="flex justify-center bg-gray-50 border border-gray-200 rounded-lg p-2 mb-3 min-h-[200px] items-center relative">
+                    <img id="posterImg" src="" alt="VJudge 报告海报"
+                         class="max-w-full h-auto rounded shadow"
+                         style="display:none"
+                         onerror="this.style.display='none'; var eb=document.getElementById('posterError'); if(eb){eb.textContent='海报加载失败';eb.style.display='';}" />
+                    <div id="posterLoading" class="text-center text-gray-500">
+                        <div class="inline-block w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                        <p class="text-sm">海报生成中…</p>
+                        <p class="text-[10px] text-gray-400 mt-1">首次需要 matplotlib 渲染，约 5-15 秒</p>
+                    </div>
+                    <div id="posterError" class="text-center text-rose-600 text-sm" style="display:none"></div>
+                </div>
+                <div class="flex gap-2">
+                    <a id="posterDownloadBtn"
+                       href="/me/{{ luogu_uid }}/share-card.png?exam_type=vjudge"
+                       download="VJudge报告海报_{{ luogu_uid }}.png"
+                       class="app-btn app-btn-primary flex-1">⬇ 再次下载</a>
+                    <button type="button" onclick="closeSharePoster()" class="app-btn app-btn-secondary flex-1">关闭</button>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            function openSharePoster(){
+                var m=document.getElementById('posterModal');
+                var img=document.getElementById('posterImg');
+                var loading=document.getElementById('posterLoading');
+                var errorBox=document.getElementById('posterError');
+                var btn=document.getElementById('posterDownloadBtn');
+                if(!m||!img) return;
+                if(loading) loading.style.display='';
+                if(errorBox) errorBox.style.display='none';
+                img.style.display='none';
+                m.classList.remove('hidden');
+                var url = '/me/{{ luogu_uid }}/share-card.png?exam_type=vjudge&t=' + Date.now();
+                var pre=new Image();
+                pre.onload=function(){
+                    img.src=url;
+                    img.style.display='';
+                    if(loading) loading.style.display='none';
+                    if(errorBox) errorBox.style.display='none';
+                    triggerDownload(url);
+                };
+                pre.onerror=function(){
+                    if(loading) loading.style.display='none';
+                    img.style.display='none';
+                    if(errorBox){
+                        errorBox.textContent='海报生成失败 · 请稍后重试或联系管理员';
+                        errorBox.style.display='';
+                    }
+                };
+                pre.src=url;
+                function triggerDownload(finalUrl){
+                    try{
+                        if(btn){
+                            btn.href=finalUrl;
+                            btn.setAttribute('download','VJudge报告海报_{{ luogu_uid }}.png');
+                            btn.click();
+                            return;
+                        }
+                    }catch(e){}
+                    try{
+                        var a=document.createElement('a');
+                        a.href=finalUrl;
+                        a.download='VJudge报告海报_{{ luogu_uid }}.png';
+                        a.style.display='none';
+                        document.body.appendChild(a);a.click();document.body.removeChild(a);
+                    }catch(e){console.error('[poster download]',e);}
+                }
+            }
+            function closeSharePoster(){
+                var m=document.getElementById('posterModal');
+                if(m) m.classList.add('hidden');
+            }
+            window.openSharePoster=openSharePoster;
+            window.closeSharePoster=closeSharePoster;
+            document.addEventListener('keydown',function(e){if(e.key==='Escape')closeSharePoster();});
+        })();
+        </script>
         {% elif status == 'done' %}
         <div class="space-y-3">
             {# v3.8 · 用户态报告页：HTML + 海报分享 + 家长订阅版（PDF/Markdown 隐藏到 /admin 后台） #}
@@ -4377,7 +6073,9 @@ def status_page(task_id):
     pdf_url = str(task.get("pdf", "") or "")
     # v3.5.2 · 统一入口生成的报告支持跳回 /me/<uid>（3 版本报告）
     luogu_uid = str(request.args.get("luogu_uid", "") or task.get("luogu_uid", "") or "")
-    me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.isdigit() else ""
+    # v3.10.0.6 · 关键修复:去掉 isdigit() 限制,支持邮箱注册学员(luogu_uid 是 short_id 字符串)
+    # `/me/<uid>` 路由本身兼容纯数字 + 短 ID 两种格式
+    me_url = f"/me/{luogu_uid}" if luogu_uid and luogu_uid.strip() else ""
 
     # v3.9.6 · 智能门控：检查该 UID 是否已生成过 parent_subscribe.html
     # 如果已生成 → 状态页直接显示"查看家长订阅版"，不再每次让家长重输邀请码
@@ -4387,10 +6085,13 @@ def status_page(task_id):
     has_parent_sub_html = False
     ps_html_url = ""
     has_parent_sub_db = False
-    if luogu_uid and luogu_uid.isdigit():
+    # v3.10.0.6 · 兼容邮箱注册学员(luogu_uid 是 short_id 字符串,不是纯数字)
+    # 用 _resolve_student_key 拿到对应学员,无论 luogu_uid 是数字还是 short_id 都能查
+    if luogu_uid and luogu_uid.strip():
         try:
-            _stu = _admin_students.get_student_by_uid(luogu_uid)
+            _stu = _admin_students.get_student_by_uid(luogu_uid) or _admin_students.get_student_by_short_id(luogu_uid)
             _stu_name = (_stu.get("real_name") or "") if _stu else ""
+            # _find_latest_report_dir 同时支持 luogu_uid 和 short_id(它读侧车文件)
             _latest = _find_latest_report_dir(luogu_uid, _stu_name)
             if _latest and (_latest / "parent_subscribe.html").exists():
                 has_parent_sub_html = True
@@ -5905,6 +7606,91 @@ def admin_students_delete(student_id: int):
 
 
 # ============================================================
+# v3.10.0.4 · 管理员代看 / 重置密码 / 封禁学员
+# ============================================================
+
+@app.route("/admin/students/<int:student_id>/impersonate", methods=["GET", "POST"])
+def admin_students_impersonate(student_id: int):
+    """v3.10.0.4 · 管理员代看学员个人主页。
+
+    流程:
+      1. 校验 admin session
+      2. 写入 student session(student_short_id / student_name),同时记一个 is_impersonating=1 标记
+      3. 302 → /me/<short_id>
+
+    退出代看:/me/<short_id> 顶部红色横幅,点"退出代看" → /admin/students/leave-impersonate
+    """
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student or not student.get("short_id"):
+        return redirect(url_for("admin_students_list", notice="学员无 short_id,无法代看", notice_type="error"))
+    # 写入 student session
+    session["student_short_id"] = student["short_id"]
+    session["student_name"] = student.get("real_name") or "学员"
+    session["student_id"] = int(student["id"])
+    session["is_impersonating"] = 1  # 标记,前端显示"代看横幅"
+    # 保留 admin session,这样退出代看后还能继续管后台
+    return redirect(url_for("student_me", short_id=student["short_id"]))
+
+
+@app.route("/admin/students/leave-impersonate", methods=["GET", "POST"])
+def admin_students_leave_impersonate():
+    """v3.10.0.4 · 退出代看(只清 student session,admin session 保留)"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    for k in ("student_short_id", "student_name", "student_id", "is_impersonating"):
+        session.pop(k, None)
+    return redirect(url_for("admin_students_list", notice="已退出代看模式", notice_type="success"))
+
+
+@app.route("/admin/students/<int:student_id>/reset-password", methods=["POST"])
+def admin_students_reset_password(student_id: int):
+    """v3.10.0.4 · 教练重置学员密码,新密码明文只显示一次"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(url_for("admin_students_list", notice="学员不存在", notice_type="error"))
+    new_pw = _admin_students.reset_student_password(student_id)
+    # 跳回详情页,带 notice 显示新密码
+    return redirect(
+        url_for(
+            "admin_students_detail",
+            student_id=student_id,
+            notice=f"✅ 密码已重置: {new_pw} (请告知学员,刷新后失效)",
+            notice_type="success",
+        )
+    )
+
+
+@app.route("/admin/students/<int:student_id>/ban", methods=["POST"])
+def admin_students_ban(student_id: int):
+    """v3.10.0.4 · 封禁/解封学员(POST 表单传 banned=1/0 + reason=...)"""
+    auth_redirect = require_admin_auth()
+    if auth_redirect is not None:
+        return auth_redirect
+    student = _admin_students.get_student(student_id)
+    if not student:
+        return redirect(url_for("admin_students_list", notice="学员不存在", notice_type="error"))
+    banned = str(request.form.get("banned", "0")).strip() == "1"
+    reason = (request.form.get("reason") or "").strip()
+    _admin_students.set_student_banned(student_id, banned, reason)
+    msg = "已封禁" if banned else "已解封"
+    return redirect(
+        url_for(
+            "admin_students_detail",
+            student_id=student_id,
+            notice=f"✅ 学员{msg}",
+            notice_type="success" if not banned else "warning",
+        )
+    )
+
+
+# ============================================================
 # v3.5.2 · 3 版本报告路由
 # ============================================================
 
@@ -5991,7 +7777,7 @@ def _collect_report_data(student: dict) -> dict:
     }
 
 
-def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: int = 10) -> list[dict]:
+def _list_student_report_htmls(uid_or_short: str, student_name: str = "", limit: int = 10) -> list[dict]:
     """v3.8 · 列出学员最近 N 份 HTML 报告（按 mtime 倒序）
 
     返回：[{dir_name, html_url, mtime_display, share_url, has_poster, size_kb, status}, ...]
@@ -5999,6 +7785,8 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
     v3.9.17 · 不再只列有 report.html 的 dir：有 export_data.json 的也算"数据已抓取"
     （AI 报告生成失败时 export_data.json 仍存在，只是 report.md 是 0 字节）。
     这些"半完成"状态对学员仍有价值：能看到 6 维评分、抓题数、难度分布等。
+
+    v3.10.0 · 入参可为 luogu_uid 或 short_id,sidecar 优先 short_id.txt,fallback luogu_uid.txt
     """
     items: list[dict] = []
     try:
@@ -6006,6 +7794,22 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
         if not reports_root.exists():
             return []
         # 报告目录命名规则：<name>_<uid>_<YYYYMMDD-HHMMSS>
+        uid_str = str(uid_or_short or "").strip()
+        # v3.10.0 · 同时取该学员的 luogu_uid(用于兼容老式侧车匹配)
+        _luogu_uid = ""
+        _short_id = ""
+        if uid_str and uid_str.isdigit() and 6 <= len(uid_str) <= 10:
+            # 看起来是 luogu_uid
+            _luogu_uid = uid_str
+        else:
+            # 看起来是 short_id(8 位字母数字)
+            _short_id = uid_str
+            try:
+                _stu = _admin_students.get_student_by_short_id(uid_str) or _admin_students.get_student_by_uid(uid_str)
+                if _stu:
+                    _luogu_uid = str(_stu.get("luogu_uid") or "").strip()
+            except Exception:
+                pass
         for d in reports_root.iterdir():
             if not d.is_dir():
                 continue
@@ -6016,19 +7820,32 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
             if not export_p.exists():
                 continue
             dir_name = d.name
-            # 校验目录与该 uid 相关（v3.9.17 · 优先侧车 luogu_uid.txt 精确匹配，回退到目录名包含）
+            # 校验目录与该 uid 相关（v3.10.0 · 优先 short_id.txt → luogu_uid.txt → 目录名包含）
             _matches = False
-            if luogu_uid:
-                # 1) 侧车文件精确匹配（最可靠）
-                _sidecar = d / "luogu_uid.txt"
-                if _sidecar.exists():
-                    try:
-                        if _sidecar.read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
-                            _matches = True
-                    except Exception:
-                        pass
-                # 2) 旧式：目录名包含 luogu_uid
-                if not _matches and str(luogu_uid) in dir_name:
+            if uid_str:
+                # 1) short_id.txt 精确匹配(v3.10.0)
+                if _short_id:
+                    _sidecar_sid = d / "short_id.txt"
+                    if _sidecar_sid.exists():
+                        try:
+                            if _sidecar_sid.read_text(encoding="utf-8", errors="replace").strip() == _short_id:
+                                _matches = True
+                        except Exception:
+                            pass
+                # 2) luogu_uid.txt 精确匹配(老路径)
+                if not _matches and _luogu_uid:
+                    _sidecar = d / "luogu_uid.txt"
+                    if _sidecar.exists():
+                        try:
+                            if _sidecar.read_text(encoding="utf-8", errors="replace").strip() == _luogu_uid:
+                                _matches = True
+                        except Exception:
+                            pass
+                # 3) 旧式:目录名包含 luogu_uid
+                if not _matches and _luogu_uid and _luogu_uid in dir_name:
+                    _matches = True
+                # 4) 旧式:目录名包含 short_id
+                if not _matches and _short_id and _short_id in dir_name:
                     _matches = True
             else:
                 _matches = True
@@ -6060,7 +7877,7 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
                 "mtime_display": mtime.strftime("%Y-%m-%d %H:%M"),
                 # v3.9.67 · 报告行通过目录名后缀（_gesp / _noi_csp）识别海报类型
                 "exam_type": "gesp" if "_gesp" in dir_name.lower() else "noi_csp",
-                "share_url": f"/me/{luogu_uid}/share-card.png?exam_type={'gesp' if '_gesp' in dir_name.lower() else 'noi_csp'}",
+                "share_url": f"/me/{uid_str}/share-card.png?exam_type={'gesp' if '_gesp' in dir_name.lower() else 'noi_csp'}",
                 "has_poster": (d / "share-card.png").exists() or (d / "share-card_gesp.png").exists() or (d / "share-card_noi_csp.png").exists(),
                 "size_kb": round(stat.st_size / 1024, 1),
                 "status": status,  # v3.9.17
@@ -6075,7 +7892,7 @@ def _list_student_report_htmls(luogu_uid: str, student_name: str = "", limit: in
 @app.route("/report/student/<luogu_uid>")
 def report_student(luogu_uid: str):
     """v3.9.7 · 学员版报告已合并到个人中心 → 统一跳转 /me/<uid>（保留旧链接以免外部引用 404）"""
-    return redirect(url_for("student_me", luogu_uid=luogu_uid), code=301)
+    return redirect(url_for("student_me", short_id=luogu_uid), code=301)
 
 
 @app.route("/report/parent/<token>")
@@ -7151,7 +8968,12 @@ ADMIN_STUDENTS_LIST_HTML = """
                                    title="在后台打开学员个人中心（带签名 token）">→ 个人中心</a>
                                 {% endif %}
                             </td>
-                            <td class="px-6 py-3">{{ s.real_name or ('UID-' + s.luogu_uid) }}{% if s.is_minor %} <span class="text-xs text-orange-500">(未成年)</span>{% endif %}</td>
+                            <td class="px-6 py-3">
+                                {{ s.real_name or ('UID-' + (s.luogu_uid or '')) }}
+                                {% if s.is_minor %} <span class="text-xs text-orange-500">(未成年)</span>{% endif %}
+                                {# v3.10.0.4 · 已封禁红标 #}
+                                {% if s.is_banned %}<span class="ml-1 text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded font-bold" title="{{ s.banned_reason or '已封禁' }}">🚫 已封禁</span>{% endif %}
+                            </td>
                             <td class="px-6 py-3 text-gray-600">{{ s.school or '—' }}</td>
                             <td class="px-6 py-3 text-gray-600">
                                 {% if s.city or s.province %}
@@ -7170,6 +8992,10 @@ ADMIN_STUDENTS_LIST_HTML = """
                             <td class="px-6 py-3 text-gray-500">{{ s.gesp_exam_count }}</td>
                             <td class="px-6 py-3">
                                 <a href="/admin/students/{{ s.id }}" class="text-blue-600 hover:underline mr-3">详情</a>
+                                {# v3.10.0.4 · 个人中心入口(仅在学员有 short_id 时显示) #}
+                                {% if s.short_id %}
+                                <a href="/admin/students/{{ s.id }}/impersonate" target="_blank" class="text-indigo-600 hover:underline mr-3" title="以学员身份打开个人中心(新窗口)">🎓 个人中心</a>
+                                {% endif %}
                                 <form method="POST" action="/admin/students/{{ s.id }}/delete" class="inline" onsubmit="return confirm('确认删除学员 #{{ s.id }}？将级联删除所有 GESP 记录。');">
                                     <button type="submit" class="text-red-600 hover:underline">删除</button>
                                 </form>
@@ -7279,8 +9105,26 @@ ADMIN_STUDENTS_DETAIL_HTML = """
 <body class="app-body p-6">
     <div class="max-w-5xl mx-auto">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-3xl font-bold text-blue-900">学员 #{{ student.id }} {{ student.real_name or ('UID-' + student.luogu_uid) }}</h1>
+            <h1 class="text-3xl font-bold text-blue-900">学员 #{{ student.id }} {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</h1>
             <div class="flex items-center gap-4">
+                {# v3.10.0.4 · 学员有 short_id 时,显示"代看个人中心"按钮(admin session 写 student session 后跳转) #}
+                {% if student.short_id %}
+                <a href="/admin/students/{{ student.id }}/impersonate" target="_blank" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">🎓 代看个人中心</a>
+                {% endif %}
+                {# v3.10.0.4 · 重置密码 + 封禁/解封 #}
+                <form method="POST" action="/admin/students/{{ student.id }}/reset-password" class="inline" onsubmit="return confirm('确认重置学员 {{ student.real_name or student.id }} 的密码?\\n新密码将随机生成,会明文显示一次。');">
+                    <button type="submit" class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">🔑 重置密码</button>
+                </form>
+                {% if student.is_banned %}
+                <form method="POST" action="/admin/students/{{ student.id }}/ban" class="inline">
+                    <input type="hidden" name="banned" value="0">
+                    <input type="hidden" name="reason" value="">
+                    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">✅ 解封</button>
+                </form>
+                <span class="px-3 py-1 text-xs bg-red-100 text-red-700 rounded font-bold">🚫 已封禁</span>
+                {% else %}
+                <button type="button" onclick="document.getElementById('ban-modal-{{ student.id }}').classList.remove('hidden')" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">🚫 封禁</button>
+                {% endif %}
                 <a href="/admin/students/{{ student.id }}/gesp/new" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ 录入 GESP 成绩</a>
                 <a href="/admin/students" class="text-blue-600 hover:underline">返回列表</a>
             </div>
@@ -7418,7 +9262,7 @@ ADMIN_STUDENTS_GESP_NEW_HTML = """
             <h1 class="text-3xl font-bold text-blue-900">录入 GESP 成绩</h1>
             <a href="/admin/students/{{ student.id }}" class="text-blue-600 hover:underline">返回学员详情</a>
         </div>
-        <p class="text-sm text-gray-500 mb-4">学员：<span class="font-mono">{{ student.real_name or ('UID-' + student.luogu_uid) }}</span></p>
+        <p class="text-sm text-gray-500 mb-4">学员：<span class="font-mono">{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</span></p>
         {% if error %}
         <div class="mb-4 rounded-lg border bg-red-50 border-red-200 text-red-700 px-4 py-3 text-sm">
             {{ error }}
@@ -7471,6 +9315,23 @@ ADMIN_STUDENTS_GESP_NEW_HTML = """
                 <a href="/admin/students/{{ student.id }}" class="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">取消</a>
             </div>
         </form>
+    </div>
+
+    {# v3.10.0.4 · 封禁原因弹窗 #}
+    <div id="ban-modal-{{ student.id }}" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 class="text-xl font-bold text-gray-900 mb-3">🚫 封禁学员 {{ student.real_name or student.id }}</h3>
+            <p class="text-sm text-gray-600 mb-4">封禁后该学员将无法登录、生成报告、绑 VJudge。可在列表随时解封。</p>
+            <form method="POST" action="/admin/students/{{ student.id }}/ban" onsubmit="return confirm('确认封禁该学员?')">
+                <input type="hidden" name="banned" value="1">
+                <label class="block text-sm font-semibold text-gray-700 mb-1">封禁原因(选填,会写入历史)</label>
+                <textarea name="reason" rows="3" maxlength="200" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="例: 长期不活跃 / 违反社区规则 / 学员申请暂停 ..."></textarea>
+                <div class="flex items-center gap-3 mt-4">
+                    <button type="submit" class="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 font-semibold">确认封禁</button>
+                    <button type="button" onclick="document.getElementById('ban-modal-{{ student.id }}').classList.add('hidden')" class="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 font-semibold">取消</button>
+                </div>
+            </form>
+        </div>
     </div>
 </body>
 </html>
@@ -7536,9 +9397,12 @@ def generate_form():
 
 @app.route("/logout", methods=["GET", "POST"])
 def student_logout():
-    """v3.8 · 清除学员会话（"退出登录" 按钮）"""
+    """v3.8 · 清除学员会话（"退出登录" 按钮）
+
+    v3.10.0 · 同时清 student_short_id
+    """
     try:
-        for _k in ("student_uid", "student_sid", "student_name", "student_login_at"):
+        for _k in ("student_short_id", "student_uid", "student_sid", "student_name", "student_login_at"):
             session.pop(_k, None)
     except Exception:
         pass
@@ -7855,7 +9719,7 @@ def generate_form_submit():
         return redirect(url_for("status_page", task_id=task_id) + f"?luogu_uid={luogu_uid}")
     except Exception as e:
         # 即使报告生成失败，也跳到 me（注册已完成）
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
 
 
 # 任务 cookies 暂存（v1 报告生成需要的 cookies）
@@ -8853,7 +10717,7 @@ def select_mode():
     # 1) 已注册 → 走 /me/<uid>（个人中心也带历史报告，但入口直达列表更快）
     stu = _admin_students.get_student_by_uid(luogu_uid)
     if stu:
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     # 2) 未注册 / 任意用户 → 直接扫 reports/ 找该 UID 所有报告
     reports = _list_reports_for_uid(luogu_uid)
     if not reports:
@@ -10493,13 +12357,14 @@ def _grade_to_label(grade: str | None) -> str | None:
 
 @app.route("/register", methods=["GET", "POST"])
 def register_student():
-    """v3.5.2 学员 4 字段极简注册（学而思图 1 模式）
+    """v3.10.0 学员邮箱注册（取代学而思图 1 模式 4 字段极简）
 
     流程：
       1. 必填 4 项：城市 / 姓名 / 年级 / 性别
-      2. 可选 3 项：洛谷 UID（必填，借力主站实名）/ 微信扫码 / 手机号
-      3. 提交后：去重（luogu_uid 已存在则提示）→ 写入 students
-      4. 重定向：/me/<luogu_uid>
+      2. 必填 2 项：邮箱 / 密码 + 确认密码
+      3. 可选 1 项：出生日期
+      4. 提交后：BCrypt 哈希密码 → 生成 8 位 short_id → 写入 students
+      5. 重定向：/me/<short_id>
     """
     if request.method == "GET":
         return render_template_string(
@@ -10511,20 +12376,39 @@ def register_student():
         )
 
     # ---- POST 处理 ----
+    import re
     form = {
+        "province": (request.form.get("province") or "").strip(),  # v3.10.0.4 · 省份(级联选择)
         "city": (request.form.get("city") or "").strip(),
         "real_name": (request.form.get("real_name") or "").strip(),
         "grade": (request.form.get("grade") or "").strip(),
         "gender": (request.form.get("gender") or "").strip(),
-        "luogu_uid": (request.form.get("luogu_uid") or "").strip(),
-        "wechat_openid": (request.form.get("wechat_openid") or "").strip(),
-        "phone": (request.form.get("phone") or "").strip(),
+        "email": (request.form.get("email") or "").strip(),
+        "password": request.form.get("password") or "",
+        "password_confirm": request.form.get("password_confirm") or "",
         "birth_date": (request.form.get("birth_date") or "").strip(),
         "agree": request.form.get("agree") == "on",
     }
 
     # ---- 校验 ----
+    # v3.10.0.1 · city 鲁棒匹配:兼容 Nginx/反代把 UTF-8 URL 编码二次解码成字节序列
+    # (形如 "\xe5\x8c\x97\xe4\xba\xac" 这种 latin-1 误读),以及全/半角差异、首尾空白
+    def _norm_city(s: str) -> str:
+        s = (s or "").strip()
+        # 尝试把可能被 latin-1 误读的字节序列还原成 UTF-8
+        try:
+            if any(0x80 <= ord(c) <= 0xFF for c in s):
+                s = s.encode("latin-1").decode("utf-8")
+        except Exception:
+            pass
+        return s
+    # v3.10.0.4 · 省份校验(级联选择第一级)
+    if not form["province"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请先选择省份/直辖市", form=form)
+    form["city"] = _norm_city(form["city"])
     if not form["city"] or form["city"] not in _CITIES_FLAT:
+        # 调试日志:打服务端实际收到的 city 值
+        app.logger.info(f"[register] city mismatch: got {form['city']!r} (len={len(form['city'])}), _CITIES_FLAT sample={list(_CITIES_FLAT)[:3]}")
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择城市", form=form)
     if not form["real_name"]:
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="姓名必填", form=form)
@@ -10532,8 +12416,16 @@ def register_student():
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="年级必填", form=form)
     if form["gender"] not in ("M", "F"):
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请选择性别", form=form)
-    if not form["luogu_uid"] or not form["luogu_uid"].isdigit() or not (6 <= len(form["luogu_uid"]) <= 10):
-        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="洛谷 UID 必填（6-10 位数字）", form=form)
+
+    # v3.10.0 · 邮箱格式校验
+    if not re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", form["email"]):
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="邮箱格式不合法", form=form)
+    if len(form["email"]) > 120:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="邮箱过长（≤120 字符）", form=form)
+    if len(form["password"]) < 8 or len(form["password"]) > 64:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="密码需 8-64 位", form=form)
+    if form["password"] != form["password_confirm"]:
+        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="两次密码不一致", form=form)
     if not form["agree"]:
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="请勾选《用户协议》和《PIPL 知情同意书》", form=form)
 
@@ -10543,58 +12435,197 @@ def register_student():
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error=bd_norm, form=form)
     form["birth_date"] = bd_norm
 
-    # 微信 / 手机 二选一 或 都不填（学而思图 1 模式允许）
-    if form["wechat_openid"] and form["phone"]:
-        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="微信扫码 + 手机号请二选一（避免重复绑定）", form=form)
-
-    # 14 岁以下 + 无手机号兜底 → 拒绝
-    if is_minor and not form["phone"]:
-        return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error="14 岁以下学员必须填写家长手机号（v3.5.2 PIPL §5.2 强制）", form=form)
-
-    # ---- 去重 ----
-    existing = _admin_students.get_student_by_uid(form["luogu_uid"])
-    if existing:
+    # ---- 去重:邮箱已注册? ----
+    existing_email = _admin_students.get_student_by_email(form["email"])
+    if existing_email:
         return render_template_string(
             REGISTER_HTML,
             cities=CITIES_REGISTRATION,
             grades=GRADES_REGISTRATION,
-            error=f"洛谷 UID {form['luogu_uid']} 已注册（学员 id={existing['id']}），如需修改请联系教练",
+            error=f"邮箱 {form['email']} 已注册（学员 id={existing_email['id']}），请直接登录或换邮箱",
             form=form,
         )
 
+    # ---- 哈希密码 ----
+    pw_hash = _admin_students.hash_password(form["password"])
+
     # ---- 写入 ----
-    note = f"v3.5.2 自助注册 IP={request.remote_addr or '—'}"
-    if form["wechat_openid"]:
-        note += f" · wechat={form['wechat_openid'][:8]}***"
-    if form["phone"]:
-        note += f" · phone={form['phone'][:3]}***{form['phone'][-2:] if len(form['phone']) >= 5 else ''}"
+    note = f"v3.10.0 邮箱注册 IP={request.remote_addr or '—'}"
     if is_minor:
         note += " · MINOR=1"
 
     try:
         sid = _admin_students.create_student(
-            luogu_uid=form["luogu_uid"],
+            luogu_uid="",                                # v3.10.0 · luogu_uid 废弃
             real_name=form["real_name"],
             grade=form["grade"],
             city=form["city"],
-            province=form.get("province", ""),  # v3.8 · 省份
+            province=form.get("province", ""),
             gender=form["gender"],
             birth_date=form["birth_date"] or None,
             is_minor=is_minor,
-            registered_via="self_web" if not form["wechat_openid"] else "wechat",
+            registered_via="email_self_web",
             note=note,
+            email=form["email"],
+            short_id=None,                              # 自动生成
+            password_hash=pw_hash,
         )
     except Exception as e:  # noqa: BLE001
         return render_template_string(REGISTER_HTML, cities=CITIES_REGISTRATION, grades=GRADES_REGISTRATION, error=f"注册失败：{e}", form=form)
 
-    # v3.9.6 · 注册成功立即写会话（180 天）· 后续访问 /me、/ 首页自动识别身份
+    # v3.10.0 · 注册成功立即写会话(用 short_id)
+    student = _admin_students.get_student(sid)
+    short_id = (student or {}).get("short_id") or ""
     try:
-        _set_student_session(form["luogu_uid"], int(sid), form["real_name"])
+        _set_student_session(short_id, int(sid), form["real_name"])
     except Exception as _se:
         app.logger.warning(f"[register_student] _set_student_session 失败: {_se}")
 
-    flash(f"✅ 学员 {form['real_name']} 注册成功（id={sid}）")
-    return redirect(url_for("student_me", luogu_uid=form["luogu_uid"]))
+    flash(f"✅ 学员 {form['real_name']} 注册成功（短 ID {short_id}）")
+    return redirect(url_for("student_me", short_id=short_id))
+
+
+# ---- v3.10.0 · 登录 / 登出 ----
+
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学员登录 · v3.10.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+</head>
+<body class="app-body min-h-screen flex items-center justify-center p-4">
+    <div class="app-card max-w-md w-full">
+        <div class="text-center mb-4">
+            <div class="app-pill app-pill-done mb-2">v3.10.0</div>
+            <h1 class="app-title">学员登录</h1>
+            <p class="app-subtitle">邮箱 + 密码</p>
+        </div>
+
+        {% if error %}
+        <div class="app-box app-box-red mb-4">⚠️ {{ error }}</div>
+        {% endif %}
+        {% if next_url %}
+        <div class="app-box app-box-blue mb-4">🔗 登录后将跳转到 <code class="text-xs">{{ next_url }}</code></div>
+        {% endif %}
+
+        <form method="POST" action="/login" class="space-y-3">
+            {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 邮箱</label>
+                <input type="email" name="email" required maxlength="120"
+                       value="{{ form.email or '' }}"
+                       placeholder="parent@example.com"
+                       class="app-input" autofocus>
+            </div>
+            <div>
+                <label class="app-label"><span class="text-red-500">*</span> 密码</label>
+                <input type="password" name="password" required maxlength="64"
+                       placeholder="≥ 8 位"
+                       class="app-input">
+            </div>
+            <button type="submit" class="app-btn app-btn-primary w-full">
+                🔑 登录
+            </button>
+        </form>
+
+        <div class="text-center mt-4 text-xs text-gray-500 space-y-1">
+            <p>还没账号？<a href="/register" class="app-link">去注册 →</a></p>
+            <p>忘了密码？<a href="#" class="app-link" onclick="alert('请联系教练重置(找回密码功能 v3.11 计划中)');return false;">找回密码</a></p>
+            <p><a href="/" class="text-gray-400 hover:text-gray-600">← 返回首页</a></p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login_student():
+    """v3.10.0 · 学员邮箱 + 密码登录
+
+    GET: 展示登录表单
+    POST: 校验邮箱 + 密码 → 设 session['student_short_id'] → 跳 next 或 /me/<short_id>
+    """
+    # 已登录则直接跳走
+    sess_short = (session.get("student_short_id") or "").strip()
+    if sess_short and request.method == "GET":
+        return redirect(url_for("student_me", short_id=sess_short))
+
+    next_url = (request.values.get("next") or "").strip()
+    # 防止 open redirect
+    if next_url and not next_url.startswith("/"):
+        next_url = ""
+
+    if request.method == "GET":
+        return render_template_string(
+            LOGIN_HTML,
+            error=None,
+            form={},
+            next_url=next_url,
+        )
+
+    # ---- POST ----
+    import re
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+    remember = request.form.get("remember") == "on"
+
+    form = {"email": email}
+
+    if not re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", email):
+        return render_template_string(LOGIN_HTML, error="邮箱格式不合法", form=form, next_url=next_url)
+    if not password:
+        return render_template_string(LOGIN_HTML, error="请输入密码", form=form, next_url=next_url)
+
+    student = _admin_students.get_student_by_email(email)
+    if not student:
+        return render_template_string(LOGIN_HTML, error="邮箱未注册", form=form, next_url=next_url)
+    if not _admin_students.verify_password(password, student.get("password_hash") or ""):
+        return render_template_string(LOGIN_HTML, error="密码错误", form=form, next_url=next_url)
+
+    # v3.10.0.4 · 封禁检查(登录前)
+    if _admin_students.is_student_banned(int(student["id"])):
+        return render_template_string(
+            LOGIN_HTML,
+            error=f"账号已被封禁:{student.get('banned_reason') or '请联系教练解封'}",
+            form=form,
+            next_url=next_url,
+        )
+
+    # 登录成功
+    short_id = student.get("short_id") or ""
+    if not short_id:
+        return render_template_string(LOGIN_HTML, error="学员档案异常(缺 short_id),请联系教练", form=form, next_url=next_url)
+
+    try:
+        _set_student_session(short_id, int(student["id"]), student.get("real_name") or "")
+        if remember:
+            session.permanent = True
+    except Exception as _se:
+        app.logger.warning(f"[login_student] _set_student_session 失败: {_se}")
+
+    flash(f"✅ 欢迎回来,{student.get('real_name') or email}")
+    if next_url:
+        return redirect(next_url)
+    return redirect(url_for("student_me", short_id=short_id))
+
+
+@app.route("/logout", methods=["POST", "GET"])
+def logout_student():
+    """v3.10.0 · 登出(支持 GET / POST,GET 时直接清 session 不再弹确认)"""
+    try:
+        session.pop("student_short_id", None)
+        session.pop("student_uid", None)        # v3.10.0 旧 session key 清理
+        session.pop("student_id", None)
+        session.pop("student_name", None)
+    except Exception:
+        pass
+    flash("已退出登录")
+    return redirect(url_for("me_root"))
 
 
 # ---- /me（无 UID）→ UID 输入中转页 ----
@@ -10647,12 +12678,19 @@ _ME_PICKER_HTML = """
 
 @app.route("/me", methods=["GET"])
 def me_root():
-    """v3.9.6 · /me（无 UID）智能入口：session 有已登录学员 → 自动跳 /me/<uid>；
-    否则跳到 /me/ 输入中转页。"""
+    """v3.9.6 · /me（无 UID）智能入口：session 有已登录学员 → 自动跳 /me/<sid>；
+    否则跳到 /me/ 输入中转页。
+
+    v3.10.0 · 优先读 student_short_id(新主键),fallback 旧 student_uid(luogu_uid)
+    """
     try:
+        session_short = str(session.get("student_short_id") or "").strip()
+        if session_short:
+            return redirect(url_for("student_me", short_id=session_short))
+        # v3.10.0 · 兼容老 session key:student_uid 存的是 luogu_uid
         session_uid = str(session.get("student_uid") or "").strip()
         if session_uid and session_uid.isdigit():
-            return redirect(url_for("student_me", luogu_uid=session_uid))
+            return redirect(url_for("student_me", short_id=session_uid))
     except Exception:
         pass
     return redirect(url_for("me_picker"))
@@ -10700,10 +12738,10 @@ def studymate_ai_tutor():
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM activation_codes ac "
                 "JOIN students s ON s.id = ac.student_id "
-                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.luogu_uid = ? "
+                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.short_id = ? "
                 "AND ac.redeemed_at IS NOT NULL "
                 "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
-                (str(luogu_uid).strip(),),
+                (str(short_id).strip(),),
             ).fetchone()
         finally:
             conn.close()
@@ -10859,11 +12897,17 @@ def me_picker():
 
     v3.9.6 · 增强：若 session 里有已登录学员（180 天 cookie）→ 自动跳到 /me/<uid>，
     免去用户每次重新输入 UID 的麻烦。
+
+    v3.10.0 · 优先读 student_short_id,fallback 旧 student_uid
     """
     try:
+        session_short = str(session.get("student_short_id") or "").strip()
+        if session_short:
+            return redirect(url_for("student_me", short_id=session_short))
+        # v3.10.0 · 兼容老 session key
         session_uid = str(session.get("student_uid") or "").strip()
         if session_uid and session_uid.isdigit():
-            return redirect(url_for("student_me", luogu_uid=session_uid))
+            return redirect(url_for("student_me", short_id=session_uid))
     except Exception:
         pass
     return _ME_PICKER_HTML
@@ -10889,9 +12933,9 @@ def me_entry():
     return redirect(_me_url(luogu_uid), code=302)
 
 
-@app.route("/me/<luogu_uid>")
-def student_me(luogu_uid: str):
-    """v3.5.2 学员 Pro 自助面板
+@app.route("/me/<short_id>")
+def student_me(short_id: str):
+    """v3.10.0 学员 Pro 自助面板(用 short_id 替代 luogu_uid)
 
     简化模式：v3.5.2 暂用 luogu_uid 直链（家长端 token 同款模式）。
     未来 v3.5.3 接微信扫码/手机 OTP 后改为带签名 token。
@@ -10915,40 +12959,40 @@ def student_me(luogu_uid: str):
       例外：session["student_uid"] == luogu_uid 时（已登录学员可直访）。
     """
     import sys
-    print(f"[DEBUG student_me] uid={luogu_uid!r}", file=sys.stderr, flush=True)
+    print(f"[DEBUG student_me] short_id={short_id!r}", file=sys.stderr, flush=True)
 
     # v3.9.62 · token 校验：必须带有效签名 token；已登录学员（session 匹配）可免 token
     token = request.args.get("t", "")
-    session_uid = str(session.get("student_uid") or "").strip()
-    is_logged_in = (session_uid and session_uid == str(luogu_uid).strip())
-    if not is_logged_in and not _verify_me_token(luogu_uid, token):
+    session_short = str(session.get("student_short_id") or "").strip()
+    is_logged_in = (session_short and session_short == str(short_id).strip())
+    if not is_logged_in and not _verify_me_token(short_id, token):
         # 无 token 或 token 错误 → 404（不暴露"链接是否有效"信息）
-        app.logger.info(f"[v3.9.62 /me] reject uid={luogu_uid!r}: invalid/missing token")
+        app.logger.info(f"[v3.9.62 /me] reject short_id={short_id!r}: invalid/missing token")
         return render_template_string(REGISTER_INVALID_HTML,
             message=f"链接已失效或无权访问该学员页面"), 404
 
-    student = _admin_students.get_student_by_uid(luogu_uid)
-    print(f"[DEBUG student_me] get_student_by_uid result: {student is not None}, keys={list(student.keys()) if student else None}", file=sys.stderr, flush=True)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id)
+    print(f"[DEBUG student_me] get_student_by_short_id result: {student is not None}, keys={list(student.keys()) if student else None}", file=sys.stderr, flush=True)
 
-    # v3.9.6 · 同步会话：UID 匹配上 → 续期 session
+    # v3.9.6 · 同步会话：short_id 匹配上 → 续期 session
     if student:
         try:
-            _existing_uid = str(session.get("student_uid") or "").strip()
-            if _existing_uid != str(luogu_uid).strip():
-                # UID 切换了 → 重新写 session
+            _existing_short = str(session.get("student_short_id") or "").strip()
+            if _existing_short != str(short_id).strip():
+                # short_id 切换了 → 重新写 session
                 _set_student_session(
-                    str(luogu_uid).strip(),
+                    str(short_id).strip(),
                     int(student["id"]),
                     (student.get("real_name") or "").strip(),
                 )
             else:
-                # 同 UID 只刷新时间（保持 180 天活跃）
+                # 同 short_id 只刷新时间
                 session.permanent = True
         except Exception as _se:
             app.logger.debug(f"[student_me] session refresh: {_se}")
 
     if not student:
-        # v3.6 fallback：扫 reports/ 看有没有该 UID 的报告
+        # v3.6 fallback：扫 reports/ 看有没有该 short_id 的报告
         from pathlib import Path as _P_fb
         _has_report = False
         try:
@@ -10960,23 +13004,34 @@ def student_me(luogu_uid: str):
                     # v3.9.18 · 放宽：report.md 或 export_data.json 任一即可
                     if not (_d / "report.md").exists() and not (_d / "export_data.json").exists():
                         continue
-                    _sidecar = _d / "luogu_uid.txt"
-                    if _sidecar.exists():
+                    # v3.10.0 · 优先 short_id.txt → luogu_uid.txt → 目录名
+                    _matched = False
+                    _sc = _d / "short_id.txt"
+                    if _sc.exists():
                         try:
-                            if _sidecar.read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
-                                _has_report = True
-                                break
+                            if _sc.read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
+                                _matched = True
                         except Exception:
                             pass
-                    if str(luogu_uid) in _d.name:
+                    if not _matched:
+                        _sc2 = _d / "luogu_uid.txt"
+                        if _sc2.exists():
+                            try:
+                                if _sc2.read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
+                                    _matched = True
+                            except Exception:
+                                pass
+                    if not _matched and str(short_id) in _d.name:
+                        _matched = True
+                    if _matched:
                         _has_report = True
                         break
         except Exception:
             _has_report = False
         if not _has_report:
-            return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
-        # 有 report → 渲染轻量版（用 STUDENT_ME_HTML + 空 student dict）
-        return _render_student_me_lite(luogu_uid)
+            return render_template_string(REGISTER_INVALID_HTML, message=f"学员 {short_id} 未注册"), 404
+        # 有 report → 渲染轻量版
+        return _render_student_me_lite(short_id)
     progress = _admin_students.get_student_gesp_progress(int(student["id"])) or {}
     # v3.9.18 · GESP 第三层兜底：学生表的 gesp_highest_passed/gesp_latest_score 可能为 0
     # （用户自录后没重算 / 注册前在 gesp_exams 表里有记录但 students 表未更新），
@@ -11025,10 +13080,10 @@ def student_me(luogu_uid: str):
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM activation_codes ac "
                 "JOIN students s ON s.id = ac.student_id "
-                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.luogu_uid = ? "
+                "WHERE ac.sku IN ('parent_sub', 'parent_invite') AND s.short_id = ? "
                 "AND ac.redeemed_at IS NOT NULL "
                 "AND (ac.expires_at IS NULL OR ac.expires_at > datetime('now'))",
-                (str(luogu_uid).strip(),),
+                (str(short_id).strip(),),
             ).fetchone()
         finally:
             conn.close()
@@ -11049,10 +13104,10 @@ def student_me(luogu_uid: str):
     }
     # v3.9.3 · 把 name 传给 _find_latest_report_dir，让"目录名以 _姓名 结尾"兜底分支生效
     try:
-        latest = _find_latest_report_dir(luogu_uid, (student.get("real_name") or "") if student else "")
+        latest = _find_latest_report_dir(short_id, (student.get("real_name") or "") if student else "")
         # v3.9.64 · 按测评类型各找一份最新报告，分别提取 6 维/错题/AI 分
-        latest_noi_csp_dir = _find_latest_report_dir_by_type(luogu_uid, (student.get("real_name") or "") if student else "", "noi_csp")
-        latest_gesp_dir = _find_latest_report_dir_by_type(luogu_uid, (student.get("real_name") or "") if student else "", "gesp")
+        latest_noi_csp_dir = _find_latest_report_dir_by_type(short_id, (student.get("real_name") or "") if student else "", "noi_csp")
+        latest_gesp_dir = _find_latest_report_dir_by_type(short_id, (student.get("real_name") or "") if student else "", "gesp")
         achievements["latest_noi_csp_dir"] = latest_noi_csp_dir.name if latest_noi_csp_dir else None
         achievements["latest_gesp_dir"] = latest_gesp_dir.name if latest_gesp_dir else None
         # v3.9.64 · 优先用 NOI-CSP 作为主报告（沿用旧行为），如果只有 GESP 则用 GESP
@@ -11134,8 +13189,8 @@ def student_me(luogu_uid: str):
     try:
         own_stage = _admin_students._grade_to_stage(student.get("grade"))  # noqa
         for p in ("month", "week", "all"):
-            my_rank["all_stage"][p] = find_my_rank(luogu_uid, stage="all", period=p)
-            my_rank["own_stage"][p] = find_my_rank(luogu_uid, stage=own_stage, period=p)
+            my_rank["all_stage"][p] = find_my_rank(short_id, stage="all", period=p)
+            my_rank["own_stage"][p] = find_my_rank(short_id, stage=own_stage, period=p)
     except Exception as _e_rank:
         app.logger.debug(f"[student_me] my_rank 计算失败: {_e_rank}")
 
@@ -11183,7 +13238,7 @@ def student_me(luogu_uid: str):
             "has_html": _html.exists(),
             "has_pdf": bool(_pdf and _pdf.exists()),
             # v3.9.67 · 海报按报告类型分文件 (share-card_gesp.png vs share-card_noi_csp.png)
-            "share_url": f"/me/{luogu_uid}/share-card.png?exam_type={_type}",
+            "share_url": f"/me/{short_id}/share-card.png?exam_type={_type}",
             "has_poster": (_d / f"share-card{_share_suffix}.png").exists() or (_d / "share-card.png").exists(),
         }
     latest_noi_csp_card = _pack_report_card(latest_noi_csp_dir, "noi_csp")
@@ -11211,13 +13266,19 @@ def student_me(luogu_uid: str):
                 continue
             # 该 dir 属于该学员？
             matched = False
-            if luogu_uid:
+            if short_id:
                 try:
-                    if (d / "luogu_uid.txt").read_text(encoding="utf-8", errors="replace").strip() == str(luogu_uid).strip():
+                    if (d / "short_id.txt").read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
                         matched = True
                 except Exception:
                     pass
-            if not matched and luogu_uid and str(luogu_uid) in d.name:
+            if not matched:
+                try:
+                    if (d / "luogu_uid.txt").read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
+                        matched = True
+                except Exception:
+                    pass
+            if not matched and short_id and str(short_id) in d.name:
                 matched = True
             if not matched and student_dict.get("real_name") and d.name.endswith("_" + "".join(c for c in student_dict["real_name"] if c.isalnum())):
                 matched = True
@@ -11252,7 +13313,7 @@ def student_me(luogu_uid: str):
         student=student_dict,
         progress=progress or {},
         has_parent_sub=has_parent_sub,
-        token=luogu_uid,
+        token=short_id,
         award_summary=_admin_students.get_student_award_summary(int(student["id"])) or {},
         csp_award_types=_admin_students.CSP_AWARD_TYPES,
         csp_award_levels=_admin_students.CSP_AWARD_LEVELS,
@@ -11263,7 +13324,7 @@ def student_me(luogu_uid: str):
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
         # v3.9.7 · 历史报告列表（从原 /report/student 页面合并过来）
-        report_htmls=_list_student_report_htmls(luogu_uid, (student.get("real_name") or "") if student else "", limit=8),
+        report_htmls=_list_student_report_htmls(short_id, (student.get("real_name") or "") if student else "", limit=8),
         # v3.9.46 · 我的排名（C 形态卡片用）
         my_rank=my_rank,
         # v3.9.64 · 按报告类型分别的"最新报告"卡片（NOI-CSP / GESP / 家长订阅）
@@ -11273,11 +13334,15 @@ def student_me(luogu_uid: str):
         # v3.9.67 · 分享海报 / QR 码都按 primary_exam_type 切
         primary_exam_type=primary_exam_type,
         primary_exam_type_for_share=primary_exam_type_for_share,
+        # v3.9.74 · VJudge 跨平台数据上下文(取代 AtCoder,供模板渲染)
+        vjudge_ctx=get_vjudge_context(short_id),
+        # v3.10.0.4 · 管理员代看标记(顶部红色横幅 + 退出代看按钮)
+        is_impersonating=bool(session.get("is_impersonating")),
     )
 
 
-@app.route("/me/<luogu_uid>/report-data/<dir_name>")
-def student_me_report_data(luogu_uid: str, dir_name: str):
+@app.route("/me/<short_id>/report-data/<dir_name>")
+def student_me_report_data(short_id: str, dir_name: str):
     """v3.9.18 · 半完成报告（data_only）的数据预览：6 维评分 + 错题 + 抓题概况。
 
     学员点「📊 数据预览」按钮直达这里。直接读 export_data.json 渲染，
@@ -11292,13 +13357,20 @@ def student_me_report_data(luogu_uid: str, dir_name: str):
     report_dir = reports_root / dir_name
     if not report_dir.exists() or not (report_dir / "export_data.json").exists():
         return render_template_string(REGISTER_INVALID_HTML, message="报告目录不存在或已删除"), 404
-    # 校验该 dir 与该 uid 匹配
+    # 校验该 dir 与该 short_id 匹配（兼容老 luogu_uid sidecar）
     try:
-        _sidecar = report_dir / "luogu_uid.txt"
-        if _sidecar.exists():
-            if _sidecar.read_text(encoding="utf-8", errors="replace").strip() != str(luogu_uid).strip():
-                return render_template_string(REGISTER_INVALID_HTML, message="无权限查看该报告"), 403
-        elif str(luogu_uid) not in dir_name:
+        _ok = False
+        _sc_short = report_dir / "short_id.txt"
+        _sc_luogu = report_dir / "luogu_uid.txt"
+        if _sc_short.exists():
+            if _sc_short.read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
+                _ok = True
+        if not _ok and _sc_luogu.exists():
+            if _sc_luogu.read_text(encoding="utf-8", errors="replace").strip() == str(short_id).strip():
+                _ok = True
+        if not _ok and not _sc_short.exists() and not _sc_luogu.exists() and str(short_id) in dir_name:
+            _ok = True
+        if not _ok:
             return render_template_string(REGISTER_INVALID_HTML, message="无权限查看该报告"), 403
     except Exception:
         pass
@@ -11316,7 +13388,7 @@ def student_me_report_data(luogu_uid: str, dir_name: str):
     return render_template_string(
         _REPORT_DATA_PREVIEW_HTML,
         dir_name=dir_name,
-        luogu_uid=luogu_uid,
+        luogu_uid=short_id,    # 模板里旧名 luogu_uid 暂保留显示（=short_id）
         achievements=ach,
         solved=solved,
         failed=failed,
@@ -11557,7 +13629,7 @@ def _render_student_me_lite(luogu_uid: str):
     return render_template_string(
         STUDENT_ME_LITE_HTML,
         student=student_dict,
-        token=luogu_uid,
+        token=short_id,
         achievements=achievements,
         mistake_count=len(achievements.get("mistakes") or []),
         report_htmls=_report_htmls,
@@ -12443,7 +14515,7 @@ def _extract_achievements_from_report(report_md: str) -> dict:
 
 
 
-def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict | None:
+def _build_share_card_data(luogu_uid_or_short_id: str, exam_type: str = "noi_csp") -> dict | None:
     """组装"9 月我家孩子位置"分享卡所需数据
 
     v3.9.68 · 新增 exam_type 参数：
@@ -12471,13 +14543,15 @@ def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict |
     except Exception:
         from gesp_estimator import compute_exemptions
 
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    # v3.10.0 · 兼容 luogu_uid + short_id 两种 key
+    _key = luogu_uid_or_short_id
+    student = _admin_students.get_student_by_short_id(_key) or _admin_students.get_student_by_uid(_key)
 
     # v3.8 · 海报兜底：学员档案不存在时，从 reports/<uid> 找 export_data.json
     # 反查姓名 + city/school，避免老用户/匿名报告生成时海报直接失败
     if not student:
         try:
-            report_dir = _find_latest_report_dir(luogu_uid, "")
+            report_dir = _find_latest_report_dir(_key, "")
             if report_dir is not None:
                 export_json = report_dir / "export_data.json"
                 if export_json.exists():
@@ -12485,7 +14559,7 @@ def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict |
                     export_meta = (export_data.get("meta") or {})
                     student = {
                         "id": 0,  # 虚拟 ID（不参与 DB 写入）
-                        "luogu_uid": luogu_uid,
+                        "luogu_uid": _key,
                         "real_name": export_meta.get("student_name") or "学员",
                         "city": export_meta.get("city") or "",
                         "province": export_meta.get("province") or "",
@@ -12495,7 +14569,7 @@ def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict |
                         "_from_export": True,  # 标记，避免后续写 DB
                     }
                     app.logger.info(
-                        f"v3.8 海报兜底: UID {luogu_uid} 学员档案不存在, 从 {export_json} 取姓名={student.get('real_name')}"
+                        f"v3.8 海报兜底: key {_key} 学员档案不存在, 从 {export_json} 取姓名={student.get('real_name')}"
                     )
         except Exception as _e:
             app.logger.warning(f"v3.8 海报兜底读取 export_data.json 失败: {_e}")
@@ -12718,7 +14792,9 @@ def _build_share_card_data(luogu_uid: str, exam_type: str = "noi_csp") -> dict |
 
     return {
         "name": name,
-        "uid": luogu_uid,
+        # v3.10.0.6 · 修复:函数形参是 luogu_uid_or_short_id,旧代码用 luogu_uid 会 NameError
+        # 当学员是邮箱注册(short_id 字符串)时,这个分支会抛异常,导致 share-card.png 预渲染失败
+        "uid": luogu_uid_or_short_id,
         "gesp_level": gesp_level,
         "gesp_score": gesp_score,
         "segment": segment,
@@ -13381,8 +15457,244 @@ def _render_share_card_png(data: dict, qr_url: str, exam_type: str = "noi_csp") 
     return buf.getvalue()
 
 
-@app.route("/me/<luogu_uid>/share-card.png", methods=["GET"])
-def share_card_png(luogu_uid: str):
+def _render_vjudge_share_card_png(data: dict, qr_url: str) -> bytes:
+    """v3.10.0.7 · VJudge 跨平台报告专属海报
+
+    与洛谷版海报布局完全独立(深琥珀色主题),针对 VJudge 数据定制:
+      - 标题:VJudge 跨平台数据测评报告
+      - 副标题:基于 vjudge.net 跨平台提交数据
+      - 主统计:总提交 / 总 AC / AC 率 / 解出题数
+      - 平台分布:覆盖的 OJ 平台(Codeforces / AtCoder / POJ / 洛谷 等)
+      - 去除:洛谷版专属的"AI 性格画像 / 高频算法 / GESP 真考 / 8 段位 / 关键赛事倒计时"
+        (VJudge 没有源码,这些分析无从进行)
+    """
+    import io as _io
+    from matplotlib.patches import FancyBboxPatch
+    import matplotlib.pyplot as plt
+
+    # ── 颜色(VJudge 主题:深琥珀 + 紫色) ──
+    COLOR_PRIMARY = "#B45309"          # 深琥珀
+    COLOR_PRIMARY_DK = "#78350F"       # 暗琥珀
+    COLOR_PRIMARY_LT = "#FCD34D"       # 亮琥珀
+    COLOR_BG = "#FFFBEB"               # 浅琥珀背景
+    COLOR_BG_CARD = "#FFFFFF"
+    COLOR_TEXT = "#1F2937"
+    COLOR_TEXT_LT = "#6B7280"
+    COLOR_TEXT_XL = "#9CA3AF"
+    COLOR_AMBER = "#F59E0B"
+    COLOR_GREEN = "#10B981"
+    COLOR_RED = "#EF4444"
+    COLOR_PURPLE = "#7C3AED"
+
+    # ── 准备画布 ──
+    fig = plt.figure(figsize=(10.5, 14.7), facecolor=COLOR_BG)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, 9)
+    ax.set_ylim(0, 14)
+    ax.set_axis_off()
+
+    def _rounded(x, y, w, h, color, r=0.05, ec="none", lw=0):
+        p = FancyBboxPatch((x, y), w, h, boxstyle=f"round,pad=0,rounding_size={r}",
+                           linewidth=lw, edgecolor=ec, facecolor=color)
+        ax.add_patch(p)
+        return p
+
+    # ── 顶部紫色 banner(沿用洛谷版紫色背景,体现"AI 测评"系列) ──
+    _rounded(0, 12.5, 9, 1.5, "#5B21B6", r=0.05)
+    # 主标题
+    ax.text(4.5, 13.50, "VJudge 跨平台数据测评报告",
+            ha="center", va="center", fontsize=22, color="white", fontweight="bold")
+    ax.text(4.5, 12.90, "AI 测评编程能力 · 基于 vjudge.net 跨平台数据",
+            ha="center", va="center", fontsize=11, color="#DDD6FE")
+
+    # ── UID 卡片(白色圆角) ──
+    _rounded(0.5, 11.30, 8, 0.95, COLOR_BG_CARD, r=0.10, ec="#E5E7EB", lw=1)
+    ax.text(0.85, 11.80, "选手", ha="left", va="center", fontsize=11, color=COLOR_TEXT_LT)
+    ax.text(0.85, 11.45, data.get("name") or "选手",
+            ha="left", va="center", fontsize=15, color=COLOR_TEXT, fontweight="bold")
+    ax.text(8.20, 11.78, "UID", ha="right", va="center", fontsize=10, color=COLOR_TEXT_LT)
+    ax.text(8.20, 11.45, data.get("uid") or "—",
+            ha="right", va="center", fontsize=15, color=COLOR_TEXT, fontweight="bold", family="monospace")
+
+    # ── AI 定级卡片 ──
+    _rounded(0.5, 9.95, 8, 1.20, COLOR_BG_CARD, r=0.10, ec="#E5E7EB", lw=1)
+    ax.text(0.85, 10.85, "AI 评级", ha="left", va="center", fontsize=11, color=COLOR_TEXT_LT)
+    level_text = data.get("ai_level") or "初步阶段"
+    ax.text(0.85, 10.35, level_text, ha="left", va="center",
+            fontsize=22, color=COLOR_PRIMARY, fontweight="bold")
+    if data.get("core_reading"):
+        ax.text(0.85, 10.05, f"💡 {data['core_reading'][:38]}{'…' if len(data.get('core_reading') or '') > 38 else ''}",
+                ha="left", va="center", fontsize=9.5, color=COLOR_TEXT_LT, style="italic")
+
+    # ── VJudge 主统计四宫格(总提交 / AC / AC率 / 解出题数) ──
+    stats = [
+        ("总提交", data.get("total_submissions", 0), COLOR_PURPLE),
+        ("总 AC", data.get("total_ac", 0), COLOR_GREEN),
+        ("AC 率", f"{data.get('ac_rate', 0)*100:.1f}%" if isinstance(data.get("ac_rate"), (int, float)) else "—", COLOR_PRIMARY),
+        ("解出题数", data.get("solved_count", 0), COLOR_AMBER),
+    ]
+    card_w = 1.95
+    card_h = 1.40
+    gap = 0.075
+    start_x = 0.5
+    y_stat = 8.10
+    for i, (label, val, color) in enumerate(stats):
+        x = start_x + i * (card_w + gap)
+        _rounded(x, y_stat, card_w, card_h, COLOR_BG_CARD, r=0.10, ec="#E5E7EB", lw=1)
+        # 顶部彩条
+        _rounded(x, y_stat + card_h - 0.18, card_w, 0.18, color, r=0.05)
+        ax.text(x + card_w / 2, y_stat + card_h / 2 + 0.15, str(val),
+                ha="center", va="center", fontsize=22, color=color, fontweight="bold")
+        ax.text(x + card_w / 2, y_stat + 0.30, label,
+                ha="center", va="center", fontsize=10, color=COLOR_TEXT_LT)
+
+    # ── 平台分布(覆盖的 OJ 平台) ──
+    _rounded(0.5, 6.30, 8, 1.55, COLOR_BG_CARD, r=0.10, ec="#E5E7EB", lw=1)
+    ax.text(0.85, 7.65, "🌐 覆盖 OJ 平台", ha="left", va="center",
+            fontsize=12, color=COLOR_PRIMARY_DK, fontweight="bold")
+    # v3.10.0.12 · 兼容 list[dict] / str 两种格式, 字符串(老版本拼的) 简单解析一下
+    raw_oj = data.get("oj_distribution")
+    if isinstance(raw_oj, str):
+        _oj_list: list[dict] = []
+        if raw_oj.strip() and "暂无" not in raw_oj:
+            for _part in raw_oj.replace("、", ",").split(","):
+                _part = _part.strip()
+                if not _part:
+                    continue
+                _bits = _part.rsplit(" ", 1)
+                if len(_bits) == 2 and _bits[1].isdigit():
+                    _oj_list.append({
+                        "name": _bits[0], "oj": _bits[0],
+                        "solved": int(_bits[1]), "solved_count": int(_bits[1]),
+                    })
+        oj_dist = _oj_list
+    elif isinstance(raw_oj, list):
+        oj_dist = raw_oj
+    else:
+        oj_dist = []
+    if oj_dist:
+        # 取前 6 个平台显示
+        top_oj = oj_dist[:6]
+        n = len(top_oj)
+        for i, item in enumerate(top_oj):
+            if not isinstance(item, dict):
+                continue
+            col = i % 3
+            row = i // 3
+            x_pos = 0.85 + col * 2.55
+            y_pos = 7.20 - row * 0.42
+            oj_name = item.get("name") or item.get("oj") or str(item.get("oj_id", ""))
+            oj_solved = item.get("solved") or item.get("solved_count") or 0
+            oj_total = item.get("total") or item.get("submissions") or 0
+            ax.add_patch(_rounded(x_pos - 0.15, y_pos - 0.15, 0.30, 0.30, COLOR_PRIMARY, r=0.05))
+            ax.text(x_pos, y_pos, "●", ha="center", va="center",
+                    fontsize=14, color="white", fontweight="bold")
+            ax.text(x_pos + 0.25, y_pos + 0.05, str(oj_name),
+                    ha="left", va="center", fontsize=11, color=COLOR_TEXT, fontweight="bold")
+            ax.text(x_pos + 0.25, y_pos - 0.20, f"解 {oj_solved} / 提交 {oj_total}",
+                    ha="left", va="center", fontsize=8.5, color=COLOR_TEXT_LT)
+    else:
+        ax.text(4.5, 7.20, "（暂无平台数据）", ha="center", va="center",
+                fontsize=11, color=COLOR_TEXT_XL, style="italic")
+
+    # ── 提交分布条(AC / WA / TLE / RE / CE) ──
+    _rounded(0.5, 4.65, 8, 1.40, COLOR_BG_CARD, r=0.10, ec="#E5E7EB", lw=1)
+    ax.text(0.85, 5.85, "📊 提交结果分布", ha="left", va="center",
+            fontsize=12, color=COLOR_PRIMARY_DK, fontweight="bold")
+    verdict_items = [
+        ("AC", data.get("total_ac", 0), COLOR_GREEN),
+        ("WA", data.get("total_wa", 0), COLOR_AMBER),
+        ("TLE", data.get("total_tle", 0), COLOR_RED),
+        ("RE", data.get("total_re", 0), COLOR_PURPLE),
+        ("CE", data.get("total_ce", 0), "#94A3B8"),
+    ]
+    # 单条横向条形图
+    total_v = sum(v for _, v, _ in verdict_items) or 1
+    bar_x = 0.85
+    bar_y = 5.10
+    bar_w_total = 7.30
+    bar_h = 0.40
+    cur_x = bar_x
+    for label, val, color in verdict_items:
+        if val <= 0:
+            continue
+        seg_w = bar_w_total * (val / total_v)
+        ax.add_patch(_rounded(cur_x, bar_y, seg_w, bar_h, color, r=0.02))
+        cur_x += seg_w
+    # 标签行
+    label_x = bar_x
+    for label, val, color in verdict_items:
+        if val <= 0:
+            continue
+        seg_w = bar_w_total * (val / total_v)
+        cx = label_x + seg_w / 2
+        ax.text(cx, bar_y - 0.20, f"{label} {val}",
+                ha="center", va="top", fontsize=8.5, color=COLOR_TEXT_LT)
+        label_x += seg_w
+
+    # ── AI 核心解读(1 句话,从 export_data 提取) ──
+    _rounded(0.5, 3.05, 8, 1.40, "#FEF3C7", r=0.10, ec=COLOR_AMBER, lw=1)
+    ax.text(0.85, 4.25, "💡 AI 核心解读", ha="left", va="center",
+            fontsize=12, color=COLOR_PRIMARY_DK, fontweight="bold")
+    core = (data.get("core_reading") or "跨平台题目覆盖广，AC 率较高，算法功底扎实。建议针对薄弱平台做专项训练。").strip()
+    # 自动换行
+    import textwrap
+    lines = textwrap.wrap(core, width=36)
+    for i, line in enumerate(lines[:4]):
+        ax.text(0.85, 3.95 - i * 0.30, line,
+                ha="left", va="center", fontsize=10, color=COLOR_TEXT)
+
+    # ── QR 区 + 文字 ──
+    _rounded(5.55, 0.40, 2.95, 2.20, "white", r=0.05, ec="#E5E7EB", lw=1)
+    qr_rendered = False
+    try:
+        import qrcode
+        from PIL import Image as _PILImage
+        from qrcode.image.pil import PilImage as _QR_FACTORY
+        qr = qrcode.QRCode(version=2, box_size=8, border=2, image_factory=_QR_FACTORY)
+        qr.add_data(qr_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        qr_buf = _io.BytesIO()
+        qr_img.save(qr_buf, "PNG")
+        qr_buf.seek(0)
+        qr_pil = _PILImage.open(qr_buf).convert("RGBA")
+        qr_target = 1.5
+        qr_left = 6.975 - qr_target / 2
+        qr_bottom = 1.45 - qr_target / 2
+        ax.imshow(qr_pil, extent=[qr_left, qr_left + qr_target, qr_bottom, qr_bottom + qr_target], zorder=10)
+        qr_rendered = True
+    except Exception:
+        pass
+    if not qr_rendered:
+        ax.text(6.975, 1.55, "⚠", ha="center", va="center", fontsize=32, color=COLOR_AMBER)
+        ax.text(6.975, 1.00, "扫码暂不可用", ha="center", va="center", fontsize=10, color=COLOR_TEXT_LT)
+    # 左侧文字
+    ax.text(0.50, 2.40, "Q", ha="left", va="center",
+            fontsize=13, color="white", fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor=COLOR_PRIMARY, edgecolor="none"))
+    ax.text(0.80, 2.40, "扫码查看完整 AI 报告",
+            ha="left", va="center", fontsize=13, color=COLOR_TEXT, fontweight="bold")
+    ax.text(0.50, 2.00, "免费 AI 测评 · 3 分钟出报告",
+            ha="left", va="center", fontsize=10, color=COLOR_TEXT_LT)
+    ax.text(0.50, 1.50, qr_url, ha="left", va="center",
+            fontsize=8, color=COLOR_TEXT_LT, family="monospace")
+    ax.text(0.50, 1.10, "● AI 估算 · 不替代真考",
+            ha="left", va="center", fontsize=8.5, color=COLOR_TEXT_XL)
+    ax.text(0.50, 0.80, f"● 最后更新 {data.get('asof', '')}",
+            ha="left", va="center", fontsize=8.5, color=COLOR_TEXT_XL)
+    ax.text(0.50, 0.50, "● VJudge 数据来自 vjudge.net, 仅作 AI 测评参考",
+            ha="left", va="center", fontsize=8.5, color=COLOR_TEXT_XL)
+
+    # ── 输出 PNG ──
+    buf = _io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor(), dpi=120)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+@app.route("/me/<short_id>/share-card.png", methods=["GET"])
+def share_card_png(short_id: str):
     """v3.5.2 传播期 · 位置图 PNG（学员自助中心"生成"按钮所调）
 
     v3.8 · 优先读取报告生成时已预渲染的 PNG（v3.8 异步任务产物），
@@ -13391,21 +15703,27 @@ def share_card_png(luogu_uid: str):
     v3.9.37 · 海报缺失时自动重新生成（兜底渲染），并把产物落盘到
     `reports/<uid>/share-card.png`，下次访问直接走缓存（不再走 5-15s 渲染）。
     适用于：(1) deploy.sh 误删 reports/；(2) 老报告未渲染海报。
+
+    v3.10.0 · 路径参数 luogu_uid → short_id(优先用 short_id 查学员,
+    找不到再 fallback 到 luogu_uid 老逻辑)
     """
     # 1) 优先从最新 report 目录读取已预渲染的 PNG
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    _key = short_id
+    student = _admin_students.get_student_by_short_id(_key) or _admin_students.get_student_by_uid(_key)
     _q_exam_type = (request.args.get("exam_type") or "noi_csp").strip().lower()
-    if _q_exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+    if _q_exam_type not in ("noi_csp", "gesp", "parent_subscribe", "vjudge"):
         _q_exam_type = "noi_csp"
     # v3.9.68 · 三种类型的后缀: _noi_csp / _gesp / _parent
+    # v3.10.0.5 · 新增 vjudge 后缀(走 share-card_vjudge.png)
     _SUFFIX_MAP = {
         "noi_csp": "_noi_csp",
         "gesp": "_gesp",
         "parent_subscribe": "_parent",
+        "vjudge": "_vjudge",
     }
     _q_suffix = _SUFFIX_MAP[_q_exam_type]
     if student:
-        report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+        report_dir = _find_latest_report_dir(_key, student.get("real_name") or "")
         if report_dir:
             # v3.9.67 · 按 exam_type 取专属缓存 (share-card_gesp.png vs share-card_noi_csp.png)
             cached = report_dir / f"share-card{_q_suffix}.png"
@@ -13413,6 +15731,13 @@ def share_card_png(luogu_uid: str):
                 resp = send_file(str(cached), mimetype="image/png", conditional=True)
                 resp.headers["Cache-Control"] = "public, max-age=600"
                 return resp
+            # v3.10.0.5 · vjudge 类型: 没专属缓存时 fall back 到 share-card.png(兼容性)
+            if _q_exam_type == "vjudge":
+                cached_fb = report_dir / "share-card.png"
+                if cached_fb.exists():
+                    resp = send_file(str(cached_fb), mimetype="image/png", conditional=True)
+                    resp.headers["Cache-Control"] = "public, max-age=600"
+                    return resp
             # 兜底取最新一份（兼容老路径：仅 share-card.png）
             # v3.9.67 · 但仅当 exam_type 与老缓存一致时才用 —— 否则按新 exam_type 重新渲染
             # （老 share-card.png 可能是 NOI 主题, 用户要求 GESP 时不能用老缓存顶替）
@@ -13431,7 +15756,7 @@ def share_card_png(luogu_uid: str):
                 )
     # 2) 兜底：现场渲染（5-15s），并把结果落盘到 reports/<uid>/share-card.png
     # v3.9.68 · 按 exam_type 找报告（避免 GESP 报告的 AI 定级被回退到 CSP 兜底）
-    data = _build_share_card_data(luogu_uid, exam_type=_q_exam_type)
+    data = _build_share_card_data(_key, exam_type=_q_exam_type)
     if not data:
         return "UID 未注册", 404
     # v3.9.68 · QR 码基础 URL：优先用环境变量 PUBLIC_BASE_URL（公网域名），
@@ -13442,20 +15767,139 @@ def share_card_png(luogu_uid: str):
     else:
         base = request.host_url.rstrip("/")
     # v3.9.67 · QR 码按 exam_type 带参,扫码后 /r/<uid> 路由能找到对应类型报告
-    qr_url = f"{base}/r/{luogu_uid}?exam_type={_q_exam_type}"  # v3.7 · 指向新建的报告预览中转页
+    qr_url = f"{base}/r/{_key}?exam_type={_q_exam_type}"  # v3.7 · 指向新建的报告预览中转页
     try:
         # v3.9.67 · 兜底渲染也按 exam_type 切主题
-        png_bytes = _render_share_card_png(data, qr_url, exam_type=_q_exam_type)
+        # v3.10.0.7 · VJudge 走完全独立的 _render_vjudge_share_card_png(去除 AI 性格画像/算法标签/GESP/8段位 等)
+        if _q_exam_type == "vjudge":
+            # 给 data 补充 VJudge 字段(若 _build_share_card_data 没填)
+            try:
+                from task_store import _get_conn as _ts_conn
+                _vj = get_vjudge_context(_key) or {}
+                data.setdefault("total_submissions", int(_vj.get("total_submissions") or 0))
+                data.setdefault("total_ac", int(_vj.get("total_ac") or 0))
+                data.setdefault("total_wa", int(_vj.get("total_wa") or 0))
+                data.setdefault("total_tle", int(_vj.get("total_tle") or 0))
+                data.setdefault("total_re", int(_vj.get("total_re") or 0))
+                data.setdefault("total_ce", int(_vj.get("total_ce") or 0))
+                data.setdefault("solved_count", int(_vj.get("solved_count") or 0))
+                data.setdefault("ac_rate", float(_vj.get("ac_rate") or 0))
+
+                # v3.10.0.12 · 平台分布三段式回退:
+                # 1) get_vjudge_context() 返回的 oj_stats 字段 (来自 student_vjudge_oj_stats 表)
+                # 2) export_data.json 里的 oj_distribution (list[dict] 或 str)
+                # 3) student_vjudge_solved 表反推: GROUP BY oj_source (最后兜底, 即便 fetcher 没升级 heavy 也能展示)
+                _oj_dist: list[dict] = []
+                # 段 1: 读 oj_stats
+                for _o in (_vj.get("oj_stats") or []):
+                    if isinstance(_o, dict):
+                        _oj_dist.append({
+                            "name": _o.get("oj") or _o.get("name") or "",
+                            "oj": _o.get("oj") or _o.get("name") or "",
+                            "solved": int(_o.get("count") or _o.get("solved") or 0),
+                            "solved_count": int(_o.get("count") or _o.get("solved") or 0),
+                        })
+                # 段 2: 读 export_data.vjudge_data.oj_distribution (list[dict] 或 str)
+                if not _oj_dist:
+                    try:
+                        _exp_vj_dir = _find_latest_report_dir(_key, (student or {}).get("real_name") or "")
+                        if _exp_vj_dir:
+                            _exp_p = _exp_vj_dir / "export_data.json"
+                            if _exp_p.exists():
+                                import json as _json2
+                                _exp_data = _json2.loads(_exp_p.read_text(encoding="utf-8", errors="replace"))
+                                _raw_dist = (_exp_data.get("vjudge_data") or {}).get("oj_distribution")
+                                if isinstance(_raw_dist, list):
+                                    for _o in _raw_dist:
+                                        if isinstance(_o, dict):
+                                            _oj_dist.append({
+                                                "name": _o.get("name") or _o.get("oj") or "",
+                                                "oj": _o.get("oj") or _o.get("name") or "",
+                                                "solved": int(_o.get("solved") or _o.get("solved_count") or _o.get("count") or 0),
+                                                "solved_count": int(_o.get("solved_count") or _o.get("solved") or _o.get("count") or 0),
+                                            })
+                                elif isinstance(_raw_dist, str) and _raw_dist.strip() and "暂无" not in _raw_dist:
+                                    # 旧版拼出来的 "OJ1 30、OJ2 15" 字符串, 简单解析
+                                    for _part in _raw_dist.replace("、", ",").split(","):
+                                        _part = _part.strip()
+                                        if not _part:
+                                            continue
+                                        _bits = _part.rsplit(" ", 1)
+                                        if len(_bits) == 2 and _bits[1].isdigit():
+                                            _oj_dist.append({
+                                                "name": _bits[0], "oj": _bits[0],
+                                                "solved": int(_bits[1]), "solved_count": int(_bits[1]),
+                                            })
+                    except Exception as _ex_e:
+                        app.logger.debug(f"[v3.10.0.12] export_data.json OJ 分布解析失败: {_ex_e}")
+                # 段 3: 从 student_vjudge_solved 表反推 (兜底)
+                if not _oj_dist:
+                    try:
+                        _tsc = _ts_conn()
+                        try:
+                            _srow = _tsc.execute(
+                                "SELECT id FROM students WHERE short_id=? OR luogu_uid=? LIMIT 1",
+                                (_key, _key),
+                            ).fetchone()
+                            if _srow:
+                                _solved_rows = _tsc.execute(
+                                    "SELECT oj_source, COUNT(*) AS n FROM student_vjudge_solved "
+                                    "WHERE student_id=? AND oj_source != '' "
+                                    "GROUP BY oj_source ORDER BY n DESC LIMIT 10",
+                                    (int(_srow["id"]),),
+                                ).fetchall()
+                                for _r in _solved_rows:
+                                    _oj_dist.append({
+                                        "name": _r["oj_source"] or "",
+                                        "oj": _r["oj_source"] or "",
+                                        "solved": int(_r["n"] or 0),
+                                        "solved_count": int(_r["n"] or 0),
+                                    })
+                        finally:
+                            _tsc.close()
+                    except Exception as _ts_e:
+                        app.logger.debug(f"[v3.10.0.12] solved 表反推 OJ 分布失败: {_ts_e}")
+                data["oj_distribution"] = _oj_dist
+                # 报告里的 AI 评级/核心解读
+                _vj_dir = _find_latest_report_dir(_key, student.get("real_name") or "")
+                if _vj_dir:
+                    _exp_path = _vj_dir / "export_data.json"
+                    if _exp_path.exists():
+                        import json as _json
+                        try:
+                            _exp = _json.loads(_exp_path.read_text(encoding="utf-8", errors="replace"))
+                            if not data.get("core_reading"):
+                                _rsm = _exp.get("vjudge_data", {}).get("register_time") or ""
+                                data["core_reading"] = f"基于 vjudge.net 真实数据, 跨平台覆盖 {len(_oj_dist)} 个 OJ。"
+                        except Exception:
+                            pass
+            except Exception as _e:
+                app.logger.warning(f"[v3.10.0.7] VJudge 数据补充失败(不影响主流程): {_e}")
+            # VJudge 学员没 GESP, 也不需要 GESP/段位/赛事倒计时
+            data["gesp_level"] = None
+            data["gesp_score"] = None
+            data["segment"] = None
+            data["events"] = []
+            data["can_j"] = False
+            data["can_s"] = False
+            data["gap_j"] = "无 GESP 数据"
+            data["gap_s"] = "无 GESP 数据"
+            data["last_exam"] = None
+            data["ai_level"] = data.get("ai_level") or "跨平台测评 · 初步阶段"
+            data["asof"] = data.get("asof") or _NOW_BJ().strftime("%Y-%m-%d")
+            png_bytes = _render_vjudge_share_card_png(data, qr_url)
+        else:
+            png_bytes = _render_share_card_png(data, qr_url, exam_type=_q_exam_type)
     except Exception as _e:
-        app.logger.exception(f"v3.9.37 share-card.png 兜底渲染失败: UID={luogu_uid}: {_e}")
+        app.logger.exception(f"v3.9.37 share-card.png 兜底渲染失败: key={_key}: {_e}")
         return f"海报生成失败: {_e}", 500
     # v3.9.37 · 落盘缓存（让下次访问走 send_file 快速返回）
     try:
         # 解析 _find_latest_report_dir 同一份报告目录（如果存在）
         if student:
-            _dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+            _dir = _find_latest_report_dir(_key, student.get("real_name") or "")
         else:
-            _dir = _find_latest_report_dir(luogu_uid, data.get("name") or "")
+            _dir = _find_latest_report_dir(_key, data.get("name") or "")
         if _dir:
             _dir.mkdir(parents=True, exist_ok=True)
             (_dir / f"share-card{_q_suffix}.png").write_bytes(png_bytes)
@@ -13465,7 +15909,7 @@ def share_card_png(luogu_uid: str):
             )
         else:
             # 没有任何 report 目录：建一个 reports/<uid>/share-card.png 占位
-            _fallback = Path(__file__).parent / "reports" / luogu_uid
+            _fallback = Path(__file__).parent / "reports" / _key
             _fallback.mkdir(parents=True, exist_ok=True)
             (_fallback / f"share-card{_q_suffix}.png").write_bytes(png_bytes)
             (_fallback / "share-card.png").write_bytes(png_bytes)
@@ -13476,7 +15920,7 @@ def share_card_png(luogu_uid: str):
         # 缓存失败不影响本次返回
         app.logger.warning(f"v3.9.37 share-card.png 落盘缓存失败（不影响本次返回）: {_cache_e}")
     return Response(png_bytes, mimetype="image/png", headers={
-        "Content-Disposition": f'inline; filename="share-card-{_q_exam_type}-{luogu_uid}.png"',
+        "Content-Disposition": f'inline; filename="share-card-{_q_exam_type}-{_key}.png"',
         "Cache-Control": "public, max-age=600",
     })
 
@@ -13780,8 +16224,9 @@ def report_preview(luogu_uid: str):
     # v3.9.67 · 读 ?exam_type= 参数（GESP 海报的 QR 码会带 exam_type=gesp），
     # 按测评类型找对应报告。缺省时用 NOI-CSP（保留旧行为）。
     # v3.9.68 · 加 parent_subscribe（家长订阅版）
+    # v3.10.0.7 · 加 vjudge（VJudge 跨平台报告,VJudge 海报 QR 带 exam_type=vjudge）
     _qr_exam_type = (request.args.get("exam_type") or "").strip().lower()
-    if _qr_exam_type not in ("noi_csp", "gesp", "parent_subscribe"):
+    if _qr_exam_type not in ("noi_csp", "gesp", "parent_subscribe", "vjudge"):
         _qr_exam_type = ""
 
     # v3.9.68 · 家长订阅版的"报告"就是 parent_subscribe.html 文件本身，
@@ -13800,6 +16245,9 @@ def report_preview(luogu_uid: str):
         latest = _find_latest_report_dir_by_type(luogu_uid, student_name, "gesp")
     elif _qr_exam_type == "noi_csp":
         latest = _find_latest_report_dir_by_type(luogu_uid, student_name, "noi_csp")
+    elif _qr_exam_type == "vjudge":
+        # v3.10.0.7 · VJudge 跨平台报告: 找 vjudge_ 目录
+        latest = _find_latest_report_dir_by_type(luogu_uid, student_name, "vjudge")
     else:
         # 兜底: 找最新一份（不分类型, mtime 倒序）
         latest = _find_latest_report_dir(luogu_uid, student_name)
@@ -13822,11 +16270,17 @@ def report_preview(luogu_uid: str):
     latest_dir_name = latest.name if latest else ""
 
     # v3.9.68 · 主报告文件按 exam_type 选（gesp → report_gesp.md）
-    _main_md_name = "report_gesp.md" if _qr_exam_type == "gesp" else "report.md"
+    # v3.10.0.8 · VJudge 用 report_vjudge.md(若存在);优先 report.md
+    if _qr_exam_type == "vjudge":
+        _vj_md = latest / "report_vjudge.md" if latest else None
+        _main_md_name = "report_vjudge.md" if (_vj_md and _vj_md.exists()) else "report.md"
+    else:
+        _main_md_name = "report_gesp.md" if _qr_exam_type == "gesp" else "report.md"
     if not latest or not (latest / _main_md_name).exists():
         # v3.9.29 · 即使没 report.md，也走 export_data 兜底（之前直接 has_report=False）
         # v3.9.68 · gesp 也检查 report_gesp.md
         _ext_fb = {}
+        _has_vj_data = False
         try:
             if latest and (latest / "export_data.json").exists():
                 _ext_fb = _extract_achievements_from_export_data(latest) or {}
@@ -13844,12 +16298,31 @@ def report_preview(luogu_uid: str):
                 if not (latest / _main_md_name).exists():
                     _ext_fb["is_partial"] = True
                 _ext_fb["report_dir"] = latest.name if latest else ""
+                # v3.10.0.8 · VJudge 兜底: 即使 report.md 缺失, 只要 export_data.json 里有 vjudge_data 就算已生成
+                try:
+                    import json as _json_v2
+                    _exp_v2 = _json_v2.loads((latest / "export_data.json").read_text(encoding="utf-8", errors="replace"))
+                    if _exp_v2.get("vjudge_data"):
+                        _has_vj_data = True
+                except Exception:
+                    pass
         except Exception:
             pass
         # v3.9.29 · 3 层 GESP 兜底（student 表 → gesp_exams 表）
         _gh, _gs = _resolve_gesp_level_score(student)
         # v3.9.68 · 模板按钮 URL：先按 exam_type 选，文件不存在时回退到 report.html
         _full_url = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
+        # v3.10.0.8 · VJudge 兜底分支: 把 vjudge_data 也传给模板,避免"尚未生成"
+        _fb_vjudge_data = None
+        if _has_vj_data and _qr_exam_type == "vjudge":
+            try:
+                import json as _json_v3
+                _exp_v3 = _json_v3.loads((latest / "export_data.json").read_text(encoding="utf-8", errors="replace"))
+                _fb_vjudge_data = _exp_v3.get("vjudge_data") or {}
+            except Exception:
+                _fb_vjudge_data = None
+        # v3.10.0.8 · VJudge 报告 / export_data 兜底: 只要有 vjudge_data 就 has_report=True
+        _fallback_has_report = bool(_ext_fb.get("six_dim") or _ext_fb.get("mistakes") or _has_vj_data)
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
@@ -13859,12 +16332,13 @@ def report_preview(luogu_uid: str):
             ai_summary="",
             suggestions=[],
             ref=ref,
-            has_report=bool(_ext_fb.get("six_dim") or _ext_fb.get("mistakes")),
+            has_report=_fallback_has_report,
             latest_dir_name=latest_dir_name,
             gesp_level=_gh,
             gesp_score=_gs,
             exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
             full_report_url=_full_url,  # v3.9.68 · 兼容旧报告的回退 URL
+            vjudge_data=_fb_vjudge_data,  # v3.10.0.8 · VJudge 兜底数据
         ), 200
 
     try:
@@ -13946,6 +16420,18 @@ def report_preview(luogu_uid: str):
     except Exception:
         _gh2, _gs2 = _resolve_gesp_level_score(student)
         _full_url2 = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
+        # v3.10.0.8 · VJudge 异常兜底: 即便 report.md 读失败, 只要 export_data.json 有 vjudge_data 也算已生成
+        _exc_vjudge_data = None
+        _exc_has_vj = False
+        if _qr_exam_type == "vjudge" and latest and (latest / "export_data.json").exists():
+            try:
+                import json as _json_exc
+                _exp_exc = _json_exc.loads((latest / "export_data.json").read_text(encoding="utf-8", errors="replace"))
+                _exc_vjudge_data = _exp_exc.get("vjudge_data") or {}
+                if _exc_vjudge_data:
+                    _exc_has_vj = True
+            except Exception:
+                pass
         return render_template_string(
             REPORT_PREVIEW_HTML,
             luogu_uid=luogu_uid,
@@ -13955,17 +16441,28 @@ def report_preview(luogu_uid: str):
             ai_summary="",
             suggestions=[],
             ref=ref,
-            has_report=False,
+            has_report=_exc_has_vj,  # v3.10.0.8 · VJudge 异常分支: 有 vjudge_data 就 True
             latest_dir_name=latest_dir_name,
             gesp_level=_gh2,
             gesp_score=_gs2,
             exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
             full_report_url=_full_url2,  # v3.9.68 · 兼容旧报告的回退 URL
+            vjudge_data=_exc_vjudge_data,  # v3.10.0.8 · VJudge 异常分支: 把 vjudge_data 也传给模板
         ), 200
 
     _gh3, _gs3 = _resolve_gesp_level_score(student)
     # v3.9.68 · 把 exam_type 传给预览模板，让"看完整 AI 报告"按钮跳对位置
     _full_url3 = _resolve_full_report_url(latest_dir_name, _qr_exam_type or "noi_csp")
+
+    # v3.10.0.7 · VJudge 类型: 读 export_data.json 拿到 VJudge 真实数据(不读 report.md 的 six_dim)
+    vjudge_data = None
+    if _qr_exam_type == "vjudge" and latest and (latest / "export_data.json").exists():
+        try:
+            import json as _json_v
+            _exp = _json_v.loads((latest / "export_data.json").read_text(encoding="utf-8", errors="replace"))
+            vjudge_data = _exp.get("vjudge_data") or {}
+        except Exception:
+            pass
     return render_template_string(
         REPORT_PREVIEW_HTML,
         luogu_uid=luogu_uid,
@@ -13981,6 +16478,8 @@ def report_preview(luogu_uid: str):
         gesp_score=_gs3,
         exam_type=_qr_exam_type or "noi_csp",  # v3.9.68 · 报告类型
         full_report_url=_full_url3,  # v3.9.68 · 兼容旧报告的回退 URL
+        # v3.10.0.7 · VJudge 报告专属数据(模板根据 exam_type 走不同分支)
+        vjudge_data=vjudge_data,
     ), 200
 
 
@@ -14175,8 +16674,8 @@ def _build_parent_subscribe_data(student: dict, luogu_uid: str) -> dict:
     }
 
 
-@app.route("/me/<luogu_uid>/parent-subscribe", methods=["GET", "POST"])
-def parent_subscribe(luogu_uid: str):
+@app.route("/me/<short_id>/parent-subscribe", methods=["GET", "POST"])
+def parent_subscribe(short_id: str):
     """v3.9 · 家长订阅版（AI 决策支持）
 
     GET 行为：
@@ -14191,12 +16690,15 @@ def parent_subscribe(luogu_uid: str):
     家长看到一头雾水）。_HIDE_COMMERCE 仍然控制模板内部商业化显示
     （如冲刺营定价），但不再让整个页面被 503 替换。
     """
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
+        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册"), 404
+
+    # v3.10.0.10 · 修复 NameError: 函数形参是 short_id, 之前用 luogu_uid(从未定义) 直接 500
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
 
     # 找该学员最近一份 report 文件夹
-    report_dir = _find_latest_report_dir(luogu_uid, student.get("real_name") or "")
+    report_dir = _find_latest_report_dir(short_id, student.get("real_name") or "")
     ps_html = (report_dir / "parent_subscribe.html") if report_dir else None
     ps_md = (report_dir / "parent_subscribe.md") if report_dir else None
 
@@ -14291,8 +16793,8 @@ def _is_parent_subscribed(luogu_uid: str) -> bool:
         return False
 
 
-@app.route("/me/<luogu_uid>/start-parent-subscribe", methods=["POST", "GET"])
-def start_parent_subscribe(luogu_uid: str):
+@app.route("/me/<short_id>/start-parent-subscribe", methods=["POST", "GET"])
+def start_parent_subscribe(short_id: str):
     """v3.5.2 · 触发生成家长订阅版（异步）
 
     1. 找该 UID 最近一份 report 文件夹
@@ -14314,9 +16816,15 @@ def start_parent_subscribe(luogu_uid: str):
               避免「admin 显示已用，前端仍要输码」造成"无效"误判。
     """
     # v3.8 · 此处不再拦截 _HIDE_COMMERCE。生成动作属于"已购用户的技术服务"，不归商业化展示开关管。
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {luogu_uid} 未注册"), 404
+        return render_template_string(REGISTER_INVALID_HTML, message=f"UID {short_id} 未注册"), 404
+
+    # v3.10.0.9 · 修复 500: 函数形参是 short_id 不是 luogu_uid, 之前 _is_parent_subscribed(luogu_uid) 抛 NameError
+    # 历史原因: 这条路由最早(/me/<luogu_uid>/start-parent-subscribe)用 luogu_uid, 后来改 short_id 但内部引用没改
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
+    if not luogu_uid:
+        return render_template_string(REGISTER_INVALID_HTML, message="学员档案缺少 luogu_uid, 无法继续"), 400
 
     # v3.9.69 · 报告 / 海报公开显示的脱敏字段：仅姓氏 + 学校 hash 匿称
     student = dict(student)
@@ -14573,8 +17081,9 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
 
     v3.5.2 · 三段式匹配（按优先级降序）：
       1. 侧车文件 `luogu_uid.txt` 精确匹配（避免同姓名/同前缀误命中）
-      2. 目录名包含 `luogu_uid`（旧式命名兼容）
-      3. 目录名以 `_sanitized_name` 结尾（同一人多 UID 兜底）
+      2. 侧车文件 `short_id.txt` 精确匹配（v3.10.0 · 邮箱注册学员）
+      3. 目录名包含 `luogu_uid`（旧式命名兼容）
+      4. 目录名以 `_sanitized_name` 结尾（同一人多 UID 兜底）
 
     v3.9.3 · 启动时自动迁移：把 task_id 关联的 luogu_uid 写到所有 reports 子目录的
               luogu_uid.txt 侧车（让"侧车文件精确匹配"分支生效，避免依赖目录名）。
@@ -14609,12 +17118,13 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
         for d in reports_root.iterdir():
             if not d.is_dir():
                 continue
-            sidecar = d / "luogu_uid.txt"
-            if sidecar.exists():
+            # v3.10.0 · 已写过的任一侧车都跳过
+            if (d / "luogu_uid.txt").exists() or (d / "short_id.txt").exists():
                 continue
             # 用目录名前 8 字符匹配 task_id
             prefix = d.name.split("_", 1)[0]
             if len(prefix) == 8 and prefix in _mapping:
+                sidecar = d / "luogu_uid.txt"
                 sidecar.write_text(_mapping[prefix], encoding="utf-8")
     except Exception:
         pass
@@ -14623,19 +17133,18 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
     target_uid = str(luogu_uid or "").strip()
 
     exact: list = []
+    exact_short: list = []
     legacy: list = []
     by_name: list = []
     for d in reports_root.iterdir():
         if not d.is_dir():
             continue
         # v3.9.18 · 放宽：report.md 或 export_data.json 任一存在即可
-        # data_only 目录（只有 export_data.json、无 report.md）也能命中，
-        # 让 /me 页的 AI 评测分兜底分支生效。
         has_report_md = (d / "report.md").exists()
         has_export_data = (d / "export_data.json").exists()
         if not (has_report_md or has_export_data):
             continue
-        # 1) 侧车文件精确匹配
+        # 1) 侧车文件精确匹配 luogu_uid
         if target_uid:
             try:
                 if (d / "luogu_uid.txt").read_text(encoding="utf-8", errors="replace").strip() == target_uid:
@@ -14643,15 +17152,23 @@ def _find_latest_report_dir(luogu_uid: str, student_name: str = "") -> "Path | N
                     continue
             except Exception:
                 pass
-        # 2) 旧式：目录名包含 luogu_uid
+        # 2) v3.10.0 · 侧车文件精确匹配 short_id
+        if target_uid:
+            try:
+                if (d / "short_id.txt").exists() and (d / "short_id.txt").read_text(encoding="utf-8", errors="replace").strip() == target_uid:
+                    exact_short.append(d)
+                    continue
+            except Exception:
+                pass
+        # 3) 旧式：目录名包含 luogu_uid
         if target_uid and target_uid in d.name:
             legacy.append(d)
             continue
-        # 3) 兜底：同姓名（多 UID 一人）
+        # 4) 兜底：同姓名（多 UID 一人）
         if safe_name and d.name.endswith(f"_{safe_name}"):
             by_name.append(d)
 
-    pool = exact or legacy or by_name
+    pool = exact or exact_short or legacy or by_name
     if not pool:
         return None
     pool.sort(key=lambda x: x.stat().st_mtime, reverse=True)
@@ -14700,6 +17217,10 @@ def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type
          所以一个 dir 可能有 report.md + parent_subscribe.html 同时存在。
          当 exam_type=parent_subscribe 时只匹配有 parent_subscribe 的 dir；
          不影响 exam_type=noi_csp（无后缀）继续匹配旧报告。
+
+    v3.10.0.7 · VJudge 跨平台报告也支持：
+      1. 目录名以 `vjudge_` 开头, 或目录内存在 `student_vjudge_data.json` → 视为 VJudge
+      2. 配套文件: report.md / report.html / export_data.json
     """
     reports_root = Path(__file__).parent / "reports"
     if not reports_root.exists():
@@ -14709,6 +17230,7 @@ def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type
     _etype = (exam_type or "noi_csp").strip().lower()
     want_gesp = _etype == "gesp"
     want_parent = _etype == "parent_subscribe"
+    want_vjudge = _etype == "vjudge"
 
     exact: list = []
     legacy: list = []
@@ -14720,25 +17242,28 @@ def _find_latest_report_dir_by_type(luogu_uid: str, student_name: str, exam_type
         has_gesp = (d / "report_gesp.md").exists() or (d / "report_gesp.html").exists()
         has_noi = (d / "report_noi_csp.md").exists() or (d / "report_noi_csp.html").exists()
         has_parent = (d / "parent_subscribe.html").exists() or (d / "parent_subscribe.md").exists()
-        # 该 dir 是否属于该学员（先用 _dir_owner_match 标记）
-        # （下面的 matched 块会处理，先仅做类型判定）
-        # 类型判定：
-        #   - want_parent: 仅匹配有 parent_subscribe 的 dir
-        #   - want_gesp: 仅匹配有 report_gesp 的 dir
-        #   - want_noi_csp: 匹配 a) 有 report_noi_csp, 或 b) 无任何 _gesp/_parent 后缀但有 report.md
+        # v3.10.0.7 · VJudge 报告目录判定
+        has_vjudge = (
+            d.name.startswith("vjudge_")
+            or (d / "student_vjudge_data.json").exists()
+        )
         if want_parent:
             is_target = has_parent
         elif want_gesp:
             is_target = has_gesp
+        elif want_vjudge:
+            # v3.10.0.7 · VJudge 报告
+            is_target = has_vjudge
         else:
             # NOI-CSP: 既要匹配显式 _noi_csp, 也要匹配"无后缀的旧版 report.md"
+            # v3.10.0.7 · 如果是 VJudge 学员但请求 noi_csp, 也不应该误把 vjudge dir 当 noi_csp
             if has_noi:
                 is_target = True
-            elif not has_gesp and not has_parent:
+            elif not has_gesp and not has_parent and not has_vjudge:
                 # 纯旧版 dir（无后缀文件）→ 视为 noi_csp
                 is_target = (d / "report.md").exists() or (d / "export_data.json").exists()
             else:
-                # dir 有 gesp 或 parent 后缀, 但没 _noi_csp → 不算 noi_csp
+                # dir 有 gesp / parent / vjudge 后缀, 但没 _noi_csp → 不算 noi_csp
                 is_target = False
         if not is_target:
             continue
@@ -14995,15 +17520,18 @@ def _run_parent_subscribe(
 
 # ---- v3.5.3 学员 GESP/CSP/NOIP/NOI 自录入 ----
 
-@app.route("/me/<luogu_uid>/record-gesp", methods=["POST"])
-def student_me_record_gesp(luogu_uid: str):
+@app.route("/me/<short_id>/record-gesp", methods=["POST"])
+def student_me_record_gesp(short_id: str):
     """学员自录 GESP 真考成绩（4 字段：level / score / award_year / certificate_no）
 
     流程：找 competitions 中匹配的 gesp 赛事（按 level + year）→ UPSERT
     """
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {short_id} 未注册"), 404
+
+    # v3.10.0.10 · 修复 NameError: 函数形参只有 short_id, 之前 url_for 用了未定义的 luogu_uid → 500
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
 
     level_raw = (request.form.get("level") or "").strip()
     score_raw = (request.form.get("score") or "").strip()
@@ -15013,14 +17541,14 @@ def student_me_record_gesp(luogu_uid: str):
     # 校验
     if not level_raw.isdigit() or not (1 <= int(level_raw) <= 8):
         flash("GESP 等级必须在 1-8")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     if not score_raw.isdigit() or not (0 <= int(score_raw) <= 100):
         flash("分数必须在 0-100")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     this_year = date.today().year
     if not year_raw.isdigit() or not (2015 <= int(year_raw) <= this_year + 1):
         flash(f"获奖年份必须在 2015-{this_year + 1}")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     level = int(level_raw)
     score = int(score_raw)
     year = int(year_raw)
@@ -15054,7 +17582,7 @@ def student_me_record_gesp(luogu_uid: str):
                 exam_id = int(row["id"])
             else:
                 flash("系统暂无 GESP 赛事数据，请先跑 import_competitions.py")
-                return redirect(url_for("student_me", luogu_uid=luogu_uid))
+                return redirect(url_for("student_me", short_id=luogu_uid))
     finally:
         conn.close()
 
@@ -15071,15 +17599,18 @@ def student_me_record_gesp(luogu_uid: str):
         flash(f"✅ GESP {level} 级 {year} 年 {score} 分 已录入")
     except Exception as e:  # noqa: BLE001
         flash(f"⚠️ GESP 录入失败：{e}")
-    return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    return redirect(url_for("student_me", short_id=luogu_uid))
 
 
-@app.route("/me/<luogu_uid>/record-csp", methods=["POST"])
-def student_me_record_csp(luogu_uid: str):
+@app.route("/me/<short_id>/record-csp", methods=["POST"])
+def student_me_record_csp(short_id: str):
     """学员自录 CSP/NOIP/NOI 奖项（5 字段：competition_type/award_level/award_year/score/province）"""
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {short_id} 未注册"), 404
+
+    # v3.10.0.10 · 修复 NameError: 函数形参只有 short_id, 之前用未定义的 luogu_uid → 500
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
 
     ctype = (request.form.get("competition_type") or "").strip()
     level = (request.form.get("award_level") or "").strip()
@@ -15091,14 +17622,14 @@ def student_me_record_csp(luogu_uid: str):
     valid_levels = {l[0] for l in _admin_students.CSP_AWARD_LEVELS}
     if ctype not in valid_types:
         flash("比赛类型不合法")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     if level not in valid_levels:
         flash("奖项等级不合法")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     this_year = date.today().year
     if not year_raw.isdigit() or not (2015 <= int(year_raw) <= this_year + 1):
         flash(f"获奖年份必须在 2015-{this_year + 1}")
-        return redirect(url_for("student_me", luogu_uid=luogu_uid))
+        return redirect(url_for("student_me", short_id=luogu_uid))
     score = int(score_raw) if score_raw.isdigit() else None
 
     try:
@@ -15117,21 +17648,24 @@ def student_me_record_csp(luogu_uid: str):
         flash(f"✅ {type_label} {level_label} {year_raw} 已录入")
     except Exception as e:  # noqa: BLE001
         flash(f"⚠️ CSP 录入失败：{e}")
-    return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    return redirect(url_for("student_me", short_id=luogu_uid))
 
 
-@app.route("/me/<luogu_uid>/delete-csp/<int:award_id>", methods=["POST"])
-def student_me_delete_csp(luogu_uid: str, award_id: int):
+@app.route("/me/<short_id>/delete-csp/<int:award_id>", methods=["POST"])
+def student_me_delete_csp(short_id: str, award_id: int):
     """学员删除自录的 CSP 奖项（仅本人可删）"""
-    student = _admin_students.get_student_by_uid(luogu_uid)
+    student = _admin_students.get_student_by_short_id(short_id) or _admin_students.get_student_by_uid(short_id) or _admin_students.get_student_by_uid(short_id)
     if not student:
-        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {luogu_uid} 未注册"), 404
+        # v3.10.0.10 · 修复: 之前用未定义的 luogu_uid, 学员档案不存在的分支也会 500
+        return render_template_string(REGISTER_INVALID_HTML, message=f"洛谷 UID {short_id} 未注册"), 404
+    # v3.10.0.10 · 修复: url_for 之前用未定义的 luogu_uid → 500
+    luogu_uid = (student.get("luogu_uid") or short_id or "").strip()
     ok = _admin_students.delete_csp_award(int(award_id), int(student["id"]))
     if ok:
         flash("✅ 已删除")
     else:
         flash("⚠️ 删除失败（无权限或不存在）")
-    return redirect(url_for("student_me", luogu_uid=luogu_uid))
+    return redirect(url_for("student_me", short_id=luogu_uid))
 
 
 # ---- v3.5.2 模板 ----
@@ -15142,35 +17676,37 @@ REGISTER_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>学员注册 · v3.5.2</title>
+    <title>学员注册 · v3.10.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
 </head>
 <body class="app-body min-h-screen flex items-center justify-center p-4">
     <div class="app-card max-w-md w-full">
         <div class="text-center mb-4">
-            <div class="app-pill app-pill-done mb-2">v3.5.2</div>
+            <div class="app-pill app-pill-done mb-2">v3.10.0</div>
             <h1 class="app-title">学员注册</h1>
-            <p class="app-subtitle">学而思图 1 模式 · 4 字段极简</p>
+            <p class="app-subtitle">邮箱注册 · 6 字段</p>
         </div>
 
         {% if error %}
         <div class="app-box app-box-red mb-4">⚠️ {{ error }}</div>
         {% endif %}
 
-        <form method="POST" class="space-y-3">
+        <form method="POST" class="space-y-3" id="register-form">
             <div>
-                <label class="app-label"><span class="text-red-500">*</span> 城市</label>
-                <select name="city" required class="app-input">
-                    <option value="">请选择城市</option>
-                    {% for group, items in cities %}
-                    <optgroup label="📍 {{ group }}">
-                        {% for c in items %}
-                        <option value="{{ c }}" {% if form.city == c %}selected{% endif %}>{{ c }}</option>
+                <label class="app-label"><span class="text-red-500">*</span> 所在地区</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <select name="province" id="province-reg" required class="app-input">
+                        <option value="">请选择省份</option>
+                        {% for group, items in cities %}
+                        <option value="{{ group }}" {% if form.province == group %}selected{% endif %}>{{ group }}</option>
                         {% endfor %}
-                    </optgroup>
-                    {% endfor %}
-                </select>
+                    </select>
+                    <select name="city" id="city-reg" required class="app-input" disabled>
+                        <option value="">请先选省份</option>
+                    </select>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">📌 先选省份 / 直辖市,再选城市</p>
             </div>
 
             <div>
@@ -15206,31 +17742,28 @@ REGISTER_HTML = """
             </div>
 
             <div class="border-t border-gray-200 pt-3 mt-3">
-                <p class="text-xs text-gray-500 mb-2">🔐 实名信息（任选其一，借力主站认证）</p>
+                <p class="text-xs text-gray-500 mb-2">🔐 账号信息（用于登录）</p>
 
                 <div>
-                    <label class="app-label"><span class="text-red-500">*</span> 洛谷 UID</label>
-                    <input type="text" name="luogu_uid" required pattern="[0-9]{6,10}"
-                           value="{{ form.luogu_uid or '' }}"
-                           placeholder="6-10 位数字"
+                    <label class="app-label"><span class="text-red-500">*</span> 邮箱</label>
+                    <input type="email" name="email" required maxlength="120"
+                           value="{{ form.email or '' }}"
+                           placeholder="parent@example.com"
                            class="app-input">
-                    <p class="text-xs text-gray-400 mt-1">v3.5.2 借力洛谷主站实名 · 学员档案主键</p>
+                    <p class="text-xs text-gray-400 mt-1">v3.10.0 · 登录账号 / 找回密码</p>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2 mt-2">
                     <div>
-                        <label class="block text-xs text-gray-600 mb-1">微信扫码（可选）</label>
-                        <button type="button" onclick="document.getElementById('wechat_openid').value='demo_wx_openid_' + Math.random().toString(36).slice(2,10); this.textContent='✓ 已扫码';" class="w-full bg-emerald-500 text-white text-xs px-2 py-2 rounded-lg hover:bg-emerald-600">
-                            🟢 微信扫码
-                        </button>
-                        <input type="hidden" name="wechat_openid" id="wechat_openid" value="">
-                        <p class="text-xs text-gray-400 mt-1">v3.5.2 demo 桩</p>
+                        <label class="block text-xs text-gray-600 mb-1"><span class="text-red-500">*</span> 密码</label>
+                        <input type="password" name="password" required minlength="8" maxlength="64"
+                               placeholder="≥ 8 位"
+                               class="app-input">
                     </div>
                     <div>
-                        <label class="block text-xs text-gray-600 mb-1">手机号（14 岁以下必填）</label>
-                        <input type="tel" name="phone" pattern="1[3-9][0-9]{9}"
-                               value="{{ form.phone or '' }}"
-                               placeholder="11 位手机号"
+                        <label class="block text-xs text-gray-600 mb-1"><span class="text-red-500">*</span> 确认密码</label>
+                        <input type="password" name="password_confirm" required minlength="8" maxlength="64"
+                               placeholder="再输一次"
                                class="app-input">
                     </div>
                 </div>
@@ -15260,12 +17793,66 @@ REGISTER_HTML = """
         </form>
 
         <div class="text-center mt-4">
-            <a href="/me/999105" class="text-xs text-gray-400 hover:text-gray-600">→ 体验已注册学员 /me/999105</a>
+            <a href="/login" class="text-xs text-emerald-700 hover:underline">已有账号？登录 →</a>
         </div>
         <div class="text-center mt-2">
             <a href="/" class="text-xs text-emerald-700 hover:underline">← 返回首页</a>
         </div>
     </div>
+
+    {# v3.10.0.4 · 省份-城市级联选择 #}
+    <script>
+    (function() {
+        // 数据:省份 → [城市]
+        var CITIES = {{ cities|tojson }};
+        var preselectedProvince = {{ (form.province or '')|tojson }};
+        var preselectedCity = {{ (form.city or '')|tojson }};
+        var $province = document.getElementById('province-reg');
+        var $city = document.getElementById('city-reg');
+
+        // 找到"新疆维吾尔自治区"或"广西壮族自治区"等,匹配最简省份名
+        function findGroup(name) {
+            if (!name) return null;
+            for (var i = 0; i < CITIES.length; i++) {
+                if (CITIES[i][0] === name) return CITIES[i];
+                if (CITIES[i][0].indexOf(name) >= 0) return CITIES[i];
+            }
+            return null;
+        }
+
+        function renderCities(province, keepSelected) {
+            var group = findGroup(province);
+            $city.innerHTML = '';
+            if (!group) {
+                $city.disabled = true;
+                var opt = document.createElement('option');
+                opt.value = ''; opt.textContent = '请先选省份';
+                $city.appendChild(opt);
+                return;
+            }
+            $city.disabled = false;
+            var placeholder = document.createElement('option');
+            placeholder.value = ''; placeholder.textContent = '请选择城市';
+            $city.appendChild(placeholder);
+            for (var j = 0; j < group[1].length; j++) {
+                var o = document.createElement('option');
+                o.value = group[1][j]; o.textContent = group[1][j];
+                if (keepSelected && group[1][j] === keepSelected) o.selected = true;
+                $city.appendChild(o);
+            }
+        }
+
+        $province.addEventListener('change', function() {
+            renderCities(this.value, null);
+        });
+
+        // 初始化:如果 form 里已有 province(回填场景),加载对应城市
+        if (preselectedProvince) {
+            $province.value = preselectedProvince;
+            renderCities(preselectedProvince, preselectedCity);
+        }
+    })();
+    </script>
 </body>
 </html>
 """
@@ -15277,7 +17864,7 @@ STUDENT_ME_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>学员 Pro · {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <title>学员 Pro · {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -15286,9 +17873,20 @@ STUDENT_ME_HTML = """
     </style>
 </head>
 <body class="app-body p-4">
+    {# v3.10.0.4 · 管理员代看横幅(红色,顶部固定,不影响布局) #}
+    {% if is_impersonating %}
+    <div class="max-w-3xl mx-auto mb-3 px-1">
+        <div class="bg-red-50 border-2 border-red-400 rounded-xl p-3 flex items-center justify-between gap-3">
+            <div class="text-sm text-red-900 font-semibold">
+                ⚠️ <strong>管理员代看模式</strong> · 你正在以学员身份查看此页面,所有操作将作用于该学员账号
+            </div>
+            <a href="/admin/students/leave-impersonate" class="inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-bold bg-white text-red-700 border border-red-300 hover:bg-red-100 whitespace-nowrap">退出代看 →</a>
+        </div>
+    </div>
+    {% endif %}
     <div class="me-hero max-w-3xl mx-auto mb-4">
         <h1 class="text-2xl font-extrabold mb-1">🎓 学员 Pro · v3.5.2</h1>
-        <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong></p>
+        <p class="text-sm opacity-90">欢迎，<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong></p>
         <p class="text-xs opacity-75 mt-1">
             UID {{ student.luogu_uid }}
             · {{ student.province or '' }} {{ student.city or '城市未填' }}
@@ -15561,6 +18159,397 @@ STUDENT_ME_HTML = """
             } catch (e) { console.error('tab restore err:', e); }
         })();
         </script>
+
+        {# v3.9.74 · VJudge 跨平台数据卡片(取代 AtCoder,只抓公开数据)
+            数据流:
+              1) 服务端渲染初始状态(link_status 决定 6 种形态)
+              2) 前端 fetch /api/vjudge/<uid>.json 每 5s 轮询,status 变了自动 reload
+              3) 用户点"绑定"/"刷新"→ POST /link-vjudge 或 /refresh-vjudge → 重定向回本页
+            状态机:
+              unlinked → pending(入队) → ok / failed
+              ok(7d 没刷) → stale
+              failed → ok(重试成功)
+              任何时候 vjudge 服务端返回 429 → rate_limited
+        #}
+        {% set _vj = vjudge_ctx or {} %}
+        <div id="vjudgeCard" class="bg-white rounded-2xl card-shadow p-5 mb-4 border-l-4
+             {% if _vj.link_status == 'unlinked' %}border-slate-300
+             {% elif _vj.link_status == 'pending' or _vj.link_status == 'fetching' %}border-amber-400
+             {% elif _vj.link_status == 'ok' %}border-emerald-500
+             {% elif _vj.link_status == 'stale' %}border-orange-400
+             {% elif _vj.link_status == 'failed' %}border-rose-500
+             {% elif _vj.link_status == 'rate_limited' %}border-yellow-400
+             {% else %}border-slate-300{% endif %}">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-[11px] font-mono text-slate-400">// VJUDGE</span>
+                    <h2 class="font-bold text-base text-slate-800">🟧 VJudge 跨平台数据</h2>
+                    {% if _vj.link_status == 'ok' %}
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">✓ 已同步</span>
+                    {% elif _vj.link_status == 'stale' %}
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-orange-100 text-orange-700 font-bold">⚠ 数据陈旧</span>
+                    {% elif _vj.link_status == 'pending' or _vj.link_status == 'fetching' %}
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">⏳ 抓取中</span>
+                    {% elif _vj.link_status == 'failed' %}
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">✗ 抓取失败</span>
+                    {% elif _vj.link_status == 'rate_limited' %}
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 font-bold">🛑 被限流</span>
+                    {% endif %}
+                </div>
+                <a href="https://vjudge.net" target="_blank" rel="noopener"
+                   class="text-[10px] text-slate-400 hover:text-slate-600 font-mono">vjudge.net ↗</a>
+            </div>
+
+            {# ============== 形态 1: 未绑 ============== #}
+            {% if _vj.link_status == 'unlinked' %}
+            <div class="space-y-3">
+                <p class="text-xs text-slate-500 leading-relaxed">
+                    绑定 VJudge <code class="text-emerald-600">username</code>,系统在生成 AI 报告时会自动并入
+                    <strong>用户主页</strong>(昵称/各 OJ 解决数/AC 率)、
+                    <strong>已 AC 题目</strong>(题号/来源 OJ/AC 时间)。<br>
+                    <span class="text-slate-400">VJudge 聚合了 Codeforces / AtCoder / Luogu / POJ 等多源 OJ 提交,一次性补齐多平台数据。</span>
+                </p>
+                <form method="POST" action="/link-vjudge" class="flex gap-2 items-end">
+                    <input type="hidden" name="short_id" value="{{ token }}">
+                    <div class="flex-1">
+                        <label class="block text-[10px] font-mono text-slate-400 mb-1">VJudge username</label>
+                        <input type="text" name="username" required pattern="[A-Za-z0-9_-]{3,30}"
+                               placeholder="例如 TLE_AC_DIAMOND / alice_2024"
+                               class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono
+                                      focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                        <p class="text-[10px] text-slate-400 mt-1">3-30 字符,字母/数字/下划线/连字符</p>
+                    </div>
+                    <button type="submit"
+                            class="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold whitespace-nowrap">
+                        🔗 绑定并抓取
+                    </button>
+                </form>
+                {% if request.args.get('vjudge_error') %}
+                <div class="text-[11px] text-rose-600 bg-rose-50 border border-rose-200 rounded p-2">
+                    ❌ 绑定失败:
+                    {% if request.args.get('vjudge_error') == 'missing_params' %}参数缺失
+                    {% elif request.args.get('vjudge_error') == 'already_pending' %}1 小时内已经刷新过
+                    {% else %}{{ request.args.get('vjudge_error') }}{% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            {# ============== 形态 2: 抓取中 (pending / fetching) ============== #}
+            {% elif _vj.link_status in ('pending', 'fetching') %}
+            <div class="py-2" id="vjudge-progress-box">
+                <div class="flex items-center gap-3">
+                    <div class="inline-block animate-spin w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full"></div>
+                    <div class="flex-1">
+                        <div class="text-sm font-bold text-slate-700">
+                            正在抓取 <span class="font-mono text-emerald-600">{{ _vj.username }}</span> 的 VJudge 数据… <span style="background:yellow;color:red;padding:1px 4px;font-size:10px;">[v3.10.0.13-progress-smooth]</span>
+                        </div>
+                        <div class="text-[11px] text-slate-500 mt-0.5" id="vjudge-progress-msg">⏳ 准备中… <a href="javascript:location.reload()" style="color:#3b82f6;text-decoration:underline;margin-left:4px">手动刷新</a></div>
+                    </div>
+                </div>
+                {# v3.10.0.4 · 进度条(JS 每 2s 轮询) #}
+                <div class="mt-2 w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div id="vjudge-progress-bar" class="h-2 rounded-full bg-gradient-to-r from-amber-400 to-emerald-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                    <span id="vjudge-progress-step">0 / 0</span>
+                    <span>⏱ 通常 10-40 秒</span>
+                </div>
+                {# v3.10.0.13 · 卡住检测 banner (默认隐藏,30s step 没动才显) #}
+                <div id="vjudge-stuck-banner" style="display:none" class="mt-2 p-2 rounded-md bg-red-50 border border-red-200">
+                    <div class="text-[11px] text-red-700 font-bold">⚠️ 抓取超过 30 秒没有进度更新</div>
+                    <div class="text-[10px] text-red-600 mt-1">可能原因: VJudge 限流(429, 退避 60s) / 网络慢 / worker 进程被 kill</div>
+                    <div class="text-[10px] text-red-600 mt-1">
+                        解决方法:
+                        <a href="javascript:location.reload()" class="text-red-700 underline">点此强制刷新页面</a>
+                        或
+                        <a href="javascript:fetch('/refresh-vjudge',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'short_id={{ token }}&heavy=0'}).then(()=>location.reload())" class="text-red-700 underline">重新入队</a>
+                    </div>
+                </div>
+            </div>
+            <script>
+            (function() {
+                var _url = '/api/vjudge/' + encodeURIComponent('{{ token }}') + '.json';
+                var _bar = document.getElementById('vjudge-progress-bar');
+                var _msg = document.getElementById('vjudge-progress-msg');
+                var _step = document.getElementById('vjudge-progress-step');
+                var _banner = document.getElementById('vjudge-stuck-banner');  // v3.10.0.13
+                if (!_bar) return;
+                var _reloadDone = false;
+                function _reloadSoon() {
+                    if (_reloadDone) return;
+                    _reloadDone = true;
+                    setTimeout(function(){ location.reload(); }, 800);
+                }
+                // v3.10.0.4-fix · 关键修复: setTimeout(_poll, ...) 必须在 .then() 内部,否则 fetch 慢时会同时排多个 2s 定时器
+                //   → 页面被反复刷新,造成"每秒闪频" + 大量请求堆积
+                // 同时增加 30s 卡住检测 + 强制刷新按钮
+                var _pollTimer = null;
+                var _firstSeenAt = 0;
+                var _lastStepSeen = -1;
+                var _lastStepAt = 0;  // v3.10.0.13 · step 上次推进的时间戳
+                var _stuckAlerted = false;
+                // v3.10.0.13 · progress_total=100 后, 卡住判断改为"step 在 30s 内没动"
+                // (v3.10.0.4 用 step=0 判定过于严格, 真实场景 step 很快会从 1→10→20...)
+                function _scheduleNext(delay) {
+                    if (_reloadDone) return;
+                    if (_pollTimer) clearTimeout(_pollTimer);
+                    _pollTimer = setTimeout(_poll, delay || 2000);
+                }
+                function _showStuckBanner() {
+                    if (_banner) _banner.style.display = 'block';
+                }
+                function _poll() {
+                    fetch(_url, {credentials: 'same-origin'})
+                        .then(function(r){ return r.ok ? r.json() : null; })
+                        .then(function(d) {
+                            if (!d) { _scheduleNext(5000); return; }
+                            console.log('[vjudge-poll]', d);
+                            var p = d.progress || {};
+                            var step = parseInt(p.step || 0);
+                            var total = parseInt(p.total || 0);
+                            var msg = p.msg || '⏳ 准备中…';
+                            if (!_firstSeenAt) _firstSeenAt = Date.now();
+                            // v3.10.0.4 · 三种情况都自动刷新:
+                            //   1) link_status 不在 pending/fetching(=成功或失败)
+                            //   2) progress.step >= progress.total(完成)
+                            //   3) progress.status === 'failed' 或 'rate_limited'(失败)
+                            if (d.link_status && d.link_status !== 'pending' && d.link_status !== 'fetching') {
+                                console.log('[vjudge-poll] reload by link_status=' + d.link_status);
+                                _reloadSoon();
+                                return;
+                            }
+                            if (p.status === 'succeeded' || p.status === 'failed' || p.status === 'rate_limited') {
+                                console.log('[vjudge-poll] reload by status=' + p.status);
+                                _reloadSoon();
+                                return;
+                            }
+                            if (total > 0 && step >= total) {
+                                console.log('[vjudge-poll] reload by step=' + step + '/total=' + total);
+                                _reloadSoon();
+                                return;
+                            }
+                            // v3.10.0.13 · 卡住检测升级: step 在 30s 内没动过 → 弹 banner
+                            //   (v3.10.0.4 的 step=0 判定过于严格, 真实场景 step 很快会从 1→10→20...)
+                            if (step !== _lastStepSeen) {
+                                _lastStepSeen = step;
+                                _lastStepAt = Date.now();
+                                _stuckAlerted = false;  // 进度推进了, 重置 banner 状态
+                                if (_banner) _banner.style.display = 'none';
+                            } else if (_lastStepAt > 0 && (Date.now() - _lastStepAt) > 30000 && !_stuckAlerted) {
+                                _stuckAlerted = true;
+                                _showStuckBanner();
+                            }
+                            if (total > 0) {
+                                var pct = Math.min(100, Math.round(step / total * 100));
+                                _bar.style.width = pct + '%';
+                                _step.textContent = step + ' / ' + total;
+                            }
+                            _msg.textContent = (step >= total ? '✓ ' : '⏳ ') + msg;
+                            _scheduleNext(2000);  // 正常情况: 2s 后再轮询
+                        })
+                        .catch(function() { _scheduleNext(5000); });
+                }
+                _poll();
+            })();
+            </script>
+
+            {# ============== 形态 3/4/5/6: ok / stale / failed / rate_limited ============== #}
+            {% else %}
+            <div class="space-y-3">
+                {# 头部: username + 解决数大数字 #}
+                <div class="flex items-center justify-between">
+                    <div>
+                        <a href="https://vjudge.net/user/{{ _vj.username }}" target="_blank" rel="noopener"
+                           class="text-base font-bold font-mono text-slate-800 hover:text-emerald-600">
+                            {{ _vj.username }}
+                        </a>
+                        {% if _vj.nick %}
+                        <span class="text-[11px] text-slate-500 ml-1">({{ _vj.nick }})</span>
+                        {% endif %}
+                        <span class="text-[10px] text-slate-400 ml-2">VJudge username</span>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-3xl font-extrabold font-mono text-emerald-600">
+                            {{ _vj.solved_count or 0 }}
+                        </div>
+                        <div class="text-[10px] text-slate-400">已解决题数</div>
+                    </div>
+                </div>
+
+                {# 关键指标 4 列: AC 总数 / AC 率 / 总提交 / WA 错误数 #}
+                <div class="grid grid-cols-4 gap-2 text-center">
+                    <div class="bg-slate-50 rounded-md p-2">
+                        <div class="text-[10px] text-slate-400 font-mono">AC 总数</div>
+                        <div class="text-sm font-bold text-emerald-600 font-mono">{{ _vj.total_ac or 0 }}</div>
+                    </div>
+                    <div class="bg-slate-50 rounded-md p-2">
+                        <div class="text-[10px] text-slate-400 font-mono">AC 率</div>
+                        <div class="text-sm font-bold text-slate-700 font-mono">
+                            {% if _vj.ac_rate and _vj.ac_rate > 0 %}
+                            {{ "%.0f"|format(_vj.ac_rate * 100) }}%
+                            {% else %}—{% endif %}
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 rounded-md p-2">
+                        <div class="text-[10px] text-slate-400 font-mono">总提交</div>
+                        <div class="text-sm font-bold text-slate-700 font-mono">{{ _vj.total_submissions or 0 }}</div>
+                    </div>
+                    <div class="bg-slate-50 rounded-md p-2">
+                        <div class="text-[10px] text-slate-400 font-mono">WA 数</div>
+                        <div class="text-sm font-bold text-rose-500 font-mono">{{ _vj.total_wa or 0 }}</div>
+                    </div>
+                </div>
+
+                {# OJ 分布(来源分布,展示多平台) #}
+                {% if _vj.oj_stats %}
+                <div class="bg-slate-50 rounded-md p-2">
+                    <div class="text-[10px] text-slate-400 font-mono mb-1.5">📊 来源 OJ 分布</div>
+                    <div class="flex flex-wrap gap-1.5">
+                        {% for s in _vj.oj_stats %}
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-white border border-slate-200 font-mono">
+                            <span class="text-slate-500">{{ s.oj }}</span>
+                            <span class="text-emerald-600 font-bold ml-1">{{ s.count }}</span>
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {# 最近 AC(最多 5 条) #}
+                {% if _vj.recent_solved %}
+                <details class="bg-slate-50 rounded-md p-2">
+                    <summary class="text-[10px] text-slate-500 font-mono cursor-pointer hover:text-slate-700">
+                        🆕 最近 5 个已解决题(点击展开)
+                    </summary>
+                    <div class="mt-2 space-y-1">
+                        {% for p in _vj.recent_solved %}
+                        <div class="text-[10px] font-mono text-slate-600 flex items-center gap-2">
+                            <span class="px-1.5 py-0.5 bg-slate-200 rounded text-slate-700">{{ p.oj }}</span>
+                            {# v3.10.0.4 · 各 OJ 官网跳转,兜底 VJudge /status #}
+                            {% if p.oj == '洛谷' or p.oj == 'Luogu' or p.oj == 'luogu' %}
+                                {% set _purl = 'https://www.luogu.com.cn/problem/' ~ p.problem_id %}
+                            {% elif p.oj == 'HDU' or p.oj == 'hdu' %}
+                                {% set _purl = 'https://acm.hdu.edu.cn/showproblem.php?pid=' ~ p.problem_id %}
+                            {% elif p.oj == 'POJ' or p.oj == 'poj' %}
+                                {% set _purl = 'https://poj.org/problem?id=' ~ (p.problem_id | regex_replace('^POJ-?', '')) %}
+                            {% elif p.oj == 'Codeforces' or p.oj == 'CF' or p.oj == 'codeforces' %}
+                                {% set _purl = 'https://codeforces.com/problemset/problem/' ~ p.problem_id %}
+                            {% elif p.oj == 'AtCoder' or p.oj == 'atcoder' %}
+                                {% set _purl = 'https://atcoder.jp/contests/' ~ p.problem_id %}
+                            {% else %}
+                                {% set _purl = 'https://vjudge.net/status#OJId=' ~ p.oj ~ '&probNum=' ~ p.problem_id %}
+                            {% endif %}
+                            <a href="{{ _purl }}" target="_blank" rel="noopener"
+                               class="text-emerald-600 hover:underline">{{ p.problem_id }}</a>
+                            <span class="text-slate-500 truncate flex-1">{{ p.title }}</span>
+                            {% if p.ac_time %}
+                            <span class="text-slate-400 text-[9px]">{{ p.ac_time[:10] }}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endif %}
+
+                {# stale 提示 #}
+                {% if _vj.link_status == 'stale' %}
+                <div class="text-[11px] text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                    ⚠ 数据已超过 7 天未刷新,建议点"刷新"按钮重新抓取。
+                </div>
+
+                {# failed 提示 #}
+                {% elif _vj.link_status == 'failed' %}
+                <div class="text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">
+                    ❌ 抓取失败:{{ _vj.fetch_error or '未知错误' }}
+                </div>
+
+                {# rate_limited 提示 #}
+                {% elif _vj.link_status == 'rate_limited' %}
+                <div class="text-[11px] text-yellow-800 bg-yellow-50 border border-yellow-300 rounded p-2">
+                    🛑 VJudge 限流中,后台将在冷却后自动重试。当前展示的是上一次成功抓取的数据。
+                </div>
+                {% endif %}
+
+                {# 底部: 刷新按钮 + 解绑 + 最近抓取时间 #}
+                <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <div class="text-[10px] text-slate-400 font-mono">
+                        {% if _vj.last_fetched_at %}
+                        上次抓取:{{ _vj.last_fetched_at[:19].replace('T', ' ') }}
+                        {% else %}
+                        暂无抓取记录
+                        {% endif %}
+                    </div>
+                    <div class="flex gap-2">
+                        <form method="POST" action="/refresh-vjudge" class="inline">
+                            <input type="hidden" name="short_id" value="{{ token }}">
+                            <button type="submit"
+                                    class="px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold">
+                                🔄 刷新
+                            </button>
+                        </form>
+                        {# v3.10.0.4 · 深度抓取(Playwright,5-10s,拿 OJ 分布 + 题目 ID) #}
+                        <form method="POST" action="/refresh-vjudge" class="inline"
+                              onsubmit="return confirm('深度抓取约 5-10 秒,会用无头浏览器访问 VJudge,确认?')">
+                            <input type="hidden" name="short_id" value="{{ token }}">
+                            <input type="hidden" name="heavy" value="1">
+                            <button type="submit"
+                                    class="px-3 py-1.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-800 text-[11px] font-bold border border-amber-300"
+                                    title="Playwright 渲染,拿 OJ 分布 + 题目 ID(用于报告)">
+                                🔥 深度抓取
+                            </button>
+                        </form>
+                        {# v3.10.0.4 · VJudge 报告生成按钮(全 vjudge 模式 AI 报告) #}
+                        <form method="POST" action="/api/reports/vjudge/{{ token }}" class="inline"
+                              target="_blank"
+                              onsubmit="setTimeout(function(){ window.location='/status?short_id={{ token }}'; }, 100);">
+                            <button type="submit"
+                                    title="基于 VJudge 跨平台数据生成 AI 评测报告(MD/HTML/PDF),不依赖洛谷数据"
+                                    class="px-3 py-1.5 rounded-md bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white text-[11px] font-bold shadow-sm">
+                                🤖 AI 报告
+                            </button>
+                        </form>
+                        <form method="POST" action="/unlink-vjudge" class="inline"
+                              onsubmit="return confirm('确定解绑 VJudge 账号?已抓取的数据会被清除。')">
+                            <input type="hidden" name="short_id" value="{{ token }}">
+                            <button type="submit"
+                                    class="px-3 py-1.5 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold">
+                                🗑 解绑
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {# v3.9.74 · VJudge 卡片前端轮询逻辑(仅 pending/fetching 状态) #}
+        {% if _vj.link_status in ('pending', 'fetching') %}
+        <script>
+        (function() {
+            var _token = {{ token|tojson }};
+            var _tried = 0;
+            var _maxTries = 40;  // 最多 40 次 × 5s = 200s(VJudge 比 AtCoder 慢)
+            function _poll() {
+                _tried++;
+                if (_tried > _maxTries) return;
+                fetch('/api/vjudge/' + encodeURIComponent(_token) + '.json', {credentials: 'same-origin'})
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(d) {
+                        if (!d) { setTimeout(_poll, 5000); return; }
+                        if (d.link_status === 'ok' || d.link_status === 'stale' ||
+                            d.link_status === 'failed' || d.link_status === 'rate_limited') {
+                            location.reload();
+                        } else {
+                            setTimeout(_poll, 5000);
+                        }
+                    })
+                    .catch(function() { setTimeout(_poll, 5000); });
+            }
+            setTimeout(_poll, 5000);
+        })();
+        </script>
+        {% endif %}
+
 
         {# v3.9.46 · 学员中心「我的排名」卡片（C 形态 · 深空玻璃质感）
             设计要点：
@@ -15903,7 +18892,8 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
 <meta property="og:type" content="article">
 <meta property="og:title" content="{{ student_name }} 的洛谷 AI 测评报告">
 {# v3.9.23 · STUDENT_ME_HTML 用 token 而非 luogu_uid（luogu_uid 在此模板里未传入，渲染为 ""） #}
-<meta property="og:image" content="/me/{{ token }}/share-card.png">
+{# v3.10.0.9 · VJudge 报告用专属 poster, 避免 OG 卡片显示成 NOI 主题 #}
+<meta property="og:image" content="/me/{{ token }}/share-card.png?exam_type={{ exam_type or 'noi_csp' }}">
 <title>{{ student_name }} 的洛谷 AI 测评报告</title>
 <script src="https://cdn.tailwindcss.com"></script>
 {{ app_skin_head() }}
@@ -15929,6 +18919,128 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
     <p class="text-sm text-gray-500 mb-5">UID {{ token }} · 暂无 AI 测评数据</p>
     <a href="/?ref={{ ref or '' }}" class="inline-block px-5 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-lg">✨ 立即生成我的报告</a>
   </div>
+  {% else %}
+
+  {# v3.10.0.7 · VJudge 跨平台报告分支: 不显示 GESP/六维/错题/赛事倒计时(这些都需要源码或 GESP 成绩) #}
+  {% if exam_type == 'vjudge' and vjudge_data %}
+  <section class="bg-gradient-to-br from-amber-50 via-white to-orange-50 rounded-2xl shadow p-5 text-center">
+    <div class="text-xs text-gray-500 mb-1">VJudge 跨平台测评</div>
+    <div class="text-2xl font-extrabold text-gray-800 mb-3 font-mono">{{ token }}</div>
+    <div class="grid grid-cols-2 gap-3 mt-4 text-center text-sm">
+      <div class="bg-white/70 rounded-lg p-3">
+        <div class="text-gray-500 text-xs">总提交</div>
+        <div class="text-2xl font-bold text-purple-600 mt-1">{{ vjudge_data.total_submissions or 0 }}</div>
+      </div>
+      <div class="bg-white/70 rounded-lg p-3">
+        <div class="text-gray-500 text-xs">总 AC</div>
+        <div class="text-2xl font-bold text-green-600 mt-1">{{ vjudge_data.total_ac or 0 }}</div>
+      </div>
+      <div class="bg-white/70 rounded-lg p-3">
+        <div class="text-gray-500 text-xs">AC 率</div>
+        <div class="text-2xl font-bold text-amber-600 mt-1">
+          {% if vjudge_data.ac_rate is number %}{{ '%.1f' % (vjudge_data.ac_rate * 100) }}%{% else %}—{% endif %}
+        </div>
+      </div>
+      <div class="bg-white/70 rounded-lg p-3">
+        <div class="text-gray-500 text-xs">解出题数</div>
+        <div class="text-2xl font-bold text-amber-600 mt-1">{{ vjudge_data.solved_count or 0 }}</div>
+      </div>
+    </div>
+    {% if vjudge_data.oj_count %}
+    <div class="mt-3 text-xs text-amber-800 font-bold">🌐 覆盖 {{ vjudge_data.oj_count }} 个 OJ 平台</div>
+    {% endif %}
+  </section>
+
+  {% if ai_summary %}
+  <section class="mt-4 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+    <div class="text-xs text-amber-700 font-bold mb-1.5">💡 VJudge AI 一句话总结</div>
+    <p class="text-sm text-gray-700 leading-relaxed">{{ ai_summary }}</p>
+  </section>
+  {% endif %}
+
+  {% if vjudge_data.oj_distribution %}
+  <section class="mt-4 bg-white rounded-2xl shadow p-5">
+    <h2 class="text-sm font-bold text-gray-800 mb-3">🌐 OJ 平台分布（Top {{ vjudge_data.oj_distribution|length }}）</h2>
+    <div class="space-y-2">
+      {% for oj in vjudge_data.oj_distribution[:8] %}
+      <div class="flex items-center gap-2 text-xs">
+        <div class="w-20 text-gray-600 text-right truncate">{{ oj.name or oj.oj or oj.oj_id }}</div>
+        <div class="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+          {% set _solved = oj.solved or oj.solved_count or 0 %}
+          {% set _max = (vjudge_data.solved_count or 1) %}
+          {% set _pct = (_solved * 100 / (_max if _max > 0 else 1)) %}
+          <div class="h-full rounded-full bg-amber-500"
+               style="width: {{ _pct if _pct <= 100 else 100 }}%"></div>
+        </div>
+        <div class="w-12 text-right font-mono font-bold text-amber-700">{{ _solved }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# v3.10.0.7 · VJudge 类型:不再展示洛谷版的 GESP/段位/赛事倒计时(这些跟 VJudge 没关系) #}
+  {% set _full_report_url = full_report_url or ('/reports/' ~ latest_dir_name ~ '/report.html') %}
+
+  {# v3.10.0.9 · VJudge 海报展示(深琥珀色主题, 与洛谷版 share-card.png 一致, 修复"明明生成了海报却看不到"的问题) #}
+  <section class="mt-4 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl shadow p-4">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-2xl">🖼️</span>
+        <div class="min-w-0">
+          <div class="text-base font-bold text-gray-800 truncate">VJudge 跨平台报告海报</div>
+          <div class="text-xs text-gray-500">扫码直达该选手的跨平台测评报告</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <a href="/me/{{ token }}/share-card.png?exam_type=vjudge" target="_blank"
+           class="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-sm font-bold rounded-lg hover:bg-amber-700 whitespace-nowrap">
+          🔍 查看海报
+        </a>
+        <a href="/me/{{ token }}/share-card.png?exam_type=vjudge" download="VJudge报告海报_{{ token }}.png"
+           class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-amber-600 text-amber-700 text-sm font-bold rounded-lg hover:bg-amber-50 whitespace-nowrap">
+          💾 保存
+        </a>
+      </div>
+    </div>
+  </section>
+
+  {# v3.10.0.9 · VJudge 家长订阅入口(与洛谷版一致: WeChat QR + 邀请码) #}
+  {# 注意: 这是公开扫码页, 不能直接发邀请码表单(需登录)→ 改为引导到 /me/<uid> 状态页或扫码加微信 #}
+  <section class="mt-4 bg-white border-2 border-emerald-200 rounded-2xl shadow p-4">
+    <div class="text-sm font-bold text-emerald-800 mb-2">📨 家长想看更深度分析？</div>
+    <div class="flex items-start gap-3">
+      <img src="/static/wechat_qr.png" alt="微信二维码"
+           class="w-24 h-24 border border-emerald-200 rounded bg-white p-1 flex-shrink-0" />
+      <div class="text-[12px] text-gray-700 leading-relaxed flex-1">
+        <p class="mb-1.5"><strong class="text-emerald-700">家长订阅版（5 维度深度分析）</strong>：基于该 VJudge 跨平台数据 + GESP 真考，输出"路径/节奏/风险"的家长决策支持报告。</p>
+        <ol class="list-decimal list-inside space-y-0.5 marker:font-bold marker:text-emerald-700">
+          <li>微信扫码左侧二维码</li>
+          <li>添加客服为好友</li>
+          <li>备注"<strong>家长订阅 + UID {{ token }}</strong>"</li>
+          <li>客服派发邀请码后可在学员中心生成</li>
+        </ol>
+        <p class="mt-2 text-[11px] text-gray-500">💡 VJudge 报告已包含跨平台测评、平台分布、AC 率等核心数据；家长订阅版在此基础上加上 5 维度决策建议（无需源码）。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+    <a href="{{ _full_report_url }}" target="_blank"
+       class="block bg-white border-2 border-amber-600 rounded-xl p-4 text-center hover:bg-amber-50">
+      <div class="text-2xl mb-1">🔍</div>
+      <div class="text-sm font-bold text-amber-700">看完整 VJudge AI 报告</div>
+      <div class="text-[10px] text-gray-500 mt-1">在新窗口打开 · 跨平台测评版</div>
+    </a>
+    <a href="/?ref={{ ref or luogu_uid }}"
+       class="block bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-4 text-center text-white shadow-lg hover:from-amber-600">
+      <div class="text-2xl mb-1">✨</div>
+      <div class="text-sm font-bold">生成你的 VJudge 报告</div>
+      <div class="text-[10px] text-amber-100 mt-1">3 分钟拿到跨平台测评</div>
+    </a>
+  </section>
+  {# v3.10.0.7 · 闭合 VJudge if / v3.10.0.8 · 此处不直接 endif,改走下面的 {% else %} 作为 vjudge 的 else 分支 #}
+
   {% else %}
 
   <section class="bg-gradient-to-br from-emerald-50 via-white to-amber-50 rounded-2xl shadow p-5 text-center">
@@ -16066,6 +19178,8 @@ REPORT_PREVIEW_HTML = r"""<!doctype html>
   </a>
 </div>
 {% endif %}
+{# v3.10.0.8 · 闭合外层 {% if not has_report %}{% else %}{% if vjudge %}{% else %}{% endif %}{% endif %} 的最外层 endif (v3.10.0.8 修了模板结构:删掉了 vjudge 之前多写的一个 {% endif %}) #}
+{% endif %}
 
 </body>
 </html>
@@ -16090,6 +19204,46 @@ REGISTER_INVALID_HTML = """
         <p class="mt-3 text-xs text-gray-500">
             <a href="/" class="app-link">← 返回首页</a>
         </p>
+    </div>
+</body>
+</html>
+"""
+
+
+# v3.10.0.11 · VJudge 报告 24h 限流提示页
+# 与洛谷版 generate_form_submit 返回的 429 风格一致:橙黄色 + 倒计时 + 跳转回学员中心
+VJUDGE_RATE_LIMITED_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>VJudge 报告 · 24h 限流</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {{ app_skin_head() }}
+</head>
+<body class="app-body p-6 flex items-center justify-center min-h-screen">
+    <div class="app-card max-w-lg w-full text-center">
+        <div class="text-6xl mb-3">⏳</div>
+        <h1 class="app-title text-2xl">VJudge 报告 24h 限流</h1>
+        <p class="app-subtitle mt-2">UID {{ luogu_uid }} 在最近 24h 内已生成过 VJudge 报告</p>
+        <div class="mt-5 bg-amber-50 border-2 border-amber-200 rounded-xl p-4 text-left">
+            <div class="text-sm font-bold text-amber-800 mb-2">📌 限流原因</div>
+            <ul class="text-xs text-amber-700 space-y-1.5 list-disc list-inside">
+                <li>每次生成都会调用 deepseek-v4-pro 等大模型, 需要付费</li>
+                <li>VJudge 数据抓取依赖外部接口, 频繁调用会被限流</li>
+                <li>与洛谷版报告保持一致: 每个学员 24h 内只生成一次</li>
+            </ul>
+        </div>
+        <div class="mt-5 bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4">
+            <div class="text-sm font-bold text-emerald-800">⏰ {{ remain_txt }}</div>
+            <div class="text-xs text-emerald-700 mt-1">冷却结束后可以重新生成, VJudge 数据将以最新的为准</div>
+        </div>
+        <div class="mt-6 flex flex-col gap-2">
+            <a href="{{ me_url }}" class="app-btn app-btn-primary">📊 返回学员中心看现有报告</a>
+            <a href="/me/{{ luogu_uid }}/r?exam_type=vjudge" class="app-btn app-btn-secondary">🌐 直接看 VJudge 报告</a>
+            <a href="/" class="app-link text-xs">← 返回首页</a>
+        </div>
+        <p class="mt-4 text-[11px] text-gray-400">Task ID: {{ task_id[:8] }}...</p>
     </div>
 </body>
 </html>
@@ -16321,7 +19475,7 @@ ADMIN_STUDENTS_GUARDIANS_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>家长列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <title>家长列表 - {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
 </head>
@@ -16335,7 +19489,7 @@ ADMIN_STUDENTS_GUARDIANS_HTML = """
             </div>
         </div>
         <div class="bg-white rounded-xl shadow p-6 mb-4">
-            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong>
             · UID <code class="text-xs">{{ student.luogu_uid }}</code> · 学校 {{ student.school or '—' }}</p>
         </div>
         {% if notice %}
@@ -16436,7 +19590,7 @@ ADMIN_STUDENTS_GOAL_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>学员目标 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <title>学员目标 - {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
 </head>
@@ -16452,7 +19606,7 @@ ADMIN_STUDENTS_GOAL_HTML = """
         </div>
         {% endif %}
         <div class="bg-white rounded-xl shadow p-6 mb-4">
-            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong>
             · UID <code class="text-xs">{{ student.luogu_uid }}</code></p>
         </div>
 
@@ -16511,7 +19665,7 @@ ADMIN_STUDENTS_REPORTS_HTML = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>周报列表 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <title>周报列表 - {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
 </head>
@@ -16530,7 +19684,7 @@ ADMIN_STUDENTS_REPORTS_HTML = """
         <div class="mb-4 rounded-lg border px-4 py-3 text-sm {% if notice_type == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">{{ notice }}</div>
         {% endif %}
         <div class="bg-white rounded-xl shadow p-6 mb-4">
-            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+            <p class="text-gray-600">学员：<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong>
             · GESP 最高 {{ student.gesp_highest_passed or 0 }} 级
             · 下次可报 GESP {{ student.gesp_next_eligible_level or 1 }} 级</p>
         </div>
@@ -16579,7 +19733,7 @@ PARENT_PANEL_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>家长端 · 赛事仪表盘 - {{ student.real_name or ('UID-' + student.luogu_uid) }}</title>
+    <title>家长端 · 赛事仪表盘 - {{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{ app_skin_head() }}
     <style>
@@ -16595,7 +19749,7 @@ PARENT_PANEL_HTML = """
                 <span class="text-xs opacity-75">v3.5.1</span>
             </div>
             <p class="text-sm opacity-90 mb-1">
-                学员：<strong>{{ student.real_name or ('UID-' + student.luogu_uid) }}</strong>
+                学员：<strong>{{ student.real_name or ('UID-' + (student.luogu_uid or '')) }}</strong>
                 · 入学年份 {{ student.grade or '—' }}
                 · 通知渠道 {{ guardian.notify_channel }}
             </p>
@@ -17327,6 +20481,23 @@ LEADERBOARD_HTML = """<!doctype html>
 
 # 把 ROOT 注入到 _weekly_reports（避免循环导入）
 ROOT = _ROOT  # noqa: F821
+
+
+# v3.9.73 · AtCoder 跨平台后台 worker 启动
+# (放在 if __name__ 外面,这样 gunicorn / flask run 都会自动起)
+try:
+    from atcoder_fetcher import start_atcoder_worker
+    start_atcoder_worker()
+except Exception as _e:
+    print(f"[v3.9.73] start_atcoder_worker warning: {_e}")
+
+
+# v3.9.74 · VJudge 跨平台后台 worker 启动(取代 AtCoder)
+try:
+    from vjudge_fetcher import start_vjudge_worker
+    start_vjudge_worker()
+except Exception as _e:
+    print(f"[v3.9.74] start_vjudge_worker warning: {_e}")
 
 
 if __name__ == "__main__":
